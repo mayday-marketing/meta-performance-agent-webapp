@@ -166,6 +166,55 @@ module.exports = async (req, res) => {
   try {
     const accessToken = await getAccessToken();
 
+    // ── ACTION: load-all ───────────────────────────────────────────
+    // Load ALL CSV files from Drive (no period filter) for dashboard
+    if (action === 'load-all') {
+      const allData = { files: [], contextFiles: [] };
+
+      const ruweDataRoot = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data'])
+                        || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data'])
+                        || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe_Data']);
+
+      if (ruweDataRoot) {
+        const foldersToLoad = [ruweDataRoot];
+        const subfolders = await listFolders(accessToken, ruweDataRoot);
+        for (const sub of subfolders) foldersToLoad.push(sub.id);
+
+        const seenIds = new Set();
+        for (const folderId of foldersToLoad) {
+          const files = await listFiles(accessToken, folderId);
+          for (const file of files) {
+            if (seenIds.has(file.id)) continue;
+            const type = classifyFile(file.name);
+            if (!type || type === 'analytics_pdf') continue; // skip PDFs for dashboard
+            seenIds.add(file.id);
+            const text = await downloadText(accessToken, file.id, file.mimeType);
+            if (text) allData.files.push({ name: file.name, type, data: text });
+          }
+        }
+      }
+
+      // Load context files
+      const ctxFolder  = await findFolderByPath(accessToken, rootId, ['00_AI-CONTEXT']);
+      const sFolder    = await findFolderByPath(accessToken, rootId, ['03_MARKETING-STRATEGIE']);
+      const mFolder    = await findFolderByPath(accessToken, rootId, ['01_MERK-STRATEGIE']);
+      const contextMap = { '0.1': 'Merk-Brief', '0.2': "Do's & Don'ts", '3.3': 'Content Pijlers', '1.3': 'Concurrentieanalyse' };
+      for (const folderId of [ctxFolder, sFolder, mFolder]) {
+        if (!folderId) continue;
+        const files = await listFiles(accessToken, folderId);
+        for (const file of files) {
+          for (const [key, label] of Object.entries(contextMap)) {
+            if (file.name.includes(key) && !allData.contextFiles.find(c => c.label === label)) {
+              const text = await downloadText(accessToken, file.id, file.mimeType);
+              if (text) allData.contextFiles.push({ label, content: text.slice(0, 3000) });
+            }
+          }
+        }
+      }
+
+      return res.status(200).json(allData);
+    }
+
     // ── ACTION: load-period ─────────────────────────────────────────
     // Download all data files for a period server-side, return full content
     if (action === 'load-period' && period) {
