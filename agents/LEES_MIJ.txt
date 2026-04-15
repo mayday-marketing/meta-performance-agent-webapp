@@ -1,0 +1,2 @@
+Zet hier het bestand Meta-Performance_Agent.md.
+Dit bestand is uitgesloten van GitHub via .gitignore (intellectueel eigendom Just Jane).

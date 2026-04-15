@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "functions": {
+    "api/auth.js": {
+      "maxDuration": 10
+    },
+    "api/chat.js": {
+      "maxDuration": 60
+    },
+    "api/sheets.js": {
+      "maxDuration": 15
+    }
+  },
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" }
+  ]
+}
