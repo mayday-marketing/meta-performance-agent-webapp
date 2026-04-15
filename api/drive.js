@@ -27,7 +27,7 @@ async function getAccessToken() {
   const now = Math.floor(Date.now() / 1000);
   const claimSet = Buffer.from(JSON.stringify({
     iss: key.client_email,
-    scope: 'https://www.googleapis.com/auth/drive.readonly',
+    scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets',
     aud: 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now,
@@ -47,40 +47,31 @@ async function getAccessToken() {
   return tokenData.access_token;
 }
 
-// Recursively search for a folder by path segments
-async function findFolderByPath(accessToken, rootFolderId, pathSegments) {
-  let currentId = rootFolderId;
-  for (const segment of pathSegments) {
-    const query = encodeURIComponent(
-      `'${currentId}' in parents and mimeType='application/vnd.google-apps.folder' and name contains '${segment}' and trashed=false`
-    );
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+async function findFolderByPath(accessToken, rootId, segments) {
+  let currentId = rootId;
+  for (const seg of segments) {
+    const q = encodeURIComponent(`'${currentId}' in parents and mimeType='application/vnd.google-apps.folder' and name contains '${seg}' and trashed=false`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
     const data = await res.json();
-    if (!data.files || data.files.length === 0) return null;
+    if (!data.files?.length) return null;
     currentId = data.files[0].id;
   }
   return currentId;
 }
 
-// List files in a folder
-async function listFiles(accessToken, folderId, mimeTypeFilter = null) {
-  let query = `'${folderId}' in parents and trashed=false`;
-  if (mimeTypeFilter) query += ` and mimeType='${mimeTypeFilter}'`;
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,modifiedTime,size)&orderBy=modifiedTime desc`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
+async function listFiles(accessToken, folderId) {
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,modifiedTime)&orderBy=modifiedTime desc`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
   const data = await res.json();
   return data.files || [];
 }
 
-// Download file content
-async function downloadFile(accessToken, fileId, mimeType) {
+async function downloadText(accessToken, fileId, mimeType) {
   let url;
-  // Google Docs/Sheets need export
   if (mimeType === 'application/vnd.google-apps.document') {
     url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/plain`;
   } else {
@@ -91,8 +82,7 @@ async function downloadFile(accessToken, fileId, mimeType) {
   return res.text();
 }
 
-// Download file as base64 (for PDFs)
-async function downloadFileBase64(accessToken, fileId) {
+async function downloadPdfAsBase64(accessToken, fileId) {
   const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) return null;
@@ -100,176 +90,176 @@ async function downloadFileBase64(accessToken, fileId) {
   return Buffer.from(buffer).toString('base64');
 }
 
-// Detect period from filename: spotto_2026-02_analytics.pdf → 2026-02
 function detectPeriod(filename) {
   const m = filename.match(/(\d{4}-\d{2})/);
   return m ? m[1] : null;
 }
 
-// Group files by period
-function groupByPeriod(files) {
-  const periods = {};
-  for (const f of files) {
-    const period = detectPeriod(f.name) || 'onbekend';
-    if (!periods[period]) periods[period] = [];
-    periods[period].push(f);
-  }
-  return periods;
+function classifyFile(name) {
+  const n = name.toLowerCase();
+  if (n.endsWith('.pdf')) return 'analytics_pdf';
+  if (n.includes('instagram') && n.endsWith('.csv')) return 'instagram_csv';
+  if (n.includes('facebook') && n.endsWith('.csv')) return 'facebook_csv';
+  if ((n.includes('meta_ads') || n.includes('ads') || n.includes('advertentie')) && n.endsWith('.csv')) return 'ads_csv';
+  if (n.endsWith('.csv')) return 'csv_other';
+  return null;
 }
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  // GET — scan Drive folder and return available files per period
-  if (req.method === 'GET') {
-    const { clientId, token, action, folderId, fileId, mimeType } = req.query || {};
+  const { clientId, token, action, period } = req.query || {};
 
-    if (!verifyToken(token, clientId)) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    // Get client config
-    let clients;
-    try { clients = JSON.parse(process.env.CLIENTS || '{}'); }
-    catch { return res.status(500).json({ error: 'Serverconfiguratie fout.' }); }
-
-    const client = clients[clientId];
-    if (!client?.driveFolderId) {
-      return res.status(200).json({ available: false, reason: 'Geen Drive map geconfigureerd voor deze klant.' });
-    }
-
-    const rootFolderId = client.driveFolderId;
-
-    try {
-      const accessToken = await getAccessToken();
-
-      // action=download — download a specific file
-      if (action === 'download' && fileId) {
-        if (mimeType === 'application/pdf') {
-          const base64 = await downloadFileBase64(accessToken, fileId);
-          return res.status(200).json({ base64 });
-        } else {
-          const text = await downloadFile(accessToken, fileId, mimeType);
-          return res.status(200).json({ text });
-        }
-      }
-
-      // action=context — load text context files (Merk-Brief, pillars, etc.)
-      if (action === 'context') {
-        const contextFolder = await findFolderByPath(accessToken, rootFolderId, ['00_AI-CONTEXT']);
-        const stratFolder = await findFolderByPath(accessToken, rootFolderId, ['03_MARKETING-STRATEGIE']);
-        const merkFolder = await findFolderByPath(accessToken, rootFolderId, ['01_MERK-STRATEGIE']);
-
-        const contextFiles = [];
-        const labels = {
-          '0.1_Merk-Brief': 'Merk-Brief',
-          '0.2_Do-Donts': "Do's & Don'ts",
-          '0.3_Woordenlijst': 'Woordenlijst',
-          '3.3_Content-Pijlers': 'Content Pijlers',
-          '1.3_Concurrentie': 'Concurrentieanalyse',
-        };
-
-        // Search context folder
-        if (contextFolder) {
-          const files = await listFiles(accessToken, contextFolder);
-          for (const f of files) {
-            for (const [key, label] of Object.entries(labels)) {
-              if (f.name.includes(key) || f.name.toLowerCase().includes(key.toLowerCase())) {
-                const text = await downloadFile(accessToken, f.id, f.mimeType);
-                if (text) contextFiles.push({ label, content: text.slice(0, 3000) });
-              }
-            }
-          }
-        }
-        // Search strategy folders
-        for (const folder of [stratFolder, merkFolder]) {
-          if (!folder) continue;
-          const files = await listFiles(accessToken, folder);
-          for (const f of files) {
-            for (const [key, label] of Object.entries(labels)) {
-              if ((f.name.includes(key) || f.name.toLowerCase().includes(key.toLowerCase()))
-                && !contextFiles.find(c => c.label === label)) {
-                const text = await downloadFile(accessToken, f.id, f.mimeType);
-                if (text) contextFiles.push({ label, content: text.slice(0, 3000) });
-              }
-            }
-          }
-        }
-
-        return res.status(200).json({ contextFiles });
-      }
-
-      // Default — scan for data files and return available periods
-      const result = {
-        available: true,
-        rootFolderId,
-        periods: {},
-        contextFiles: { merkBrief: false, pillars: false, concurrentie: false },
-      };
-
-      // Find data folders
-      const rapportFolder = await findFolderByPath(accessToken, rootFolderId, ['06_PERFORMANTIE', '6.3_Rapporten']);
-      const organischFolder = await findFolderByPath(accessToken, rootFolderId, ['06_PERFORMANTIE', '6.3_Rapporten', 'Organische-Rapporten', 'Instagram']);
-      const ruweDataOrg = await findFolderByPath(accessToken, rootFolderId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Organisch']);
-      const ruweDataAds = await findFolderByPath(accessToken, rootFolderId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Advertenties']);
-
-      // Collect all data files
-      const allFiles = [];
-
-      if (organischFolder) {
-        const pdfs = await listFiles(accessToken, organischFolder, 'application/pdf');
-        pdfs.forEach(f => allFiles.push({ ...f, type: 'analytics_pdf' }));
-      }
-      if (ruweDataOrg) {
-        const csvs = await listFiles(accessToken, ruweDataOrg);
-        csvs.filter(f => f.name.endsWith('.csv')).forEach(f => {
-          const type = f.name.toLowerCase().includes('instagram') ? 'instagram_csv'
-            : f.name.toLowerCase().includes('facebook') ? 'facebook_csv' : 'csv';
-          allFiles.push({ ...f, type });
-        });
-      }
-      if (ruweDataAds) {
-        const csvs = await listFiles(accessToken, ruweDataAds);
-        csvs.filter(f => f.name.endsWith('.csv')).forEach(f => allFiles.push({ ...f, type: 'ads_csv' }));
-      }
-
-      // Check template
-      if (rapportFolder) {
-        const templateFiles = await listFiles(accessToken, rapportFolder);
-        const template = templateFiles.find(f => f.name.includes('TEMPLATE') && f.name.endsWith('.xlsx'));
-        if (template) result.template = { id: template.id, name: template.name };
-      }
-
-      // Group by period
-      result.periods = groupByPeriod(allFiles);
-
-      // Check context files existence
-      const contextFolder = await findFolderByPath(accessToken, rootFolderId, ['00_AI-CONTEXT']);
-      if (contextFolder) {
-        const ctxFiles = await listFiles(accessToken, contextFolder);
-        result.contextFiles.merkBrief = ctxFiles.some(f => f.name.includes('0.1') || f.name.toLowerCase().includes('merk-brief'));
-        result.contextFiles.woordenlijst = ctxFiles.some(f => f.name.includes('0.3') || f.name.toLowerCase().includes('woordenlijst'));
-      }
-      const stratFolder = await findFolderByPath(accessToken, rootFolderId, ['03_MARKETING-STRATEGIE']);
-      if (stratFolder) {
-        const stratFiles = await listFiles(accessToken, stratFolder);
-        result.contextFiles.pillars = stratFiles.some(f => f.name.includes('3.3') || f.name.toLowerCase().includes('content-pijlers'));
-      }
-      const merkFolder = await findFolderByPath(accessToken, rootFolderId, ['01_MERK-STRATEGIE']);
-      if (merkFolder) {
-        const merkFiles = await listFiles(accessToken, merkFolder);
-        result.contextFiles.concurrentie = merkFiles.some(f => f.name.includes('1.3') || f.name.toLowerCase().includes('concurrentie'));
-      }
-
-      return res.status(200).json(result);
-
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
-    }
+  if (!verifyToken(token, clientId)) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  res.status(405).json({ error: 'Method not allowed' });
+  let clients;
+  try { clients = JSON.parse(process.env.CLIENTS || '{}'); }
+  catch { return res.status(500).json({ error: 'Serverconfiguratie fout.' }); }
+
+  const client = clients[clientId];
+  if (!client?.driveFolderId) {
+    return res.status(200).json({ available: false, reason: 'Geen Drive map geconfigureerd voor deze klant.' });
+  }
+
+  const rootId = client.driveFolderId;
+
+  try {
+    const accessToken = await getAccessToken();
+
+    // ── ACTION: load-period ─────────────────────────────────────────
+    // Download all data files for a period server-side, return full content
+    if (action === 'load-period' && period) {
+      const result = { period, files: [] };
+
+      // Find data folders
+      const organischFolder = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten', 'Organische-Rapporten', 'Instagram']);
+      const ruweDataOrg    = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Organisch']);
+      const ruweDataAds    = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Advertenties']);
+
+      // Also try alternate path names (lowercase / different naming)
+      const ruweDataOrg2   = ruweDataOrg || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data', 'Organisch']);
+      const ruweDataAds2   = ruweDataAds || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data', 'Advertenties']);
+
+      const allFolders = [
+        { folderId: organischFolder,  label: 'Analytics PDF' },
+        { folderId: ruweDataOrg2,     label: 'Organische data' },
+        { folderId: ruweDataAds2,     label: 'Advertentiedata' },
+      ];
+
+      for (const { folderId } of allFolders) {
+        if (!folderId) continue;
+        const files = await listFiles(accessToken, folderId);
+
+        for (const file of files) {
+          // Match period in filename
+          const filePeriod = detectPeriod(file.name);
+          if (filePeriod && filePeriod !== period) continue;
+
+          const type = classifyFile(file.name);
+          if (!type) continue;
+
+          // Download content
+          if (type === 'analytics_pdf') {
+            // Send PDF as base64 — Anthropic handles it natively
+            const base64 = await downloadPdfAsBase64(accessToken, file.id);
+            if (base64) {
+              result.files.push({ name: file.name, type, contentType: 'pdf_base64', data: base64 });
+            }
+          } else {
+            // CSV — full text, no truncation
+            const text = await downloadText(accessToken, file.id, file.mimeType);
+            if (text) {
+              result.files.push({ name: file.name, type, contentType: 'csv_text', data: text });
+            }
+          }
+        }
+      }
+
+      // Also load context files
+      const contextFiles = [];
+      const contextFolder = await findFolderByPath(accessToken, rootId, ['00_AI-CONTEXT']);
+      const stratFolder   = await findFolderByPath(accessToken, rootId, ['03_MARKETING-STRATEGIE']);
+      const merkFolder    = await findFolderByPath(accessToken, rootId, ['01_MERK-STRATEGIE']);
+
+      const contextMap = {
+        '0.1': 'Merk-Brief', '0.2': "Do's & Don'ts", '0.3': 'Woordenlijst',
+        '3.3': 'Content Pijlers', '1.3': 'Concurrentieanalyse',
+      };
+
+      for (const folderId of [contextFolder, stratFolder, merkFolder]) {
+        if (!folderId) continue;
+        const files = await listFiles(accessToken, folderId);
+        for (const file of files) {
+          for (const [key, label] of Object.entries(contextMap)) {
+            if (file.name.includes(key) && !contextFiles.find(c => c.label === label)) {
+              const text = await downloadText(accessToken, file.id, file.mimeType);
+              if (text) contextFiles.push({ label, content: text.slice(0, 4000) });
+            }
+          }
+        }
+      }
+
+      result.contextFiles = contextFiles;
+      return res.status(200).json(result);
+    }
+
+    // ── ACTION: scan ─────────────────────────────────────────────────
+    // Scan folder structure and return available periods + file list
+    const scanResult = { available: true, periods: {}, contextFiles: {} };
+
+    const organischFolder = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten', 'Organische-Rapporten', 'Instagram']);
+    const ruweDataOrg     = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Organisch'])
+                         || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data', 'Organisch']);
+    const ruweDataAds     = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Advertenties'])
+                         || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data', 'Advertenties']);
+    const rapportFolder   = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten']);
+
+    for (const folderId of [organischFolder, ruweDataOrg, ruweDataAds]) {
+      if (!folderId) continue;
+      const files = await listFiles(accessToken, folderId);
+      for (const file of files) {
+        const type = classifyFile(file.name);
+        if (!type) continue;
+        const p = detectPeriod(file.name) || 'onbekend';
+        if (!scanResult.periods[p]) scanResult.periods[p] = [];
+        scanResult.periods[p].push({ id: file.id, name: file.name, type, mimeType: file.mimeType });
+      }
+    }
+
+    if (rapportFolder) {
+      const tplFiles = await listFiles(accessToken, rapportFolder);
+      const tpl = tplFiles.find(f => f.name.includes('TEMPLATE') && f.name.endsWith('.xlsx'));
+      if (tpl) scanResult.template = { id: tpl.id, name: tpl.name };
+    }
+
+    // Check context files
+    const ctxFolder  = await findFolderByPath(accessToken, rootId, ['00_AI-CONTEXT']);
+    const sFolder    = await findFolderByPath(accessToken, rootId, ['03_MARKETING-STRATEGIE']);
+    const mFolder    = await findFolderByPath(accessToken, rootId, ['01_MERK-STRATEGIE']);
+
+    if (ctxFolder) {
+      const f = await listFiles(accessToken, ctxFolder);
+      scanResult.contextFiles.merkBrief   = f.some(x => x.name.includes('0.1') || x.name.toLowerCase().includes('merk-brief'));
+      scanResult.contextFiles.woordenlijst = f.some(x => x.name.includes('0.3'));
+    }
+    if (sFolder) {
+      const f = await listFiles(accessToken, sFolder);
+      scanResult.contextFiles.pillars     = f.some(x => x.name.includes('3.3') || x.name.toLowerCase().includes('content-pijlers'));
+    }
+    if (mFolder) {
+      const f = await listFiles(accessToken, mFolder);
+      scanResult.contextFiles.concurrentie = f.some(x => x.name.includes('1.3') || x.name.toLowerCase().includes('concurrentie'));
+    }
+
+    return res.status(200).json(scanResult);
+
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 };
