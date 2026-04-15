@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Just Jane — Meta Meta Performance Agent</title>
+  <title>Just Jane — Meta Performance Agent</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;700;800&display=swap" rel="stylesheet">
   <style>
@@ -24,107 +24,46 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: var(--font); background: var(--off-white); color: var(--burg); font-size: 14px; line-height: 1.6; }
 
-    /* ── LOGIN ──────────────────────────────── */
-    #login-screen {
-      min-height: 100vh;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-    }
-    .login-left {
-      background: var(--burg);
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 56px 52px;
-    }
+    /* LOGIN */
+    #login-screen { min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; }
+    .login-left { background: var(--burg); display: flex; flex-direction: column; justify-content: space-between; padding: 56px 52px; }
     .login-logo { font-size: 13px; letter-spacing: 0.18em; color: rgba(255,255,255,0.5); text-transform: uppercase; }
     .login-logo strong { font-weight: 800; color: rgba(255,255,255,0.9); }
     .login-tagline { color: rgba(255,255,255,0.85); }
-    .login-tagline h1 { font-size: 42px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; line-height: 1.1; margin-bottom: 16px; }
+    .login-tagline h1 { font-size: 40px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; line-height: 1.1; margin-bottom: 16px; }
     .login-tagline p { font-size: 13px; font-weight: 300; opacity: 0.7; max-width: 320px; line-height: 1.7; }
     .login-meta { font-size: 10px; color: rgba(255,255,255,0.3); letter-spacing: 0.08em; text-transform: uppercase; }
-    .login-right {
-      background: var(--white);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 56px 52px;
-    }
+    .login-right { background: var(--white); display: flex; align-items: center; justify-content: center; padding: 56px 52px; }
     .login-form-wrap { width: 100%; max-width: 360px; }
     .login-form-wrap h2 { font-size: 22px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
     .login-form-wrap p { font-size: 12px; color: var(--gray-text); margin-bottom: 36px; }
     .field { margin-bottom: 20px; }
     .field label { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gray-text); margin-bottom: 8px; }
-    .field input {
-      width: 100%; padding: 13px 16px;
-      border: 1px solid var(--gray-mid);
-      border-radius: 4px;
-      font-family: var(--font);
-      font-size: 13px;
-      color: var(--gray-dark);
-      background: var(--off-white);
-      outline: none;
-      transition: border-color 0.2s;
-    }
+    .field input { width: 100%; padding: 13px 16px; border: 1px solid var(--gray-mid); border-radius: 4px; font-family: var(--font); font-size: 13px; color: var(--gray-dark); background: var(--off-white); outline: none; transition: border-color 0.2s; }
     .field input:focus { border-color: var(--burg); }
-    .btn-primary {
-      width: 100%; padding: 14px;
-      background: var(--burg);
-      color: var(--white);
-      border: none;
-      border-radius: 4px;
-      font-family: var(--font);
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
+    .btn-primary { width: 100%; padding: 14px; background: var(--burg); color: var(--white); border: none; border-radius: 4px; font-family: var(--font); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; cursor: pointer; transition: background 0.2s; }
     .btn-primary:hover { background: var(--burg-dark); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
     .login-error { margin-top: 14px; padding: 12px 14px; background: var(--blush); border-radius: 4px; font-size: 12px; color: var(--burg); display: none; }
 
-    /* ── CHAT ────────────────────────────────── */
+    /* CHAT */
     #chat-screen { display: none; height: 100vh; flex-direction: column; }
     #chat-screen.active { display: flex; }
-
-    .chat-header {
-      background: var(--burg);
-      padding: 0 28px;
-      height: 56px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-shrink: 0;
-    }
+    .chat-header { background: var(--burg); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
     .chat-header-logo { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.55); }
     .chat-header-logo strong { font-weight: 800; color: rgba(255,255,255,0.9); }
     .chat-header-brand { font-size: 11px; color: rgba(255,255,255,0.6); letter-spacing: 0.05em; }
     .chat-header-brand strong { color: rgba(255,255,255,0.9); font-weight: 700; }
-    .btn-logout {
-      background: none; border: 1px solid rgba(255,255,255,0.25); color: rgba(255,255,255,0.6);
-      padding: 6px 14px; border-radius: 3px; font-family: var(--font); font-size: 10px;
-      letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: all 0.2s;
-    }
+    .btn-logout { background: none; border: 1px solid rgba(255,255,255,0.25); color: rgba(255,255,255,0.6); padding: 6px 14px; border-radius: 3px; font-family: var(--font); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: all 0.2s; }
     .btn-logout:hover { border-color: rgba(255,255,255,0.5); color: rgba(255,255,255,0.9); }
-
     .chat-body { flex: 1; overflow-y: auto; padding: 28px 0; }
     .chat-messages { max-width: 800px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 20px; }
-
     .msg { display: flex; gap: 12px; align-items: flex-start; }
     .msg.user { flex-direction: row-reverse; }
-    .msg-avatar {
-      width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
-    }
+    .msg-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
     .msg.assistant .msg-avatar { background: var(--burg); color: var(--white); }
     .msg.user .msg-avatar { background: var(--gray-light); color: var(--burg); }
-    .msg-bubble {
-      max-width: 76%; padding: 14px 18px; border-radius: 8px;
-      font-size: 13px; line-height: 1.7;
-    }
+    .msg-bubble { max-width: 76%; padding: 14px 18px; border-radius: 8px; font-size: 13px; line-height: 1.7; }
     .msg.assistant .msg-bubble { background: var(--white); border: 1px solid var(--gray-mid); color: var(--gray-dark); }
     .msg.user .msg-bubble { background: var(--burg); color: var(--white); }
     .msg-bubble p { margin-bottom: 10px; }
@@ -135,121 +74,36 @@
     .msg-bubble code { background: var(--gray-light); padding: 2px 6px; border-radius: 3px; font-size: 11px; font-family: monospace; }
     .msg-bubble pre { background: var(--gray-light); padding: 12px; border-radius: 4px; overflow-x: auto; margin: 10px 0; font-size: 11px; }
     .msg-bubble h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin: 14px 0 6px; color: var(--burg); }
-    .msg.user .msg-bubble h3 { color: rgba(255,255,255,0.8); }
     .msg-bubble table { border-collapse: collapse; width: 100%; font-size: 12px; margin: 10px 0; }
     .msg-bubble th { background: var(--gray-light); padding: 6px 10px; text-align: left; font-weight: 700; border: 1px solid var(--gray-mid); color: var(--burg); font-size: 10px; text-transform: uppercase; }
     .msg-bubble td { padding: 6px 10px; border: 1px solid var(--gray-mid); }
-
     .msg-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .msg-file-badge {
-      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25);
-      padding: 3px 10px; border-radius: 20px; font-size: 10px; letter-spacing: 0.05em;
-    }
-
+    .msg-file-badge { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); padding: 3px 10px; border-radius: 20px; font-size: 10px; letter-spacing: 0.05em; }
     .typing-indicator { display: flex; gap: 5px; align-items: center; padding: 14px 18px; }
     .typing-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gray-text); animation: bounce 1.2s infinite; }
     .typing-dot:nth-child(2) { animation-delay: 0.2s; }
     .typing-dot:nth-child(3) { animation-delay: 0.4s; }
     @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
-
     .chat-footer { background: var(--white); border-top: 1px solid var(--gray-mid); padding: 16px 24px; flex-shrink: 0; }
     .chat-footer-inner { max-width: 800px; margin: 0 auto; }
-
-    .upload-zone {
-      border: 1px dashed var(--gray-mid); border-radius: 6px; padding: 10px 14px;
-      margin-bottom: 10px; cursor: pointer; transition: all 0.2s;
-      display: flex; align-items: center; gap: 10px;
-    }
+    .upload-zone { border: 1px dashed var(--gray-mid); border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 10px; }
     .upload-zone:hover, .upload-zone.drag { border-color: var(--burg); background: var(--off-white); }
-    .upload-zone-icon { font-size: 16px; }
-    .upload-zone-text { font-size: 11px; color: var(--gray-text); }
-    .upload-zone-text strong { color: var(--burg); font-weight: 600; }
     #file-input { display: none; }
-
     .file-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .file-chip {
-      display: flex; align-items: center; gap: 6px;
-      background: var(--off-white); border: 1px solid var(--gray-mid);
-      padding: 4px 10px 4px 10px; border-radius: 20px; font-size: 11px; color: var(--burg);
-    }
+    .file-chip { display: flex; align-items: center; gap: 6px; background: var(--off-white); border: 1px solid var(--gray-mid); padding: 4px 10px; border-radius: 20px; font-size: 11px; color: var(--burg); }
     .file-chip-remove { cursor: pointer; color: var(--gray-text); font-size: 14px; line-height: 1; }
     .file-chip-remove:hover { color: var(--burg); }
-
     .input-row { display: flex; gap: 10px; align-items: flex-end; }
-    .chat-input {
-      flex: 1; padding: 12px 16px;
-      border: 1px solid var(--gray-mid); border-radius: 6px;
-      font-family: var(--font); font-size: 13px; color: var(--gray-dark);
-      resize: none; min-height: 46px; max-height: 160px; outline: none;
-      background: var(--off-white); transition: border-color 0.2s; line-height: 1.5;
-    }
+    .chat-input { flex: 1; padding: 12px 16px; border: 1px solid var(--gray-mid); border-radius: 6px; font-family: var(--font); font-size: 13px; color: var(--gray-dark); resize: none; min-height: 46px; max-height: 160px; outline: none; background: var(--off-white); transition: border-color 0.2s; line-height: 1.5; }
     .chat-input:focus { border-color: var(--burg); }
-    .btn-send {
-      width: 46px; height: 46px; border-radius: 6px;
-      background: var(--burg); color: var(--white); border: none;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-      transition: background 0.2s; flex-shrink: 0;
-    }
+    .btn-send { width: 46px; height: 46px; border-radius: 6px; background: var(--burg); color: var(--white); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; flex-shrink: 0; }
     .btn-send:hover { background: var(--burg-dark); }
     .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-send svg { width: 18px; height: 18px; }
-
-
-    /* Drive scan panel */
-    .drive-panel {
-      background: var(--white); border: 1px solid var(--gray-mid); border-radius: 8px;
-      padding: 24px 28px; margin: 20px auto 0; max-width: 800px;
-    }
-    .drive-panel-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-    .drive-panel-header h3 { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
-    .drive-panel-header p { font-size: 11px; color: var(--gray-text); margin: 0; }
-    .drive-scan-btn {
-      display: inline-flex; align-items: center; gap: 8px;
-      background: var(--burg); color: var(--white); border: none; border-radius: 4px;
-      padding: 10px 18px; font-family: var(--font); font-size: 11px; font-weight: 700;
-      text-transform: uppercase; letter-spacing: 0.1em; cursor: pointer; transition: background 0.2s;
-    }
-    .drive-scan-btn:hover { background: var(--burg-dark); }
-    .drive-scan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .drive-scan-btn.secondary {
-      background: none; color: var(--burg); border: 1px solid var(--burg);
-    }
-    .drive-scan-btn.secondary:hover { background: var(--off-white); }
-    .drive-results { margin-top: 16px; }
-    .drive-check-row {
-      display: flex; align-items: center; gap: 8px; padding: 6px 0;
-      border-bottom: 0.5px solid var(--gray-mid); font-size: 12px;
-    }
-    .drive-check-row:last-child { border-bottom: none; }
-    .drive-icon { font-size: 14px; width: 20px; text-align: center; }
-    .drive-period-select { margin-top: 16px; }
-    .drive-period-select label { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gray-text); margin-bottom: 8px; }
-    .drive-period-select select {
-      width: 100%; padding: 10px 14px; border: 1px solid var(--gray-mid); border-radius: 4px;
-      font-family: var(--font); font-size: 13px; color: var(--gray-dark); background: var(--off-white); outline: none;
-    }
-    .drive-period-select select:focus { border-color: var(--burg); }
-    .drive-file-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
-    .drive-file-item {
-      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-      border: 1px solid var(--gray-mid); border-radius: 4px; font-size: 11px;
-    }
-    .drive-file-item.found { border-color: var(--mint); background: #f0faf4; }
-    .drive-file-item.missing { border-color: var(--blush); background: #fdf5f6; color: var(--gray-text); }
-    .drive-loading { display: flex; align-items: center; gap: 10px; padding: 16px 0; font-size: 12px; color: var(--gray-text); }
-    .drive-spinner { width: 18px; height: 18px; border: 2px solid var(--gray-mid); border-top-color: var(--burg); border-radius: 50%; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .drive-action-row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
     .hint { font-size: 10px; color: var(--gray-text); margin-top: 8px; text-align: center; }
 
-    /* Welcome message */
-    .welcome {
-      max-width: 800px; margin: 20px auto 0; padding: 0 24px;
-    }
-    .welcome-card {
-      background: var(--white); border: 1px solid var(--gray-mid); border-radius: 8px;
-      padding: 28px 32px;
-    }
+    /* WELCOME */
+    .welcome { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+    .welcome-card { background: var(--white); border: 1px solid var(--gray-mid); border-radius: 8px; padding: 28px 32px; }
     .welcome-card h2 { font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
     .welcome-card p { font-size: 12px; color: var(--gray-text); margin-bottom: 20px; line-height: 1.7; }
     .welcome-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
@@ -257,17 +111,44 @@
     .welcome-step-num { font-size: 9px; font-weight: 700; color: var(--burg); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
     .welcome-step p { font-size: 11px; color: var(--gray-dark); margin: 0; }
 
-    /* Responsive */
+    /* DRIVE PANEL */
+    .drive-wrap { max-width: 800px; margin: 20px auto 0; padding: 0 24px; }
+    .drive-panel { background: var(--white); border: 1px solid var(--gray-mid); border-radius: 8px; padding: 24px 28px; }
+    .drive-panel h3 { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+    .drive-panel p.sub { font-size: 11px; color: var(--gray-text); margin-bottom: 16px; }
+    .drive-btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 4px; padding: 10px 18px; font-family: var(--font); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; cursor: pointer; transition: all 0.2s; border: none; }
+    .drive-btn.primary { background: var(--burg); color: var(--white); }
+    .drive-btn.primary:hover { background: var(--burg-dark); }
+    .drive-btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .drive-btn.secondary { background: none; color: var(--burg); border: 1px solid var(--burg); }
+    .drive-btn.secondary:hover { background: var(--off-white); }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .drive-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; font-size: 12px; color: var(--gray-text); }
+    .drive-spinner { width: 18px; height: 18px; border: 2px solid var(--gray-mid); border-top-color: var(--burg); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .drive-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .drive-check { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 0.5px solid var(--gray-mid); font-size: 12px; }
+    .drive-check:last-child { border-bottom: none; }
+    .section-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--gray-text); margin-bottom: 8px; }
+    .period-select { width: 100%; padding: 10px 14px; border: 1px solid var(--gray-mid); border-radius: 4px; font-family: var(--font); font-size: 13px; color: var(--gray-dark); background: var(--off-white); outline: none; margin-bottom: 12px; }
+    .period-select:focus { border-color: var(--burg); }
+    .file-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 16px; }
+    .file-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 4px; font-size: 11px; border: 1px solid var(--gray-mid); }
+    .file-item.found { border-color: #86c99a; background: #f0faf4; }
+    .file-item.missing { border-color: var(--blush); background: #fdf5f6; color: var(--gray-text); }
+
     @media (max-width: 700px) {
       #login-screen { grid-template-columns: 1fr; }
       .login-left { display: none; }
       .welcome-steps { grid-template-columns: 1fr; }
+      .drive-grid { grid-template-columns: 1fr; }
+      .file-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
 
-<!-- ── LOGIN SCREEN ─────────────────────────────────────────── -->
+<!-- LOGIN -->
 <div id="login-screen">
   <div class="login-left">
     <div class="login-logo">Just<strong>Jane</strong>.</div>
@@ -275,7 +156,7 @@
       <h1>Meta Performance<br>Agent</h1>
       <p>Social media analyse — dashboard &amp; chat-interface</p>
     </div>
-    <div class="login-meta">Just Jane Marketing · Vertrouwelijk · v1.0</div>
+    <div class="login-meta">Just Jane Marketing &nbsp;·&nbsp; Vertrouwelijk &nbsp;·&nbsp; v1.0</div>
   </div>
   <div class="login-right">
     <div class="login-form-wrap">
@@ -289,46 +170,38 @@
         <label>Wachtwoord</label>
         <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
       </div>
-      <button class="btn-primary" id="btn-login" onclick="handleLogin()">Aanmelden</button>
+      <button class="btn-primary" id="btn-login">Aanmelden</button>
       <div class="login-error" id="login-error"></div>
     </div>
   </div>
 </div>
 
-<!-- ── CHAT SCREEN ──────────────────────────────────────────── -->
+<!-- CHAT -->
 <div id="chat-screen">
   <div class="chat-header">
     <div class="chat-header-logo">Just<strong>Jane</strong>. <span style="opacity:0.3;margin:0 8px">|</span> Meta Performance Agent</div>
     <div class="chat-header-brand">Klant: <strong id="brand-display">—</strong></div>
-    <button class="btn-logout" onclick="handleLogout()">Afmelden</button>
+    <button class="btn-logout" id="btn-logout">Afmelden</button>
   </div>
 
   <div class="chat-body" id="chat-body">
 
-  <!-- Drive panel -->
-  <div id="drive-panel" style="display:none; padding: 0 24px;">
-    <div class="drive-panel">
-      <div class="drive-panel-header">
-        <div>
-          <h3>📁 Google Drive — Bestanden laden</h3>
-          <p>Scan de Drive map van deze klant en kies de periode om te analyseren.</p>
-        </div>
-      </div>
-      <div id="drive-scan-state">
-        <div class="drive-action-row">
-          <button class="drive-scan-btn" id="btn-drive-scan" onclick="scanDrive()">
-            🔍 Drive scannen
-          </button>
-          <button class="drive-scan-btn secondary" onclick="hideDrivePanel()">
-            Handmatig uploaden
-          </button>
+    <!-- Drive panel -->
+    <div class="drive-wrap" id="drive-wrap" style="display:none">
+      <div class="drive-panel">
+        <h3>📁 Google Drive — Bestanden laden</h3>
+        <p class="sub">Scan de Drive map van deze klant en kies de periode om te analyseren.</p>
+        <div id="drive-state">
+          <div class="btn-row">
+            <button class="drive-btn primary" id="btn-drive-scan">🔍 Drive scannen</button>
+            <button class="drive-btn secondary" id="btn-drive-skip">Handmatig uploaden</button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-
-    <div class="welcome" id="welcome-block">
+    <!-- Welcome -->
+    <div class="welcome" id="welcome-block" style="margin-top:20px">
       <div class="welcome-card">
         <h2>Klaar om te analyseren</h2>
         <p>Upload de bestanden voor deze maand en start de analyse. De agent doorloopt automatisch alle fasen en vraagt bevestiging voor elke stap.</p>
@@ -348,22 +221,22 @@
         </div>
       </div>
     </div>
+
     <div class="chat-messages" id="chat-messages"></div>
   </div>
 
   <div class="chat-footer">
     <div class="chat-footer-inner">
-      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragleave="this.classList.remove('drag')">
-        <div class="upload-zone-icon">📎</div>
-        <div class="upload-zone-text"><strong>Bestanden uploaden</strong> — sleep hier of klik — PDF, CSV</div>
+      <div class="upload-zone" id="upload-zone">
+        <span style="font-size:16px">📎</span>
+        <span style="font-size:11px;color:var(--gray-text)"><strong style="color:var(--burg)">Bestanden uploaden</strong> — sleep hier of klik — PDF, CSV</span>
       </div>
-      <input type="file" id="file-input" multiple accept=".pdf,.csv" onchange="handleFileSelect(event)" />
+      <input type="file" id="file-input" multiple accept=".pdf,.csv" />
       <div class="file-list" id="file-list"></div>
       <div class="input-row">
-        <textarea class="chat-input" id="chat-input" placeholder="Stuur een bericht…" rows="1"
-          onkeydown="handleKeyDown(event)" oninput="autoResize(this)"></textarea>
-        <button class="btn-send" id="btn-send" onclick="sendMessage()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <textarea class="chat-input" id="chat-input" placeholder="Stuur een bericht…" rows="1"></textarea>
+        <button class="btn-send" id="btn-send">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
         </button>
@@ -374,485 +247,427 @@
 </div>
 
 <script>
-  // ── STATE ─────────────────────────────────────────────────────
-  let session = null;          // { token, clientId, brandName, sheetId }
-  let clientContext = '';      // loaded from Google Sheets
-  let messages = [];           // conversation history
-  let pendingFiles = [];       // { name, type, data } — files staged for next message
-  let isStreaming = false;
+// ── STATE ──────────────────────────────────────────────────────────
+var session = null;
+var clientContext = '';
+var messages = [];
+var pendingFiles = [];
+var isStreaming = false;
+var driveData = null;
+var selectedPeriod = null;
 
-  // ── INIT ──────────────────────────────────────────────────────
-  window.onload = () => {
-    const saved = sessionStorage.getItem('jj_session');
-    if (saved) {
-      session = JSON.parse(saved);
-      showChat();
-      loadClientContext();
-    }
-  };
-
-  // ── AUTH ──────────────────────────────────────────────────────
-  async function handleLogin() {
-    const clientId = document.getElementById('client-id').value.trim().toLowerCase();
-    const password = document.getElementById('password').value;
-    const btn = document.getElementById('btn-login');
-    const errEl = document.getElementById('login-error');
-
-    if (!clientId || !password) { showError('Vul alle velden in.'); return; }
-
-    btn.disabled = true;
-    btn.textContent = 'Aanmelden…';
-    errEl.style.display = 'none';
-
-    try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, password })
-      });
-      const data = await res.json();
-      if (!res.ok) { showError(data.error || 'Aanmelding mislukt.'); return; }
-
-      session = { token: data.token, clientId: data.clientId, brandName: data.brandName, sheetId: data.sheetId, hasDrive: data.hasDrive };
-      sessionStorage.setItem('jj_session', JSON.stringify(session));
-      showChat();
-      loadClientContext();
-    } catch (e) {
-      showError('Verbindingsfout. Probeer opnieuw.');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Aanmelden';
-    }
+// ── INIT ───────────────────────────────────────────────────────────
+window.addEventListener('load', function() {
+  var saved = sessionStorage.getItem('jj_session');
+  if (saved) {
+    session = JSON.parse(saved);
+    showChat();
+    loadClientContext();
   }
 
-  document.getElementById('password').addEventListener('keydown', e => {
+  // Login
+  document.getElementById('btn-login').addEventListener('click', handleLogin);
+  document.getElementById('password').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') handleLogin();
   });
 
-  function showError(msg) {
-    const el = document.getElementById('login-error');
-    el.textContent = msg;
-    el.style.display = 'block';
-  }
+  // Logout
+  document.getElementById('btn-logout').addEventListener('click', handleLogout);
 
-  function handleLogout() {
-    sessionStorage.removeItem('jj_session');
-    session = null; messages = []; clientContext = ''; pendingFiles = [];
-    document.getElementById('chat-screen').classList.remove('active');
-    document.getElementById('login-screen').style.display = 'grid';
-    document.getElementById('chat-messages').innerHTML = '';
-    document.getElementById('welcome-block').style.display = 'block';
-    document.getElementById('client-id').value = '';
-    document.getElementById('password').value = '';
-  }
+  // Drive
+  document.getElementById('btn-drive-scan').addEventListener('click', scanDrive);
+  document.getElementById('btn-drive-skip').addEventListener('click', function() {
+    document.getElementById('drive-wrap').style.display = 'none';
+  });
 
-  function showChat() {
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('chat-screen').classList.add('active');
-    document.getElementById('brand-display').textContent = session.brandName || session.clientId;
-  }
-
-  // ── GOOGLE SHEETS ─────────────────────────────────────────────
-  async function loadClientContext() {
-    if (!session.sheetId) return;
-    try {
-      const res = await fetch(`/api/sheets?clientId=${session.clientId}&sheetId=${session.sheetId}&token=${encodeURIComponent(session.token)}`);
-      if (res.ok) {
-        const data = await res.json();
-        clientContext = data.context || '';
-      }
-    } catch (e) { /* context remains empty */ }
-  }
-
-  async function saveAnalysisResult(summary) {
-    if (!session.sheetId) return;
-    try {
-      await fetch('/api/sheets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: session.clientId, sheetId: session.sheetId, token: session.token, summary })
-      });
-    } catch (e) { /* silent fail */ }
-  }
-
-  // ── FILE HANDLING ─────────────────────────────────────────────
-  function handleFileSelect(e) { addFiles(Array.from(e.target.files)); e.target.value = ''; }
-  function handleDragOver(e) { e.preventDefault(); document.getElementById('upload-zone').classList.add('drag'); }
-  function handleDrop(e) {
+  // File upload
+  document.getElementById('upload-zone').addEventListener('click', function() {
+    document.getElementById('file-input').click();
+  });
+  document.getElementById('upload-zone').addEventListener('dragover', function(e) {
     e.preventDefault();
-    document.getElementById('upload-zone').classList.remove('drag');
+    this.classList.add('drag');
+  });
+  document.getElementById('upload-zone').addEventListener('dragleave', function() {
+    this.classList.remove('drag');
+  });
+  document.getElementById('upload-zone').addEventListener('drop', function(e) {
+    e.preventDefault();
+    this.classList.remove('drag');
     addFiles(Array.from(e.dataTransfer.files));
-  }
+  });
+  document.getElementById('file-input').addEventListener('change', function(e) {
+    addFiles(Array.from(e.target.files));
+    e.target.value = '';
+  });
 
-  async function addFiles(files) {
-    for (const file of files) {
-      if (!file.name.match(/\.(pdf|csv)$/i)) continue;
-      const data = await readFile(file);
-      pendingFiles.push({ name: file.name, type: file.type || (file.name.endsWith('.csv') ? 'text/csv' : 'application/pdf'), data });
-    }
-    renderFileList();
-  }
-
-  function readFile(file) {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      if (file.name.endsWith('.csv')) {
-        reader.onload = e => resolve(e.target.result);
-        reader.readAsText(file);
-      } else {
-        reader.onload = e => resolve(e.target.result.split(',')[1]); // base64
-        reader.readAsDataURL(file);
-      }
-    });
-  }
-
-  function renderFileList() {
-    const el = document.getElementById('file-list');
-    el.innerHTML = pendingFiles.map((f, i) => `
-      <div class="file-chip">
-        ${f.name.endsWith('.csv') ? '📊' : '📄'} ${f.name}
-        <span class="file-chip-remove" onclick="removeFile(${i})">×</span>
-      </div>`).join('');
-  }
-
-  function removeFile(i) { pendingFiles.splice(i, 1); renderFileList(); }
-
-  // ── MESSAGING ─────────────────────────────────────────────────
-  function handleKeyDown(e) {
+  // Chat
+  document.getElementById('btn-send').addEventListener('click', sendMessage);
+  document.getElementById('chat-input').addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+  document.getElementById('chat-input').addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+  });
+});
+
+// ── AUTH ───────────────────────────────────────────────────────────
+function handleLogin() {
+  var clientId = document.getElementById('client-id').value.trim().toLowerCase();
+  var password = document.getElementById('password').value;
+  var btn = document.getElementById('btn-login');
+  var errEl = document.getElementById('login-error');
+
+  if (!clientId || !password) { showError('Vul alle velden in.'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Aanmelden\u2026';
+  errEl.style.display = 'none';
+
+  fetch('/api/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId: clientId, password: password })
+  })
+  .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+  .then(function(r) {
+    if (!r.ok) { showError(r.data.error || 'Aanmelding mislukt.'); return; }
+    session = { token: r.data.token, clientId: r.data.clientId, brandName: r.data.brandName, sheetId: r.data.sheetId, hasDrive: r.data.hasDrive };
+    sessionStorage.setItem('jj_session', JSON.stringify(session));
+    showChat();
+    loadClientContext();
+  })
+  .catch(function() { showError('Verbindingsfout. Probeer opnieuw.'); })
+  .finally(function() { btn.disabled = false; btn.textContent = 'Aanmelden'; });
+}
+
+function showError(msg) {
+  var el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function handleLogout() {
+  sessionStorage.removeItem('jj_session');
+  session = null; messages = []; clientContext = ''; pendingFiles = []; driveData = null;
+  document.getElementById('chat-screen').classList.remove('active');
+  document.getElementById('login-screen').style.display = 'grid';
+  document.getElementById('chat-messages').innerHTML = '';
+  document.getElementById('welcome-block').style.display = 'block';
+  document.getElementById('drive-wrap').style.display = 'none';
+  document.getElementById('file-list').innerHTML = '';
+  document.getElementById('client-id').value = '';
+  document.getElementById('password').value = '';
+}
+
+function showChat() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('chat-screen').classList.add('active');
+  document.getElementById('brand-display').textContent = session.brandName || session.clientId;
+  if (session.hasDrive) {
+    document.getElementById('drive-wrap').style.display = 'block';
   }
+}
 
-  function autoResize(el) {
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
-  }
+// ── SHEETS ─────────────────────────────────────────────────────────
+function loadClientContext() {
+  if (!session.sheetId) return;
+  fetch('/api/sheets?clientId=' + session.clientId + '&sheetId=' + session.sheetId + '&token=' + encodeURIComponent(session.token))
+  .then(function(r) { return r.json(); })
+  .then(function(d) { clientContext = d.context || ''; })
+  .catch(function() {});
+}
 
-  async function sendMessage() {
-    if (isStreaming) return;
-    const input = document.getElementById('chat-input');
-    const text = input.value.trim();
-    if (!text && pendingFiles.length === 0) return;
+function saveAnalysisResult(summary) {
+  if (!session.sheetId) return;
+  fetch('/api/sheets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId: session.clientId, sheetId: session.sheetId, token: session.token, summary: summary })
+  }).catch(function() {});
+}
 
-    document.getElementById('welcome-block').style.display = 'none';
+// ── DRIVE ──────────────────────────────────────────────────────────
+function scanDrive() {
+  var btn = document.getElementById('btn-drive-scan');
+  btn.disabled = true;
+  var stateEl = document.getElementById('drive-state');
+  stateEl.innerHTML = '<div class="drive-loading"><div class="drive-spinner"></div> Drive map scannen\u2026</div>';
 
-    // Build user message content
-    const content = [];
-
-    // Attach files
-    for (const f of pendingFiles) {
-      if (f.name.endsWith('.csv')) {
-        content.push({ type: 'text', text: `[Bestand: ${f.name}]\n\`\`\`\n${f.data}\n\`\`\`` });
-      } else {
-        content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } });
-      }
+  fetch('/api/drive?clientId=' + session.clientId + '&token=' + encodeURIComponent(session.token))
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (!data.available) {
+      stateEl.innerHTML = '<p style="font-size:12px;color:var(--gray-text)">' + data.reason + '</p>';
+      return;
     }
-    if (text) content.push({ type: 'text', text });
+    driveData = data;
+    renderDriveResults(data);
+  })
+  .catch(function(e) {
+    stateEl.innerHTML = '<p style="font-size:12px;color:var(--burg)">Scan mislukt: ' + e.message + '</p><div class="btn-row" style="margin-top:12px"><button class="drive-btn primary" id="btn-drive-scan">Opnieuw</button><button class="drive-btn secondary" id="btn-drive-skip">Handmatig uploaden</button></div>';
+    document.getElementById('btn-drive-scan').addEventListener('click', scanDrive);
+    document.getElementById('btn-drive-skip').addEventListener('click', function() {
+      document.getElementById('drive-wrap').style.display = 'none';
+    });
+  });
+}
 
-    const fileNames = [...pendingFiles.map(f => f.name)];
-    pendingFiles = [];
-    renderFileList();
+function renderDriveResults(data) {
+  var ctx = data.contextFiles || {};
+  var periods = Object.keys(data.periods || {}).filter(function(p) { return p !== 'onbekend'; }).sort().reverse();
 
-    // Add to history & render
-    messages.push({ role: 'user', content });
-    appendUserMessage(text, fileNames);
+  var ctxHtml = [
+    { label: 'Merk-Brief', found: ctx.merkBrief },
+    { label: 'Content Pijlers', found: ctx.pillars },
+    { label: 'Concurrentieanalyse', found: ctx.concurrentie },
+    { label: 'Rapport Template', found: !!data.template }
+  ].map(function(c) {
+    return '<div class="drive-check"><span>' + (c.found ? '\u2705' : '\u274c') + '</span><span>' + c.label + '</span></div>';
+  }).join('');
 
-    input.value = '';
-    input.style.height = 'auto';
-    document.getElementById('btn-send').disabled = true;
-    isStreaming = true;
+  var periodOpts = periods.length
+    ? '<option value="">— Kies een periode —</option>' + periods.map(function(p) {
+        return '<option value="' + p + '">' + formatPeriod(p) + '</option>';
+      }).join('')
+    : '<option value="">Geen periodes gevonden</option>';
 
-    // Streaming response
-    const assistantEl = appendAssistantMessage();
+  document.getElementById('drive-state').innerHTML =
+    '<div class="drive-grid">' +
+      '<div><div class="section-label">Context &amp; strategie</div>' + ctxHtml + '</div>' +
+      '<div>' +
+        '<div class="section-label">Kies periode</div>' +
+        '<select class="period-select" id="period-select">' + periodOpts + '</select>' +
+        '<div id="files-overview"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="btn-row">' +
+      '<button class="drive-btn primary" id="btn-load-files" disabled>&#x1F4E5; Laden &amp; analyse starten</button>' +
+      '<button class="drive-btn secondary" id="btn-drive-skip2">Handmatig uploaden</button>' +
+    '</div>';
 
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages,
-          clientId: session.clientId,
-          token: session.token,
-          clientContext
-        })
-      });
+  document.getElementById('period-select').addEventListener('change', function() {
+    onPeriodChange(this.value);
+  });
+  document.getElementById('btn-load-files').addEventListener('click', loadDriveFiles);
+  document.getElementById('btn-drive-skip2').addEventListener('click', function() {
+    document.getElementById('drive-wrap').style.display = 'none';
+  });
+}
 
-      if (!res.ok) {
-        const err = await res.json();
-        updateAssistantMessage(assistantEl, `⚠️ Fout: ${err.error || 'Onbekende fout'}`);
-        return;
-      }
+function formatPeriod(p) {
+  var months = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+  var m = p.match(/(\d{4})-(\d{2})/);
+  if (m) return months[parseInt(m[2]) - 1] + ' ' + m[1];
+  return p;
+}
 
-      const data = await res.json();
-      const fullText = data.text || '';
-      updateAssistantMessage(assistantEl, fullText);
+function onPeriodChange(period) {
+  selectedPeriod = period;
+  var btn = document.getElementById('btn-load-files');
+  if (!btn) return;
+  if (!period) { btn.disabled = true; document.getElementById('files-overview').innerHTML = ''; return; }
+  btn.disabled = false;
 
-      // Add assistant message to history
-      messages.push({ role: 'assistant', content: [{ type: 'text', text: fullText }] });
+  var files = (driveData.periods[period] || []);
+  var types = ['analytics_pdf','instagram_csv','facebook_csv','ads_csv'];
+  var labels = { analytics_pdf: 'Analytics PDF', instagram_csv: 'Instagram CSV', facebook_csv: 'Facebook CSV', ads_csv: 'Ads CSV' };
+  var icons = { analytics_pdf: '\uD83D\uDCC4', instagram_csv: '\uD83D\uDCCA', facebook_csv: '\uD83D\uDCCA', ads_csv: '\uD83D\uDCB6' };
 
-      // Auto-save if looks like a completed analysis summary
-      if (fullText.includes('Phase 7') || fullText.includes('rapport') || fullText.toLowerCase().includes('complete')) {
-        saveAnalysisResult(fullText.slice(0, 1500));
-      }
+  var html = '<div class="file-grid">';
+  types.forEach(function(t) {
+    var f = files.find(function(x) { return x.type === t; });
+    html += '<div class="file-item ' + (f ? 'found' : 'missing') + '">' + (f ? '\u2705' : '\u274c') + ' ' + icons[t] + ' ' + (f ? f.name : labels[t] + ' \u2014 niet gevonden') + '</div>';
+  });
+  html += '</div>';
+  document.getElementById('files-overview').innerHTML = html;
+}
 
-    } catch (e) {
-      updateAssistantMessage(assistantEl, '⚠️ Verbindingsfout. Controleer je internetverbinding en probeer opnieuw.');
-    } finally {
-      isStreaming = false;
-      document.getElementById('btn-send').disabled = false;
-      document.getElementById('chat-input').focus();
-    }
-  }
+function loadDriveFiles() {
+  if (!selectedPeriod || !driveData) return;
+  var btn = document.getElementById('btn-load-files');
+  btn.disabled = true;
+  btn.textContent = '\u23F3 Bestanden downloaden\u2026';
 
-  // ── RENDER HELPERS ────────────────────────────────────────────
-  function appendUserMessage(text, files) {
-    const el = document.createElement('div');
-    el.className = 'msg user';
-    el.innerHTML = `
-      <div class="msg-avatar">JOU</div>
-      <div class="msg-bubble">
-        ${text ? `<p>${escapeHtml(text)}</p>` : ''}
-        ${files.length ? `<div class="msg-files">${files.map(f => `<span class="msg-file-badge">📎 ${f}</span>`).join('')}</div>` : ''}
-      </div>`;
-    document.getElementById('chat-messages').appendChild(el);
-    scrollBottom();
-    return el;
-  }
+  var files = (driveData.periods[selectedPeriod] || []);
+  var loaded = [];
+  var chain = Promise.resolve();
 
-  function appendAssistantMessage() {
-    const el = document.createElement('div');
-    el.className = 'msg assistant';
-    el.innerHTML = `
-      <div class="msg-avatar">JJ</div>
-      <div class="msg-bubble">
-        <div class="typing-indicator">
-          <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-        </div>
-      </div>`;
-    document.getElementById('chat-messages').appendChild(el);
-    scrollBottom();
-    return el;
-  }
-
-  function updateAssistantMessage(el, text) {
-    const bubble = el.querySelector('.msg-bubble');
-    bubble.innerHTML = renderMarkdown(text);
-    scrollBottom();
-  }
-
-  function renderMarkdown(text) {
-    return text
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^\| (.+)$/gm, (m) => '<tr><td>' + m.slice(2).replace(/\s*\|\s*/g,'</td><td>').replace(/<\/td><td>$/,'') + '</td></tr>')
-      .replace(/(<tr>[\s\S]+?<\/tr>)/g, '<table>$1</table>')
-      .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
-      .replace(/(<li>[\s\S]+?<\/li>)/g, '<ul>$1</ul>')
-      .replace(/\n{2,}/g, '</p><p>')
-      .replace(/^(?!<[htup])(.+)$/gm, '<p>$1</p>')
-      .replace(/<p><\/p>/g, '')
-      .replace(/(<\/table>)\s*<table>/g, '$1');
-  }
-
-  function escapeHtml(t) {
-    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
-
-
-  // ── GOOGLE DRIVE ──────────────────────────────────────────────
-  let driveData = null;
-  let selectedPeriod = null;
-  let driveFiles = {};  // period → { analytics_pdf, instagram_csv, facebook_csv, ads_csv }
-
-  function showDrivePanel() {
-    if (session.hasDrive) {
-      document.getElementById('drive-panel').style.display = 'block';
-    }
-  }
-
-  function hideDrivePanel() {
-    document.getElementById('drive-panel').style.display = 'none';
-  }
-
-  async function scanDrive() {
-    const btn = document.getElementById('btn-drive-scan');
-    btn.disabled = true;
-    const stateEl = document.getElementById('drive-scan-state');
-    stateEl.innerHTML = `<div class="drive-loading"><div class="drive-spinner"></div> Drive map scannen…</div>`;
-
-    try {
-      const res = await fetch(`/api/drive?clientId=${session.clientId}&token=${encodeURIComponent(session.token)}`);
-      const data = await res.json();
-
-      if (!data.available) {
-        stateEl.innerHTML = `<p style="font-size:12px;color:var(--gray-text)">${data.reason}</p>`;
-        return;
-      }
-
-      driveData = data;
-      renderDriveScanResults(data);
-    } catch (e) {
-      stateEl.innerHTML = `<p style="font-size:12px;color:var(--burg)">⚠️ Scan mislukt: ${e.message}</p>
-        <div class="drive-action-row">
-          <button class="drive-scan-btn" onclick="scanDrive()">Opnieuw proberen</button>
-          <button class="drive-scan-btn secondary" onclick="hideDrivePanel()">Handmatig uploaden</button>
-        </div>`;
-    }
-  }
-
-  function renderDriveScanResults(data) {
-    const stateEl = document.getElementById('drive-scan-state');
-    const periods = Object.keys(data.periods).filter(p => p !== 'onbekend').sort().reverse();
-    const ctx = data.contextFiles || {};
-
-    // Context files status
-    const ctxRows = [
-      { label: 'Merk-Brief', found: ctx.merkBrief },
-      { label: 'Content Pijlers', found: ctx.pillars },
-      { label: 'Concurrentieanalyse', found: ctx.concurrentie },
-      { label: 'Rapport Template', found: !!data.template },
-    ].map(c => `
-      <div class="drive-check-row">
-        <span class="drive-icon">${c.found ? '✅' : '❌'}</span>
-        <span>${c.label}</span>
-      </div>`).join('');
-
-    // Period options
-    const periodOptions = periods.length
-      ? periods.map(p => `<option value="${p}">${formatPeriod(p)}</option>`).join('')
-      : '<option value="">Geen periodes gevonden</option>';
-
-    stateEl.innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-        <div>
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:var(--gray-text);margin-bottom:8px">Context & strategie</div>
-          ${ctxRows}
-        </div>
-        <div>
-          <div class="drive-period-select">
-            <label>Kies periode om te analyseren</label>
-            <select id="drive-period-select" onchange="onPeriodChange(this.value)">
-              <option value="">— Kies een periode —</option>
-              ${periodOptions}
-            </select>
-          </div>
-          <div id="drive-files-overview" style="margin-top:12px"></div>
-        </div>
-      </div>
-      <div class="drive-action-row">
-        <button class="drive-scan-btn" id="btn-drive-load" onclick="loadDriveFiles()" disabled>
-          📥 Bestanden laden & analyse starten
-        </button>
-        <button class="drive-scan-btn secondary" onclick="hideDrivePanel()">
-          Handmatig uploaden
-        </button>
-      </div>`;
-  }
-
-  function formatPeriod(p) {
-    const months = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
-    const m = p.match(/(\d{4})-(\d{2})/);
-    if (m) return `${months[parseInt(m[2])-1]} ${m[1]}`;
-    return p;
-  }
-
-  function onPeriodChange(period) {
-    selectedPeriod = period;
-    const btn = document.getElementById('btn-drive-load');
-    if (!period) { btn.disabled = true; document.getElementById('drive-files-overview').innerHTML = ''; return; }
-    btn.disabled = false;
-
-    const files = (driveData.periods[period] || []);
-    driveFiles[period] = {
-      analytics_pdf: files.find(f => f.type === 'analytics_pdf'),
-      instagram_csv: files.find(f => f.type === 'instagram_csv'),
-      facebook_csv: files.find(f => f.type === 'facebook_csv'),
-      ads_csv: files.find(f => f.type === 'ads_csv'),
-    };
-
-    const overview = [
-      { label: 'Analytics PDF', key: 'analytics_pdf', icon: '📄' },
-      { label: 'Instagram CSV', key: 'instagram_csv', icon: '📊' },
-      { label: 'Facebook CSV', key: 'facebook_csv', icon: '📊' },
-      { label: 'Ads CSV', key: 'ads_csv', icon: '💶' },
-    ].map(item => {
-      const f = driveFiles[period][item.key];
-      return `<div class="drive-file-item ${f ? 'found' : 'missing'}">
-        ${f ? '✅' : '❌'} ${item.icon} ${f ? f.name : item.label + ' — niet gevonden'}
-      </div>`;
-    }).join('');
-
-    document.getElementById('drive-files-overview').innerHTML = `
-      <div class="drive-file-grid">${overview}</div>`;
-  }
-
-  async function loadDriveFiles() {
-    if (!selectedPeriod || !driveData) return;
-    const btn = document.getElementById('btn-drive-load');
-    btn.disabled = true;
-    btn.textContent = '⏳ Bestanden downloaden…';
-
-    const files = driveFiles[selectedPeriod];
-    const loaded = [];
-    const missing = [];
-
-    try {
-      // Load context files first
-      const ctxRes = await fetch(`/api/drive?clientId=${session.clientId}&token=${encodeURIComponent(session.token)}&action=context`);
-      const ctxData = await ctxRes.json();
-      let contextText = '';
-      if (ctxData.contextFiles?.length) {
-        contextText = ctxData.contextFiles.map(f => `## ${f.label}
-${f.content}`).join('
-
----
-
-');
-      }
-
-      // Download each data file
-      for (const [key, file] of Object.entries(files)) {
-        if (!file) { missing.push(key); continue; }
-        btn.textContent = `⏳ ${file.name} downloaden…`;
-        const dlRes = await fetch(`/api/drive?clientId=${session.clientId}&token=${encodeURIComponent(session.token)}&action=download&fileId=${file.id}&mimeType=${encodeURIComponent(file.mimeType || 'text/plain')}`);
-        const dlData = await dlRes.json();
-
-        if (key === 'analytics_pdf' && dlData.base64) {
-          pendingFiles.push({ name: file.name, type: 'application/pdf', data: dlData.base64 });
-        } else if (dlData.text) {
-          pendingFiles.push({ name: file.name, type: 'text/csv', data: dlData.text });
+  files.forEach(function(file) {
+    chain = chain.then(function() {
+      btn.textContent = '\u23F3 ' + file.name + '\u2026';
+      return fetch('/api/drive?clientId=' + session.clientId + '&token=' + encodeURIComponent(session.token) + '&action=download&fileId=' + file.id + '&mimeType=' + encodeURIComponent(file.mimeType || 'text/plain'))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (file.type === 'analytics_pdf' && d.base64) {
+          pendingFiles.push({ name: file.name, type: 'application/pdf', data: d.base64 });
+        } else if (d.text) {
+          pendingFiles.push({ name: file.name, type: 'text/csv', data: d.text });
         }
         loaded.push(file.name);
-      }
+      });
+    });
+  });
 
-      renderFileList();
-      hideDrivePanel();
-      document.getElementById('welcome-block').style.display = 'none';
+  chain.then(function() {
+    renderFileList();
+    document.getElementById('drive-wrap').style.display = 'none';
+    document.getElementById('welcome-block').style.display = 'none';
+    var msg = 'Drive scan klaar voor ' + session.brandName + ' \u2014 ' + formatPeriod(selectedPeriod) + '.\n\nGeladen: ' + loaded.join(', ') + '\n\nStart de analyse.';
+    document.getElementById('chat-input').value = msg;
+    sendMessage();
+  })
+  .catch(function(e) {
+    btn.disabled = false;
+    btn.textContent = '\uD83D\uDCE5 Laden & analyse starten';
+    alert('Fout bij laden: ' + e.message);
+  });
+}
 
-      // Compose auto-start message
-      const loadedList = loaded.map(f => `• ${f}`).join('\n');
-      const missingNote = missing.length ? `\n\nNiet gevonden: ${missing.join(', ')} — ik ga door met wat beschikbaar is.` : '';
-      const periodLabel = formatPeriod(selectedPeriod);
+// ── FILES ──────────────────────────────────────────────────────────
+function addFiles(files) {
+  var chain = Promise.resolve();
+  files.forEach(function(file) {
+    if (!file.name.match(/\.(pdf|csv)$/i)) return;
+    chain = chain.then(function() {
+      return readFile(file).then(function(data) {
+        pendingFiles.push({ name: file.name, type: file.type || (file.name.endsWith('.csv') ? 'text/csv' : 'application/pdf'), data: data });
+      });
+    });
+  });
+  chain.then(renderFileList);
+}
 
-      const autoMsg = `Drive scan klaar voor ${session.brandName} — ${periodLabel}.\n\nGeladen bestanden:\n${loadedList}${missingNote}${contextText ? '\n\nKlantcontext geladen vanuit Drive.' : ''}\n\nStart de analyse voor ${periodLabel}.`;
-
-      document.getElementById('chat-input').value = autoMsg;
-      sendMessage();
-
-    } catch (e) {
-      btn.disabled = false;
-      btn.textContent = '📥 Bestanden laden & analyse starten';
-      alert('Fout bij laden: ' + e.message);
+function readFile(file) {
+  return new Promise(function(resolve) {
+    var reader = new FileReader();
+    if (file.name.endsWith('.csv')) {
+      reader.onload = function(e) { resolve(e.target.result); };
+      reader.readAsText(file);
+    } else {
+      reader.onload = function(e) { resolve(e.target.result.split(',')[1]); };
+      reader.readAsDataURL(file);
     }
-  }
+  });
+}
 
-  function scrollBottom() {
-    const body = document.getElementById('chat-body');
-    body.scrollTop = body.scrollHeight;
-  }
+function renderFileList() {
+  document.getElementById('file-list').innerHTML = pendingFiles.map(function(f, i) {
+    return '<div class="file-chip">' + (f.name.endsWith('.csv') ? '\uD83D\uDCCA' : '\uD83D\uDCC4') + ' ' + f.name + '<span class="file-chip-remove" data-i="' + i + '">\u00d7</span></div>';
+  }).join('');
+  document.querySelectorAll('.file-chip-remove').forEach(function(el) {
+    el.addEventListener('click', function() {
+      pendingFiles.splice(parseInt(this.getAttribute('data-i')), 1);
+      renderFileList();
+    });
+  });
+}
+
+// ── MESSAGING ──────────────────────────────────────────────────────
+function sendMessage() {
+  if (isStreaming) return;
+  var input = document.getElementById('chat-input');
+  var text = input.value.trim();
+  if (!text && pendingFiles.length === 0) return;
+
+  document.getElementById('welcome-block').style.display = 'none';
+
+  var content = [];
+  pendingFiles.forEach(function(f) {
+    if (f.name.endsWith('.csv')) {
+      content.push({ type: 'text', text: '[Bestand: ' + f.name + ']\n```\n' + f.data + '\n```' });
+    } else {
+      content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } });
+    }
+  });
+  if (text) content.push({ type: 'text', text: text });
+
+  var fileNames = pendingFiles.map(function(f) { return f.name; });
+  pendingFiles = [];
+  renderFileList();
+
+  messages.push({ role: 'user', content: content });
+  appendUserMessage(text, fileNames);
+
+  input.value = '';
+  input.style.height = 'auto';
+  document.getElementById('btn-send').disabled = true;
+  isStreaming = true;
+
+  var assistantEl = appendAssistantMessage();
+
+  fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: messages, clientId: session.clientId, token: session.token, clientContext: clientContext })
+  })
+  .then(function(res) {
+    if (!res.ok) return res.json().then(function(e) { throw new Error(e.error || 'API fout'); });
+    return res.json();
+  })
+  .then(function(data) {
+    var fullText = data.text || '';
+    updateAssistantMessage(assistantEl, fullText);
+    messages.push({ role: 'assistant', content: [{ type: 'text', text: fullText }] });
+    if (fullText.toLowerCase().includes('phase 7') || fullText.toLowerCase().includes('rapport')) {
+      saveAnalysisResult(fullText.slice(0, 1500));
+    }
+  })
+  .catch(function(e) {
+    updateAssistantMessage(assistantEl, '\u26a0\ufe0f Fout: ' + e.message);
+  })
+  .finally(function() {
+    isStreaming = false;
+    document.getElementById('btn-send').disabled = false;
+    document.getElementById('chat-input').focus();
+  });
+}
+
+// ── RENDER ─────────────────────────────────────────────────────────
+function appendUserMessage(text, files) {
+  var el = document.createElement('div');
+  el.className = 'msg user';
+  el.innerHTML = '<div class="msg-avatar">JOU</div><div class="msg-bubble">' +
+    (text ? '<p>' + esc(text) + '</p>' : '') +
+    (files.length ? '<div class="msg-files">' + files.map(function(f) { return '<span class="msg-file-badge">\uD83D\uDCCE ' + f + '</span>'; }).join('') + '</div>' : '') +
+    '</div>';
+  document.getElementById('chat-messages').appendChild(el);
+  scrollBottom();
+}
+
+function appendAssistantMessage() {
+  var el = document.createElement('div');
+  el.className = 'msg assistant';
+  el.innerHTML = '<div class="msg-avatar">JJ</div><div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+  document.getElementById('chat-messages').appendChild(el);
+  scrollBottom();
+  return el;
+}
+
+function updateAssistantMessage(el, text) {
+  el.querySelector('.msg-bubble').innerHTML = renderMarkdown(text);
+  scrollBottom();
+}
+
+function renderMarkdown(t) {
+  t = t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  t = t.replace(/```([\s\S]*?)```/g,'<pre><code>$1</code></pre>');
+  t = t.replace(/`([^`]+)`/g,'<code>$1</code>');
+  t = t.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  t = t.replace(/^#{1,3} (.+)$/gm,'<h3>$1</h3>');
+  t = t.replace(/^[-*] (.+)$/gm,'<li>$1</li>');
+  t = t.replace(/(<li>[\s\S]+?<\/li>)/g,'<ul>$1</ul>');
+  t = t.replace(/\n{2,}/g,'</p><p>');
+  t = '<p>' + t + '</p>';
+  t = t.replace(/<p>(<h3>|<ul>|<pre>)/g,'$1');
+  t = t.replace(/(<\/h3>|<\/ul>|<\/pre>)<\/p>/g,'$1');
+  t = t.replace(/<p>\s*<\/p>/g,'');
+  return t;
+}
+
+function esc(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function scrollBottom() { var b = document.getElementById('chat-body'); b.scrollTop = b.scrollHeight; }
 </script>
 </body>
 </html>
