@@ -531,13 +531,21 @@ function addFiles(files) {
   var chain = Promise.resolve();
   files.forEach(function(file) {
     if (!file.name.match(/\.(pdf|csv)$/i)) return;
+    // Show processing state
+    pendingFiles.push({ name: file.name, fileType: 'loading', data: '' });
+    renderFileList();
+    var idx = pendingFiles.length - 1;
     chain = chain.then(function() {
       return readFile(file).then(function(result) {
-        pendingFiles.push({ name: file.name, fileType: result.type, data: result.data });
+        pendingFiles[idx] = { name: file.name, fileType: result.type, data: result.data };
+        renderFileList();
+      }).catch(function(err) {
+        pendingFiles.splice(idx, 1);
+        renderFileList();
+        alert('Fout bij verwerken van ' + file.name + ': ' + err.message);
       });
     });
   });
-  chain.then(renderFileList);
 }
 
 function readFile(file) {
@@ -591,7 +599,9 @@ function readFile(file) {
 
 function renderFileList() {
   document.getElementById('file-list').innerHTML = pendingFiles.map(function(f, i) {
-    return '<div class="file-chip">' + (f.name.endsWith('.csv') ? '\uD83D\uDCCA' : '\uD83D\uDCC4') + ' ' + f.name + '<span class="file-chip-remove" data-i="' + i + '">\u00d7</span></div>';
+    var icon = f.fileType === 'loading' ? '⏳' : (f.name.toLowerCase().endsWith('.csv') ? '📊' : '📄');
+    var extra = f.fileType === 'loading' ? ' <em style="font-size:10px;color:var(--gray-text)">verwerken...</em>' : '';
+    return '<div class="file-chip">' + icon + ' ' + f.name + extra + (f.fileType !== 'loading' ? '<span class="file-chip-remove" data-i="' + i + '">×</span>' : '') + '</div>';
   }).join('');
   document.querySelectorAll('.file-chip-remove').forEach(function(el) {
     el.addEventListener('click', function() {
