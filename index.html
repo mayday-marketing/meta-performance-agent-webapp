@@ -256,6 +256,7 @@ var pendingFiles = [];
 var isStreaming = false;
 var driveData = null;
 var selectedPeriod = null;
+var pendingDriveData = null;
 
 // ── INIT ───────────────────────────────────────────────────────────
 window.addEventListener('load', function() {
@@ -486,36 +487,39 @@ function onPeriodChange(period) {
 }
 
 function loadDriveFiles() {
-  if (!selectedPeriod || !driveData) return;
+  if (!selectedPeriod) return;
   var btn = document.getElementById('btn-load-files');
   btn.disabled = true;
-  btn.textContent = '\u23F3 Bestanden downloaden\u2026';
+  btn.textContent = '\u23F3 Bestanden laden via Drive\u2026';
 
-  var files = (driveData.periods[selectedPeriod] || []);
-  var loaded = [];
-  var chain = Promise.resolve();
+  // Server-side loading: pass period to drive API, which downloads everything server-to-server
+  fetch('/api/drive?clientId=' + session.clientId + '&token=' + encodeURIComponent(session.token) + '&action=load-period&period=' + encodeURIComponent(selectedPeriod))
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Drive laad fout'); });
+    return r.json();
+  })
+  .then(function(data) {
+    // Store loaded drive data for sending with next message
+    pendingDriveData = { files: data.files || [], contextFiles: data.contextFiles || [] };
 
-  files.forEach(function(file) {
-    chain = chain.then(function() {
-      btn.textContent = '\u23F3 ' + file.name + '\u2026';
-      return fetch('/api/drive?clientId=' + session.clientId + '&token=' + encodeURIComponent(session.token) + '&action=download&fileId=' + file.id + '&mimeType=' + encodeURIComponent(file.mimeType || 'text/plain'))
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        if (file.type === 'analytics_pdf' && d.base64) {
-          pendingFiles.push({ name: file.name, type: 'application/pdf', data: d.base64 });
-        } else if (d.text) {
-          pendingFiles.push({ name: file.name, type: 'text/csv', data: d.text });
-        }
-        loaded.push(file.name);
-      });
+    var loaded = (data.files || []).map(function(f) { return f.name; });
+    var missing = [];
+    var types = ['analytics_pdf','instagram_csv','facebook_csv','ads_csv'];
+    types.forEach(function(t) {
+      if (!data.files.find(function(f) { return f.type === t; })) missing.push(t.replace('_',' '));
     });
-  });
 
-  chain.then(function() {
-    renderFileList();
     document.getElementById('drive-wrap').style.display = 'none';
     document.getElementById('welcome-block').style.display = 'none';
-    var msg = 'Drive scan klaar voor ' + session.brandName + ' \u2014 ' + formatPeriod(selectedPeriod) + '.\n\nGeladen: ' + loaded.join(', ') + '\n\nStart de analyse.';
+
+    var msg = 'Drive geladen voor ' + session.brandName + ' \u2014 ' + formatPeriod(selectedPeriod) + '.';
+    msg += '\n\nBestanden: ' + (loaded.length ? loaded.join(', ') : 'geen gevonden');
+    if (missing.length) msg += '\nOntbreekt: ' + missing.join(', ');
+    if (data.contextFiles && data.contextFiles.length) {
+      msg += '\nContext: ' + data.contextFiles.map(function(c) { return c.label; }).join(', ');
+    }
+    msg += '\n\nStart de analyse voor ' + formatPeriod(selectedPeriod) + '.';
+
     document.getElementById('chat-input').value = msg;
     sendMessage();
   })
@@ -636,7 +640,20 @@ function sendMessage() {
   pendingFiles = [];
   renderFileList();
 
-  messages.push({ role: 'user', content: content });
+  // For history: store only a short label for file content, never the full data
+  var historyContent = content.map(function(c) {
+    if (c.type === 'text' && c.text && c.text.length > 500 && c.text.startsWith('[')) {
+      var firstLine = c.text.split('\n')[0];
+      return { type: 'text', text: firstLine + '\n[bestandsinhoud niet opgeslagen in geschiedenis]' };
+    }
+    if (c.type === 'document') {
+      return { type: 'text', text: '[PDF document — niet opgeslagen in geschiedenis]' };
+    }
+    return c;
+  });
+
+  // Push compact version to history
+  messages.push({ role: 'user', content: historyContent });
   appendUserMessage(text, fileNames);
 
   input.value = '';
@@ -646,13 +663,51 @@ function sendMessage() {
 
   var assistantEl = appendAssistantMessage();
 
+  // API call uses full content for current message, compact history for previous messages
+  var apiMessages = messages.slice(0, -1).concat([{ role: 'user', content: content }]);
+
+  var payload = {
+    messages: apiMessages,
+    clientId: session.clientId,
+    token: session.token,
+    clientContext: clientContext
+  };
+
+  // Attach Drive data if available — server handles file loading
+  if (pendingDriveData) {
+    payload.driveFiles = pendingDriveData;
+    payload.drivePeriod = selectedPeriod;
+    pendingDriveData = null;
+    // For Drive flow: apiMessages should only contain the text, no file content
+    apiMessages = messages.slice(0, -1).concat([{
+      role: 'user',
+      content: [{ type: 'text', text: text || 'Start de analyse.' }]
+    }]);
+    payload.messages = apiMessages;
+  }
+
   fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages: messages, clientId: session.clientId, token: session.token, clientContext: clientContext })
+    body: JSON.stringify(payload)
   })
   .then(function(res) {
-    if (!res.ok) return res.json().then(function(e) { throw new Error(e.error || 'API fout'); });
+    if (!res.ok) {
+      // Always remove the failed message from history so it never accumulates
+      messages.pop();
+      return res.text().then(function(t) {
+        var msg = 'Fout bij versturen.';
+        try {
+          var e = JSON.parse(t);
+          msg = e.error || msg;
+        } catch(pe) {
+          if (t.toLowerCase().includes('request entity')) {
+            msg = 'Bestanden te groot voor directe upload. Gebruik de Drive-koppeling om bestanden te laden.';
+          }
+        }
+        throw new Error(msg);
+      });
+    }
     return res.json();
   })
   .then(function(data) {
@@ -664,7 +719,11 @@ function sendMessage() {
     }
   })
   .catch(function(e) {
-    updateAssistantMessage(assistantEl, '\u26a0\ufe0f Fout: ' + e.message);
+    // Remove failed user message from history to keep it clean
+    if (messages.length && messages[messages.length - 1].role === 'user') {
+      messages.pop();
+    }
+    updateAssistantMessage(assistantEl, '\u26a0\ufe0f ' + e.message);
   })
   .finally(function() {
     isStreaming = false;
