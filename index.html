@@ -150,6 +150,41 @@
       .stats{grid-template-columns:repeat(2,1fr);}
       .chat-panel{position:fixed;right:0;top:52px;bottom:0;z-index:100;box-shadow:-4px 0 16px rgba(0,0,0,.1);}
     }
+
+    /* MODAL */
+    .modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;transition:opacity .2s;pointer-events:none;}
+    .modal-ov.show{opacity:1;pointer-events:all;}
+    .modal{background:var(--white);border-radius:8px;width:100%;max-width:540px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);transform:translateY(8px);transition:transform .2s;}
+    .modal-ov.show .modal{transform:translateY(0);}
+    .mhdr{background:var(--burg);padding:16px 20px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+    .mhdr-text h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#fff;margin-bottom:3px;}
+    .mhdr-text p{font-size:11px;color:rgba(255,255,255,.65);line-height:1.4;}
+    .mbtn-close{background:none;border:none;color:rgba(255,255,255,.6);font-size:20px;cursor:pointer;padding:0;line-height:1;flex-shrink:0;}
+    .mbtn-close:hover{color:#fff;}
+    .mbody{padding:20px;}
+    .msection{margin-bottom:18px;}
+    .msection:last-child{margin-bottom:0;}
+    .msec-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--gray-text);margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid var(--gray-mid);}
+    .mrow{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:.5px solid var(--gray-mid);font-size:12px;}
+    .mrow:last-child{border-bottom:none;}
+    .mrow-label{color:var(--gray-text);font-weight:500;}
+    .mrow-val{font-weight:700;color:var(--burg);}
+    .mrow-val.up{color:#065f46;}
+    .mrow-val.down{color:#991b1b;}
+    .mbar-wrap{margin:6px 0 10px;}
+    .mbar-label{display:flex;justify-content:space-between;font-size:10px;color:var(--gray-text);margin-bottom:4px;}
+    .mbar-track{height:8px;background:var(--gray-light);border-radius:4px;overflow:hidden;}
+    .mbar-fill{height:100%;border-radius:4px;transition:width .5s ease;}
+    .mbar-fill.excellent{background:#10b981;}
+    .mbar-fill.good{background:#6ee7b7;}
+    .mbar-fill.average{background:#f59e0b;}
+    .mbar-fill.weak{background:#f87171;}
+    .mbar-fill.poor{background:#d1d5db;}
+    .insight-box{background:var(--off-white);border-left:3px solid var(--burg);padding:10px 14px;border-radius:0 4px 4px 0;margin:8px 0;font-size:12px;color:var(--gray-dark);line-height:1.6;}
+    .insight-box.good{border-left-color:#10b981;background:#f0faf4;}
+    .insight-box.warn{border-left-color:#f59e0b;background:#fffbeb;}
+    .insight-box.bad{border-left-color:#ef4444;background:#fef2f2;}
+    .type-icon{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--gray-text);}
   </style>
 </head>
 <body>
@@ -423,6 +458,9 @@ function applyFilters(){
   var ffb=filterDate(allData.fb,from,to);
   var fp=allData.paid;
   fig=scoreRows(fig,'views');ffb=scoreRows(ffb,'views');fp=scorePaid(fp);
+  avgs.ig=computeAvgs(fig,['views','reach','likes','saves','shares','engagement']);
+  avgs.fb=computeAvgs(ffb,['views','reach','likes','avgWatch']);
+  avgs.paid=computeAvgs(fp,['spend','views','hookPct','holdPct','cpm']);
   updateStats(fig,ffb,fp);
   renderIG(fig);renderFB(ffb);renderPaid(fp);
   buildCtx(fig,ffb,fp);
@@ -472,17 +510,30 @@ function renderIG(rows){
   if(!rows.length){el.innerHTML='<div class="empty"><h3>Geen data in deze periode</h3><p>Pas de datumfilter aan of controleer de Drive-bestanden.</p></div>';return;}
   var s=srtRows(rows,'ig');
   el.innerHTML='<div class="dtw"><div class="dth"><span class="dth-title">Instagram Reels</span><span class="dth-count">'+rows.length+' posts</span></div><div class="tscroll"><table><thead><tr>'+
-    '<th onclick="srt(\'ig\',\'date\')">Datum</th><th onclick="srt(\'ig\',\'title\')">Caption</th>'+
-    '<th onclick="srt(\'ig\',\'duration\')">Sec</th><th onclick="srt(\'ig\',\'views\')" class="tdr">Views</th>'+
-    '<th onclick="srt(\'ig\',\'reach\')" class="tdr">Bereik</th><th onclick="srt(\'ig\',\'likes\')" class="tdr">Likes</th>'+
-    '<th onclick="srt(\'ig\',\'saves\')" class="tdr">Saves</th><th onclick="srt(\'ig\',\'shares\')" class="tdr">Shares</th>'+
-    '<th onclick="srt(\'ig\',\'engagement\')" class="tdr">Eng%</th><th onclick="srt(\'ig\',\'score\')">Score</th>'+
+    '<th onclick="srt('ig','date')">Datum'+si('ig','date')+'</th>'+
+    '<th onclick="srt('ig','title')">Caption'+si('ig','title')+'</th>'+
+    '<th>Type</th>'+
+    '<th onclick="srt('ig','duration')">Sec'+si('ig','duration')+'</th>'+
+    '<th onclick="srt('ig','views')" class="tdr">Views'+si('ig','views')+'</th>'+
+    '<th onclick="srt('ig','reach')" class="tdr">Bereik'+si('ig','reach')+'</th>'+
+    '<th onclick="srt('ig','likes')" class="tdr">Likes'+si('ig','likes')+'</th>'+
+    '<th onclick="srt('ig','saves')" class="tdr">Saves'+si('ig','saves')+'</th>'+
+    '<th onclick="srt('ig','shares')" class="tdr">Shares'+si('ig','shares')+'</th>'+
+    '<th onclick="srt('ig','engagement')" class="tdr">Eng%'+si('ig','engagement')+'</th>'+
+    '<th onclick="srt('ig','score')">Score'+si('ig','score')+'</th>'+
     '</tr></thead><tbody>'+
-    s.map(function(r){return'<tr><td>'+(r.date||'—')+'</td><td class="tdtitle" title="'+r.title.replace(/"/g,'')+'">'+r.title+'</td>'+
-      '<td>'+(r.duration||'—')+'</td><td class="tdr">'+fmt(r.views)+'</td><td class="tdr">'+fmt(r.reach)+'</td>'+
-      '<td class="tdr">'+fmt(r.likes)+'</td><td class="tdr">'+fmt(r.saves)+'</td><td class="tdr">'+fmt(r.shares)+'</td>'+
-      '<td class="tdr">'+fp(r.engagement)+'</td><td>'+bdg(r.score)+'</td></tr>';}).join('')+
+    s.map(function(r,i){
+      return'<tr><td>'+(r.date||'—')+'</td>'+
+        '<td class="tdtitle" title="'+r.title.replace(/"/g,'')+'">'+r.title+'</td>'+
+        '<td>'+postTypeIcon(r.type)+'</td>'+
+        '<td>'+(r.duration||'—')+'</td>'+
+        '<td class="tdr">'+fmt(r.views)+'</td><td class="tdr">'+fmt(r.reach)+'</td>'+
+        '<td class="tdr">'+fmt(r.likes)+'</td><td class="tdr">'+fmt(r.saves)+'</td><td class="tdr">'+fmt(r.shares)+'</td>'+
+        '<td class="tdr">'+fp(r.engagement)+'</td>'+
+        '<td><span class="badge b-'+r.score+'" style="cursor:pointer" onclick="showScoreModal(igFiltered['+i+'],'ig')">'+({excellent:'Excellent',good:'Good',average:'Average',weak:'Weak',poor:'Poor'}[r.score]||r.score)+'</span></td>'+
+        '</tr>';}).join('')+
     '</tbody></table></div></div>';
+  window.igFiltered=s;
 }
 
 function renderFB(rows){
@@ -490,17 +541,26 @@ function renderFB(rows){
   if(!rows.length){el.innerHTML='<div class="empty"><h3>Geen Facebook data</h3><p>Zorg dat een Facebook CSV in je Drive map staat.</p></div>';return;}
   var s=srtRows(rows,'fb');
   el.innerHTML='<div class="dtw"><div class="dth"><span class="dth-title">Facebook Reels</span><span class="dth-count">'+rows.length+' posts</span></div><div class="tscroll"><table><thead><tr>'+
-    '<th onclick="srt(\'fb\',\'date\')">Datum</th><th onclick="srt(\'fb\',\'title\')">Caption</th>'+
-    '<th onclick="srt(\'fb\',\'views\')" class="tdr">Views</th><th onclick="srt(\'fb\',\'reach\')" class="tdr">Bereik</th>'+
-    '<th onclick="srt(\'fb\',\'likes\')" class="tdr">Likes</th><th onclick="srt(\'fb\',\'avgWatch\')" class="tdr">Avg Watch</th>'+
-    '<th onclick="srt(\'fb\',\'score\')">Score</th>'+
+    '<th onclick="srt('fb','date')">Datum'+si('fb','date')+'</th>'+
+    '<th onclick="srt('fb','title')">Caption'+si('fb','title')+'</th>'+
+    '<th>Type</th>'+
+    '<th onclick="srt('fb','views')" class="tdr">Views'+si('fb','views')+'</th>'+
+    '<th onclick="srt('fb','reach')" class="tdr">Bereik'+si('fb','reach')+'</th>'+
+    '<th onclick="srt('fb','likes')" class="tdr">Likes'+si('fb','likes')+'</th>'+
+    '<th onclick="srt('fb','avgWatch')" class="tdr">Avg Watch'+si('fb','avgWatch')+'</th>'+
+    '<th onclick="srt('fb','score')">Score'+si('fb','score')+'</th>'+
     '</tr></thead><tbody>'+
-    s.map(function(r){var pct=r.duration>0?((r.avgWatch/r.duration)*100).toFixed(0)+'%':'—';
-      return'<tr><td>'+(r.date||'—')+'</td><td class="tdtitle" title="'+r.title.replace(/"/g,'')+'">'+r.title+'</td>'+
+    s.map(function(r,i){var pct=r.duration>0?((r.avgWatch/r.duration)*100).toFixed(0)+'%':'—';
+      return'<tr><td>'+(r.date||'—')+'</td>'+
+        '<td class="tdtitle" title="'+r.title.replace(/"/g,'')+'">'+r.title+'</td>'+
+        '<td>'+postTypeIcon(r.type)+'</td>'+
         '<td class="tdr">'+fmt(r.views)+'</td><td class="tdr">'+fmt(r.reach)+'</td>'+
-        '<td class="tdr">'+fmt(r.likes)+'</td><td class="tdr">'+(r.avgWatch?r.avgWatch.toFixed(1)+'s ('+pct+')':'—')+'</td>'+
-        '<td>'+bdg(r.score)+'</td></tr>';}).join('')+
+        '<td class="tdr">'+fmt(r.likes)+'</td>'+
+        '<td class="tdr">'+(r.avgWatch?r.avgWatch.toFixed(1)+'s ('+pct+')':'—')+'</td>'+
+        '<td><span class="badge b-'+r.score+'" style="cursor:pointer" onclick="showScoreModal(fbFiltered['+i+'],'fb')">'+({excellent:'Excellent',good:'Good',average:'Average',weak:'Weak',poor:'Poor'}[r.score]||r.score)+'</span></td>'+
+        '</tr>';}).join('')+
     '</tbody></table></div></div>';
+  window.fbFiltered=s;
 }
 
 function renderPaid(rows){
@@ -508,21 +568,29 @@ function renderPaid(rows){
   if(!rows.length){el.innerHTML='<div class="empty"><h3>Geen paid data</h3><p>Zorg dat een Meta Ads CSV in je Drive map staat.</p></div>';return;}
   var s=srtRows(rows,'paid');
   el.innerHTML='<div class="dtw"><div class="dth"><span class="dth-title">Paid Campaigns</span><span class="dth-count">'+rows.length+' ads</span></div><div class="tscroll"><table><thead><tr>'+
-    '<th onclick="srt(\'paid\',\'name\')">Advertentie</th><th onclick="srt(\'paid\',\'spend\')" class="tdr">Spend</th>'+
-    '<th onclick="srt(\'paid\',\'views\')" class="tdr">Views</th><th onclick="srt(\'paid\',\'hookPct\')" class="tdr">Hook 3s</th>'+
-    '<th onclick="srt(\'paid\',\'holdPct\')" class="tdr">Hold 100%</th><th onclick="srt(\'paid\',\'cpm\')" class="tdr">CPM</th>'+
-    '<th onclick="srt(\'paid\',\'ctr\')" class="tdr">CTR</th><th onclick="srt(\'paid\',\'results\')" class="tdr">Resultaten</th>'+
-    '<th onclick="srt(\'paid\',\'score\')">Score</th>'+
+    '<th onclick="srt('paid','name')">Advertentie'+si('paid','name')+'</th>'+
+    '<th onclick="srt('paid','spend')" class="tdr">Spend'+si('paid','spend')+'</th>'+
+    '<th onclick="srt('paid','views')" class="tdr">Views'+si('paid','views')+'</th>'+
+    '<th onclick="srt('paid','hookPct')" class="tdr">Hook 3s'+si('paid','hookPct')+'</th>'+
+    '<th onclick="srt('paid','holdPct')" class="tdr">Hold 100%'+si('paid','holdPct')+'</th>'+
+    '<th onclick="srt('paid','cpm')" class="tdr">CPM'+si('paid','cpm')+'</th>'+
+    '<th onclick="srt('paid','ctr')" class="tdr">CTR'+si('paid','ctr')+'</th>'+
+    '<th onclick="srt('paid','results')" class="tdr">Resultaten'+si('paid','results')+'</th>'+
+    '<th onclick="srt('paid','score')">Score'+si('paid','score')+'</th>'+
     '</tr></thead><tbody>'+
-    s.map(function(r){return'<tr><td class="tdtitle" title="'+r.name.replace(/"/g,'')+'">'+r.name+'</td>'+
-      '<td class="tdr">'+fc(r.spend)+'</td><td class="tdr">'+fmt(r.views)+'</td>'+
-      '<td class="tdr">'+fp(r.hookPct)+'</td><td class="tdr">'+fp(r.holdPct)+'</td>'+
-      '<td class="tdr">'+fc(r.cpm)+'</td><td class="tdr">'+fp(r.ctr)+'</td>'+
-      '<td class="tdr">'+fmt(r.results)+'</td><td>'+bdg(r.score)+'</td></tr>';}).join('')+
+    s.map(function(r,i){
+      return'<tr>'+
+        '<td class="tdtitle" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px" title="Klik voor detail" onclick="showAdModal(paidFiltered['+i+'])">'+r.name+'</td>'+
+        '<td class="tdr">'+fc(r.spend)+'</td><td class="tdr">'+fmt(r.views)+'</td>'+
+        '<td class="tdr">'+fp(r.hookPct)+'</td><td class="tdr">'+fp(r.holdPct)+'</td>'+
+        '<td class="tdr">'+fc(r.cpm)+'</td><td class="tdr">'+fp(r.ctr)+'</td>'+
+        '<td class="tdr">'+fmt(r.results)+'</td>'+
+        '<td><span class="badge b-'+r.score+'" style="cursor:pointer" onclick="event.stopPropagation();showAdModal(paidFiltered['+i+'])">'+({excellent:'Excellent',good:'Good',average:'Average',weak:'Weak',poor:'Poor'}[r.score]||r.score)+'</span></td>'+
+        '</tr>';}).join('')+
     '</tbody></table></div></div>';
+  window.paidFiltered=s;
 }
 
-// CHAT CONTEXT
 function buildCtx(ig,fb,paid){
   var lines=['## DASHBOARD DATA\n','**Periode:** '+(document.getElementById('df').value||'alle')+' t/m '+(document.getElementById('dt').value||'alle'),
     '**IG Reels:** '+ig.length+' | **FB Reels:** '+fb.length+' | **Paid:** '+paid.length+'\n'];
@@ -640,6 +708,241 @@ function renderChips(){
     el.addEventListener('click',function(){pendingFiles.splice(+this.dataset.i,1);renderChips();});
   });
 }
+
+// PERIOD AVERAGES
+var avgs = { ig: {}, fb: {}, paid: {} };
+function computeAvgs(rows, fields) {
+  var result = {};
+  fields.forEach(function(f) {
+    var vals = rows.map(function(r) { return r[f] || 0; }).filter(function(v) { return v > 0; });
+    result[f] = vals.length ? vals.reduce(function(a, b) { return a + b; }, 0) / vals.length : 0;
+    result[f + '_max'] = vals.length ? Math.max.apply(null, vals) : 0;
+  });
+  return result;
+}
+
+// POST TYPE HELPER
+function postTypeIcon(type) {
+  if (!type) return '<span class="type-icon">📄 Post</span>';
+  var t = type.toLowerCase();
+  if (t.includes('reel') || t.includes('video')) return '<span class="type-icon">🎬 Reel</span>';
+  if (t.includes('carousel') || t.includes('album')) return '<span class="type-icon">📸 Carousel</span>';
+  if (t.includes('image') || t.includes('foto') || t.includes('afbeelding')) return '<span class="type-icon">🖼️ Foto</span>';
+  if (t.includes('story') || t.includes('stories')) return '<span class="type-icon">⭕ Story</span>';
+  return '<span class="type-icon">📄 ' + type + '</span>';
+}
+
+// SORT INDICATOR
+function si(tab, col) {
+  var k = tab + '_' + col;
+  if (!sortState[k]) return ' <span style="opacity:.3;font-size:9px">⇅</span>';
+  return sortState[k] === 'asc' ? ' <span style="color:var(--burg);font-size:9px">▲</span>' : ' <span style="color:var(--burg);font-size:9px">▼</span>';
+}
+
+// MODAL SYSTEM
+function openModal(title, subtitle, bodyHtml) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-subtitle').textContent = subtitle;
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal-ov').classList.add('show');
+}
+function closeModal() { document.getElementById('modal-ov').classList.remove('show'); }
+function closeModalOuter(e) { if (e.target === document.getElementById('modal-ov')) closeModal(); }
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
+
+// DIFF helper
+function diff(val, avg) {
+  if (!avg) return '';
+  var d = ((val - avg) / avg * 100);
+  var cls = d >= 0 ? 'up' : 'down';
+  var arrow = d >= 0 ? '▲' : '▼';
+  return ' <span class="' + cls + '">' + arrow + ' ' + Math.abs(d).toFixed(0) + '%</span>';
+}
+
+function metricRow(label, val, avg, fmtFn) {
+  fmtFn = fmtFn || fmt;
+  return '<div class="mrow"><span class="mrow-label">' + label + '</span>' +
+    '<span class="mrow-val">' + fmtFn(val) + (avg ? diff(val, avg) : '') + '</span></div>';
+}
+
+function barRow(label, val, max, score) {
+  var pct = max > 0 ? Math.min(100, (val / max) * 100) : 0;
+  return '<div class="mbar-wrap">' +
+    '<div class="mbar-label"><span>' + label + '</span><span>' + fp(val) + '</span></div>' +
+    '<div class="mbar-track"><div class="mbar-fill ' + score + '" style="width:' + pct.toFixed(1) + '%"></div></div>' +
+    '</div>';
+}
+
+// SCORE MODAL — IG / FB
+function showScoreModal(row, tabType) {
+  var avg = avgs[tabType];
+  var title = row.title || row.name || '—';
+  var score = row.score;
+
+  var scoreLabels = { excellent: 'Excellent', good: 'Good', average: 'Average', weak: 'Weak', poor: 'Poor' };
+  var html = '';
+
+  // Metrics section
+  html += '<div class="msection"><div class="msec-label">Prestaties vs periode-gemiddeld</div>';
+  if (tabType === 'ig') {
+    html += metricRow('Views', row.views, avg.views);
+    html += metricRow('Bereik', row.reach, avg.reach);
+    html += metricRow('Likes', row.likes, avg.likes);
+    html += metricRow('Saves', row.saves, avg.saves);
+    html += metricRow('Shares', row.shares, avg.shares);
+    html += metricRow('Engagement %', row.engagement, avg.engagement, fp);
+    if (row.duration) html += metricRow('Duur', row.duration + 's', null, function(v) { return v; });
+  } else if (tabType === 'fb') {
+    html += metricRow('Views', row.views, avg.views);
+    html += metricRow('Bereik', row.reach, avg.reach);
+    html += metricRow('Likes', row.likes, avg.likes);
+    html += metricRow('Avg Watch', row.avgWatch, avg.avgWatch, function(v) { return v.toFixed(1) + 's'; });
+    if (row.duration > 0) {
+      var watchPct = (row.avgWatch / row.duration * 100).toFixed(0);
+      html += metricRow('% Bekeken', watchPct, null, function(v) { return v + '%'; });
+    }
+  }
+  html += '</div>';
+
+  // Score explanation
+  html += '<div class="msection"><div class="msec-label">Waarom deze score</div>';
+  var insights = generateInsightsIG(row, avg, tabType);
+  insights.forEach(function(i) { html += '<div class="insight-box ' + i.type + '">' + i.text + '</div>'; });
+  html += '</div>';
+
+  // Lesson
+  var lesson = generateLesson(row, avg, tabType);
+  html += '<div class="msection"><div class="msec-label">Les & volgende stap</div>';
+  lesson.forEach(function(l) { html += '<div class="insight-box warn">' + l + '</div>'; });
+  html += '</div>';
+
+  openModal(scoreLabels[score] + ' — ' + title.slice(0, 45), row.date + (row.type ? ' · ' + row.type : ''), html);
+}
+
+function generateInsightsIG(row, avg, type) {
+  var insights = [];
+  if (type === 'ig') {
+    if (row.views >= (avg.views || 0) * 1.5) insights.push({ type: 'good', text: '✅ <strong>Views +' + Math.round((row.views / (avg.views || 1) - 1) * 100) + '%</strong> boven gemiddeld — sterke distributie of goede hook die scroll stopt.' });
+    else if (row.views < (avg.views || 0) * 0.5) insights.push({ type: 'bad', text: '⚠️ <strong>Views ' + Math.round((1 - row.views / (avg.views || 1)) * 100) + '% onder gemiddeld</strong> — het algoritme heeft dit content weinig verspreid.' });
+    if (row.saves > (avg.saves || 0) * 1.5) insights.push({ type: 'good', text: '✅ <strong>Hoge saves (' + row.saves + ')</strong> — content wordt bewaard voor later. Sterk intent-signaal: mensen vinden het waardevol.' });
+    if (row.shares > (avg.shares || 0) * 1.5) insights.push({ type: 'good', text: '✅ <strong>Hoge shares (' + row.shares + ')</strong> — content wordt gedeeld. Zeer sterk distributie-signaal voor organisch bereik.' });
+    if (row.saves < 2 && row.views > (avg.views || 0)) insights.push({ type: '', text: '💡 Lage saves bij hoog bereik: mensen kijken maar bewaren niet. Mogelijk te oppervlakkig of zonder concrete take-away.' });
+    if (row.engagement < (avg.engagement || 0) * 0.5 && row.views > (avg.views || 0)) insights.push({ type: 'bad', text: '⚠️ Hoog bereik maar lage engagement: passieve kijkers, geen actie. Voeg een sterkere CTA of vraag toe.' });
+  } else {
+    if (row.avgWatch > (avg.avgWatch || 0) * 1.5) insights.push({ type: 'good', text: '✅ <strong>Avg watch time +' + Math.round((row.avgWatch / (avg.avgWatch || 1) - 1) * 100) + '%</strong> — kijkers blijven significant langer kijken dan gemiddeld.' });
+    if (row.duration > 0 && row.avgWatch / row.duration > 0.5) insights.push({ type: 'good', text: '✅ <strong>' + (row.avgWatch / row.duration * 100).toFixed(0) + '% van de video bekeken</strong> — sterke retentie. Content houdt aandacht vast.' });
+    if (row.duration > 0 && row.avgWatch / row.duration < 0.2) insights.push({ type: 'bad', text: '⚠️ Slechts ' + (row.avgWatch / row.duration * 100).toFixed(0) + '% van de video bekeken — kijkers haken vroeg af. Mogelijk zwakke hook of trage intro.' });
+  }
+  if (!insights.length) insights.push({ type: '', text: '📊 Prestaties liggen rond het periode-gemiddeld. Geen uitschieters in positieve of negatieve zin.' });
+  return insights;
+}
+
+function generateLesson(row, avg, type) {
+  var lessons = [];
+  if (type === 'ig') {
+    if (row.score === 'excellent' || row.score === 'good') {
+      lessons.push('🔁 <strong>Repurpose dit format</strong> — analyseer de hook, het onderwerp en de structuur. Maak een vergelijkbare reel binnen 2 weken terwijl het momentum er is.');
+      if (row.saves > (avg.saves || 0)) lessons.push('📌 <strong>Maak een carrousel of gids</strong> van dit onderwerp — hoge saves wijzen op informatieve behoefte. Een dieper duik werkt hier waarschijnlijk ook goed.');
+    } else if (row.score === 'weak' || row.score === 'poor') {
+      lessons.push('🔍 <strong>Analyseer de eerste 3 seconden</strong> — bij lage views is de hook waarschijnlijk het probleem. Herwerk met een result-first opening.');
+      if (row.engagement < 1) lessons.push('❓ <strong>Valideer het onderwerp</strong> — als zowel views als engagement laag zijn, resoneert het topic mogelijk niet. Test een andere invalshoek.');
+    } else {
+      lessons.push('⚙️ <strong>Optimaliseer één variabele</strong> — gemiddelde prestaties betekenen potentieel. Test een sterkere hook of een andere CTA bij vergelijkbaar content.');
+    }
+  } else {
+    if (row.score === 'excellent' || row.score === 'good') {
+      lessons.push('🔁 <strong>Crosspost naar Instagram</strong> als dat nog niet gedaan is — goede Facebook retentie voorspelt vaak ook IG-succes.');
+    } else if (row.score === 'weak' || row.score === 'poor') {
+      lessons.push('🎬 <strong>Gebruik het retentiepatroon</strong> — slechte watch time op Facebook wijst op een probleem in de eerste 5–8 seconden. Herwerk de opening.');
+    }
+  }
+  return lessons;
+}
+
+// AD DETAIL MODAL
+function showAdModal(row) {
+  var html = '';
+
+  // Budget & delivery
+  html += '<div class="msection"><div class="msec-label">Budget & bereik</div>';
+  html += metricRow('Spend', row.spend, null, fc);
+  html += metricRow('Views / Impressies', row.views, null);
+  html += metricRow('Bereik', row.reach, null);
+  if (row.frequency) html += metricRow('Frequentie', row.frequency, null, function(v) { return v.toFixed(2) + 'x'; });
+  if (row.cpm) html += metricRow('CPM', row.cpm, null, fc);
+  if (row.ctr) html += metricRow('CTR', row.ctr, null, fp);
+  if (row.results) html += metricRow('Resultaten', row.results, null);
+  html += '</div>';
+
+  // Retention bars
+  var hasRetention = row.hookPct > 0 || row.holdPct > 0;
+  if (hasRetention) {
+    html += '<div class="msection"><div class="msec-label">Retention checkpoints</div>';
+    var hScore = row.hookPct >= 65 ? 'excellent' : row.hookPct >= 50 ? 'good' : row.hookPct >= 35 ? 'average' : 'weak';
+    var holdScore = row.holdPct >= 25 ? 'excellent' : row.holdPct >= 15 ? 'good' : row.holdPct >= 8 ? 'average' : 'weak';
+    html += barRow('Hook rate (3s) — doel ≥50%', row.hookPct, 100, hScore);
+    if (row.hold25) html += barRow('25% retention', row.hold25 > 1 ? row.hold25 : row.hold25 * 100, 100, 'average');
+    if (row.hold50) html += barRow('50% retention', row.hold50 > 1 ? row.hold50 : row.hold50 * 100, 100, 'average');
+    html += barRow('Hold rate (100%) — doel ≥15%', row.holdPct, 100, holdScore);
+    html += '</div>';
+  }
+
+  // Diagnosis
+  html += '<div class="msection"><div class="msec-label">Diagnose & aanbeveling</div>';
+  var diag = diagnosePaid(row);
+  diag.forEach(function(d) { html += '<div class="insight-box ' + d.type + '">' + d.text + '</div>'; });
+  html += '</div>';
+
+  openModal(row.name.slice(0, 50), (row.campaign ? row.campaign.slice(0, 60) : 'Campagnedetail'), html);
+}
+
+function diagnosePaid(row) {
+  var diag = [];
+  var hr = row.hookPct;
+  var hold = row.holdPct;
+  var freq = row.frequency;
+
+  if (freq > 5) {
+    diag.push({ type: 'bad', text: '🔴 <strong>Ad fatigue:</strong> frequentie ' + freq.toFixed(1) + 'x — kijkers zien deze advertentie te vaak. Rotate creative onmiddellijk.' });
+  } else if (freq > 3.5) {
+    diag.push({ type: 'warn', text: '⚠️ <strong>Frequentie ' + freq.toFixed(1) + 'x</strong> — in de gevarenzone. Vernieuw creative binnen 2 weken.' });
+  }
+
+  if (hr > 0 && hr < 35) {
+    diag.push({ type: 'bad', text: '🔴 <strong>Zwakke hook (' + hr.toFixed(1) + '%):</strong> de opening stopt de scroll niet. Test een result-first hook — begin met het eindresultaat, niet de aanloop.' });
+  } else if (hr >= 65) {
+    diag.push({ type: 'good', text: '✅ <strong>Sterke hook (' + hr.toFixed(1) + '%):</strong> opening is effectief — kijkers stoppen bij het scrollen. Hergebruik dit type opening.' });
+  } else if (hr >= 50) {
+    diag.push({ type: 'good', text: '✅ <strong>Goede hook (' + hr.toFixed(1) + '%)</strong> — above average. Ruimte voor verbetering richting 65%+.' });
+  }
+
+  if (hold > 0 && hold < 8) {
+    diag.push({ type: 'bad', text: '🔴 <strong>Lage hold rate (' + hold.toFixed(1) + '%):</strong> kijkers haken snel af na de hook. De video lost de belofte van de opening niet in. Herwerk de body van de video.' });
+  } else if (hold >= 25) {
+    diag.push({ type: 'good', text: '✅ <strong>Hoge hold rate (' + hold.toFixed(1) + '%):</strong> kijkers kijken door tot het einde. Sterk content — overweeg dit te boosten of als organic te hergebruiken.' });
+  }
+
+  if (row.ctr && row.ctr < 0.8) {
+    diag.push({ type: 'warn', text: '⚠️ <strong>Lage CTR (' + row.ctr.toFixed(2) + '%):</strong> kijkers klikken niet door. Controleer of de CTA duidelijk en relevant is voor het doelpubliek.' });
+  }
+
+  if (!diag.length) {
+    diag.push({ type: '', text: '📊 Geen grote afwijkingen gevonden. Prestaties liggen binnen normale bandbreedtes.' });
+  }
+  return diag;
+}
+
 </script>
+
+  <!-- Modal -->
+  <div class="modal-ov" id="modal-ov" onclick="closeModalOuter(event)">
+    <div class="modal" id="modal">
+      <div class="mhdr">
+        <div class="mhdr-text"><h3 id="modal-title">Detail</h3><p id="modal-subtitle"></p></div>
+        <button class="mbtn-close" onclick="closeModal()">&#215;</button>
+      </div>
+      <div class="mbody" id="modal-body"></div>
+    </div>
+  </div>
 </body>
 </html>
