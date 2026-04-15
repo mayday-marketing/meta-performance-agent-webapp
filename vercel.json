@@ -5,10 +5,14 @@
       "maxDuration": 10
     },
     "api/chat.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "memory": 1024
     },
     "api/sheets.js": {
       "maxDuration": 15
+    },
+    "api/drive.js": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
