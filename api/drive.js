@@ -70,6 +70,15 @@ async function listFiles(accessToken, folderId) {
   return data.files || [];
 }
 
+async function listFolders(accessToken, folderId) {
+  const q = encodeURIComponent(`'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const data = await res.json();
+  return data.files || [];
+}
+
 async function downloadText(accessToken, fileId, mimeType) {
   let url;
   if (mimeType === 'application/vnd.google-apps.document') {
@@ -90,9 +99,34 @@ async function downloadPdfAsBase64(accessToken, fileId) {
   return Buffer.from(buffer).toString('base64');
 }
 
+const MONTH_MAP = {
+  jan:'01', feb:'02', mar:'03', mrt:'03', apr:'04', mei:'05', may:'05',
+  jun:'06', jul:'07', aug:'08', sep:'09', oct:'10', okt:'10', nov:'11', dec:'12'
+};
+
 function detectPeriod(filename) {
-  const m = filename.match(/(\d{4}-\d{2})/);
-  return m ? m[1] : null;
+  const f = filename.toLowerCase();
+
+  // YYYY-MM exact
+  let m = f.match(/(\d{4})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}`;
+
+  // feb26 / feb2026 / feb-26 / feb-2026
+  m = f.match(/([a-z]{3})[\-_]?(20\d{2}|\d{2})(?!\d)/);
+  if (m && MONTH_MAP[m[1]]) {
+    const year = m[2].length === 2 ? '20' + m[2] : m[2];
+    return `${year}-${MONTH_MAP[m[1]]}`;
+  }
+
+  // Feb-1-2026-tot-Feb-28-2026 style — take first month+year found
+  m = f.match(/([a-z]{3})[\-_](\d{1,2})[\-_](20\d{2})/);
+  if (m && MONTH_MAP[m[1]]) return `${m[3]}-${MONTH_MAP[m[1]]}`;
+
+  // 2026 only — group by year
+  m = f.match(/(20\d{2})/);
+  if (m) return m[1];
+
+  return null;
 }
 
 function classifyFile(name) {
@@ -137,46 +171,39 @@ module.exports = async (req, res) => {
     if (action === 'load-period' && period) {
       const result = { period, files: [] };
 
-      // Find data folders
-      const organischFolder = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten', 'Organische-Rapporten', 'Instagram']);
-      const ruweDataOrg    = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Organisch']);
-      const ruweDataAds    = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Advertenties']);
+      // Find data folders — scan root + all subfolders of 6.4_Ruwe-Data
+      const analyticsFolder = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten', 'Organische-Rapporten', 'Instagram']);
+      const ruweDataRoot    = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data'])
+                           || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data'])
+                           || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe_Data']);
 
-      // Also try alternate path names (lowercase / different naming)
-      const ruweDataOrg2   = ruweDataOrg || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data', 'Organisch']);
-      const ruweDataAds2   = ruweDataAds || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data', 'Advertenties']);
+      const foldersToLoad = [];
+      if (analyticsFolder) foldersToLoad.push(analyticsFolder);
+      if (ruweDataRoot) {
+        foldersToLoad.push(ruweDataRoot);
+        const subfolders = await listFolders(accessToken, ruweDataRoot);
+        for (const sub of subfolders) foldersToLoad.push(sub.id);
+      }
 
-      const allFolders = [
-        { folderId: organischFolder,  label: 'Analytics PDF' },
-        { folderId: ruweDataOrg2,     label: 'Organische data' },
-        { folderId: ruweDataAds2,     label: 'Advertentiedata' },
-      ];
-
-      for (const { folderId } of allFolders) {
-        if (!folderId) continue;
+      const seenIds = new Set();
+      for (const folderId of foldersToLoad) {
         const files = await listFiles(accessToken, folderId);
-
         for (const file of files) {
-          // Match period in filename
+          if (seenIds.has(file.id)) continue;
+
           const filePeriod = detectPeriod(file.name);
           if (filePeriod && filePeriod !== period) continue;
 
           const type = classifyFile(file.name);
           if (!type) continue;
+          seenIds.add(file.id);
 
-          // Download content
           if (type === 'analytics_pdf') {
-            // Send PDF as base64 — Anthropic handles it natively
             const base64 = await downloadPdfAsBase64(accessToken, file.id);
-            if (base64) {
-              result.files.push({ name: file.name, type, contentType: 'pdf_base64', data: base64 });
-            }
+            if (base64) result.files.push({ name: file.name, type, contentType: 'pdf_base64', data: base64 });
           } else {
-            // CSV — full text, no truncation
             const text = await downloadText(accessToken, file.id, file.mimeType);
-            if (text) {
-              result.files.push({ name: file.name, type, contentType: 'csv_text', data: text });
-            }
+            if (text) result.files.push({ name: file.name, type, contentType: 'csv_text', data: text });
           }
         }
       }
@@ -213,22 +240,35 @@ module.exports = async (req, res) => {
     // Scan folder structure and return available periods + file list
     const scanResult = { available: true, periods: {}, contextFiles: {} };
 
-    const organischFolder = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten', 'Organische-Rapporten', 'Instagram']);
-    const ruweDataOrg     = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Organisch'])
-                         || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data', 'Organisch']);
-    const ruweDataAds     = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data', 'Advertenties'])
-                         || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data', 'Advertenties']);
-    const rapportFolder   = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten']);
+    const analyticsFolder = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten', 'Organische-Rapporten', 'Instagram']);
+    const rapportFolder    = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.3_Rapporten']);
 
-    for (const folderId of [organischFolder, ruweDataOrg, ruweDataAds]) {
-      if (!folderId) continue;
+    // Find 6.4_Ruwe-Data root (try multiple casings)
+    const ruweDataRoot = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-Data'])
+                      || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe-data'])
+                      || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.4_Ruwe_Data']);
+
+    // Collect all folders to scan: analytics PDF folder + ruwe-data root + all its subfolders
+    const foldersToScan = [];
+    if (analyticsFolder) foldersToScan.push(analyticsFolder);
+    if (ruweDataRoot) {
+      foldersToScan.push(ruweDataRoot); // scan root directly (files placed here)
+      // Also scan all subfolders (Organisch, Organsich, Advertenties, etc.)
+      const subfolders = await listFolders(accessToken, ruweDataRoot);
+      for (const sub of subfolders) foldersToScan.push(sub.id);
+    }
+
+    for (const folderId of foldersToScan) {
       const files = await listFiles(accessToken, folderId);
       for (const file of files) {
         const type = classifyFile(file.name);
         if (!type) continue;
         const p = detectPeriod(file.name) || 'onbekend';
         if (!scanResult.periods[p]) scanResult.periods[p] = [];
-        scanResult.periods[p].push({ id: file.id, name: file.name, type, mimeType: file.mimeType });
+        // Avoid duplicates
+        if (!scanResult.periods[p].find(x => x.id === file.id)) {
+          scanResult.periods[p].push({ id: file.id, name: file.name, type, mimeType: file.mimeType });
+        }
       }
     }
 
