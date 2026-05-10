@@ -274,6 +274,15 @@
       flex-direction: column;
       padding: 24px;
       overflow-y: auto;
+      transition: transform 0.3s ease, width 0.3s ease;
+    }
+
+    .chat-panel.collapsed {
+      width: 0;
+      border-left: none;
+      transform: translateX(100%);
+      padding: 0;
+      overflow: hidden;
     }
 
     .chat-panel h2 {
@@ -315,9 +324,9 @@
 
     .auth-grid {
       display: grid;
-      grid-template-columns: 1.2fr 1fr;
+      grid-template-columns: 0.5fr 1.5fr;
       min-height: calc(100vh - 56px);
-      gap: 24px;
+      gap: 32px;
       align-items: center;
       padding: 40px;
     }
@@ -326,17 +335,17 @@
       background: var(--accent);
       color: #fff;
       border-radius: 32px;
-      padding: 40px 36px;
+      padding: 32px 28px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      min-height: 420px;
+      min-height: 360px;
       box-shadow: var(--shadow);
     }
 
     .auth-panel h1 {
       margin: 0;
-      font-size: 46px;
+      font-size: 34px;
       line-height: 1.05;
       font-family: var(--font-serif);
       text-transform: uppercase;
@@ -556,6 +565,35 @@
       justify-content: center;
       min-height: calc(100vh - 40px);
     }
+
+    .chat-toggle-btn {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(255, 104, 59, 0.3);
+      transition: all 0.3s ease;
+      z-index: 999;
+    }
+
+    .chat-toggle-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 12px 32px rgba(255, 104, 59, 0.4);
+    }
+
+    .chat-toggle-btn.open {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -706,13 +744,15 @@
         </section>
       </main>
 
-      <aside class="chat-panel">
+      <aside class="chat-panel collapsed" id="chat-panel">
         <h2>Analyse Chat</h2>
         <p>De chat blijft voorlopig in de bestaande layout en wordt later in stap 6 uitgebreid met Metricool MCP + Meta Ads MCP.</p>
         <div class="chat-placeholder">Hier komt het chatpaneel met vragen en antwoorden over de data. Voor stap 1 is dit een stijlplaceholder.</div>
       </aside>
     </div>
   </div>
+
+  <button class="chat-toggle-btn" id="chat-toggle-btn" onclick="toggleChatPanel()">💬</button>
 
   <script>
     const state = {
@@ -780,6 +820,13 @@
 
     function toggleChat() {
       alert('Chatpaneel is een visuele placeholder in stap 1. Later wordt dit werkend gemaakt.');
+    }
+
+    function toggleChatPanel() {
+      const chatPanel = document.getElementById('chat-panel');
+      const toggleBtn = document.getElementById('chat-toggle-btn');
+      chatPanel.classList.toggle('collapsed');
+      toggleBtn.classList.toggle('open');
     }
   </script>
 </body>
