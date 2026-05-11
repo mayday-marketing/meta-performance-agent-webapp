@@ -160,6 +160,7 @@
     state.analysisCache = {};
     state.analysisLoading = false;
     state.analysisError = null;
+    state.chatMessages = [];
     dashboardInited = false;
     $("#brand-input").value = "";
     $("#code-input").value = "";
@@ -1534,6 +1535,7 @@
   /* ---------- Chat panel (mock, stap 6) ---------- */
 
   function renderChat() {
+    $("#chat-body").innerHTML = "";
     $("#chat-prompts").innerHTML = DATA.prompts.map(p => `<button class="chat-prompt" data-prompt="${p}">${p}</button>`).join("");
     $$("#chat-prompts .chat-prompt").forEach(b => { b.onclick = () => sendUserMsg(b.dataset.prompt); });
     $("#chat-form").onsubmit = (e) => {
@@ -1545,6 +1547,9 @@
     };
     if (state.chatMessages.length === 0) {
       pushBot({ text: `Hoi! Ik ben je <strong>Performance Agent</strong>. Ik kan vragen beantwoorden over je content en groei. Probeer een prompt hieronder, of stel je eigen vraag.` });
+    } else {
+      // Re-render bestaande geschiedenis in de DOM
+      for (const m of state.chatMessages) appendMsg(m.role === "bot" ? "bot" : "user", m.text, m.stats);
     }
   }
   function pushUser(text) { state.chatMessages.push({ role: "user", text }); appendMsg("user", text); }
@@ -1571,13 +1576,45 @@
     body.scrollTop = body.scrollHeight;
     return wrap;
   }
-  function sendUserMsg(text) {
+  async function sendUserMsg(text) {
+    if (!state.session?.token) return;
     pushUser(text);
+    const inputField = $("#chat-input-field");
+    const submitBtn = $("#chat-form button[type='submit']");
+    if (inputField) inputField.disabled = true;
+    if (submitBtn) submitBtn.disabled = true;
     const typing = appendTyping();
-    setTimeout(() => {
+
+    // Anthropic verwacht: eerste message met role "user". Onze welcome zit als
+    // "bot" vooraan in state.chatMessages — die slaan we over tot we de eerste user-turn hebben.
+    const apiMessages = [];
+    let started = false;
+    for (const m of state.chatMessages) {
+      if (!started && m.role === "bot") continue;
+      started = true;
+      apiMessages.push({ role: m.role === "bot" ? "assistant" : "user", content: m.text });
+    }
+
+    try {
+      const data = await apiPost("/api/chat", {
+        messages: apiMessages,
+        clientId: state.session.clientId,
+        token: state.session.token,
+        clientContext: state.session.clientContext || "",
+      });
       typing.remove();
-      pushBot({ text: `Chat-agent komt in stap 6. Voor nu reageer ik niet op data. (Je vroeg: <em>${text}</em>)` });
-    }, 600);
+      pushBot({ text: data.text || "Geen antwoord ontvangen." });
+    } catch (err) {
+      typing.remove();
+      pushBot({ text: `<em>Er ging iets mis: ${escapeHtml(err.message || "onbekende fout")}</em>` });
+      if (err.status === 401) {
+        clearSession();
+        setTimeout(() => showScreen("login-screen"), 600);
+      }
+    } finally {
+      if (inputField) { inputField.disabled = false; inputField.focus(); }
+      if (submitBtn) submitBtn.disabled = false;
+    }
   }
   function bindChatPanel() {
     $("#chat-toggle-btn").addEventListener("click", () => toggleChatPanel(true));
