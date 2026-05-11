@@ -24,7 +24,7 @@ function toMetricoolDate(dateStr) {
   return dateStr.replace(/-/g, '');
 }
 
-async function mc(path, mcToken, mcUserId, timeoutMs = 10000) {
+async function mc(path, mcToken, mcUserId, timeoutMs = 25000) {
   const sep = path.includes('?') ? '&' : '?';
   const url = `${BASE}${path}${sep}userId=${mcUserId}`;
   const ctrl = new AbortController();
