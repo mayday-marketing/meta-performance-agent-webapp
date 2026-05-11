@@ -3,621 +3,39 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>mayday marketing Social Performance Agent</title>
-  <style>
-    :root {
-      --background: #fff7fc;
-      --surface: #ffffff;
-      --surface-strong: #f7ebf6;
-      --text: #400745;
-      --text-muted: #6b5878;
-      --accent: #ff683b;
-      --accent-2: #351f69;
-      --border: rgba(52, 7, 69, 0.12);
-      --shadow: 0 24px 60px rgba(52, 7, 69, 0.08);
-      --radius: 24px;
-      --radius-sm: 14px;
-      --font-sans: "Instrument Sans", "Inter", system-ui, sans-serif;
-      --font-serif: "Instrument Serif", Georgia, serif;
-    }
-
-    @font-face {
-      font-family: "Instrument Serif";
-      font-style: normal;
-      font-weight: 400;
-      src: url("../FONTS/Instrument_Sans,Instrument_Serif/Instrument_Serif/InstrumentSerif-Regular.ttf") format("truetype");
-      font-display: swap;
-    }
-
-    @font-face {
-      font-family: "Instrument Sans";
-      font-style: normal;
-      font-weight: 400;
-      src: url("../FONTS/Instrument_Sans,Instrument_Serif/Instrument_Sans/InstrumentSans-VariableFont_wdth,wght.ttf") format("truetype");
-      font-display: swap;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: var(--font-sans);
-      background: var(--background);
-      color: var(--text);
-    }
-
-    button,
-    input,
-    textarea {
-      font: inherit;
-    }
-
-    button {
-      cursor: pointer;
-    }
-
-    .screen {
-      display: none;
-      min-height: 100vh;
-    }
-
-    .screen.on {
-      display: block;
-    }
-
-    .page-shell {
-      display: flex;
-      min-height: 100vh;
-      overflow: hidden;
-    }
-
-    .page-shell .sidebar {
-      width: 280px;
-      background: #fff;
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      padding: 32px 24px;
-      gap: 24px;
-    }
-
-    .sidebar .brand {
-      font-family: var(--font-serif);
-      font-size: 18px;
-      line-height: 1.1;
-      font-weight: 400;
-      color: var(--accent-2);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-    }
-
-    .sidebar .brand span {
-      display: block;
-      margin-top: 8px;
-      font-size: 12px;
-      color: var(--text-muted);
-      letter-spacing: 0;
-      text-transform: none;
-    }
-
-    .nav-links {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      flex: 1;
-    }
-
-    .nav-link {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 16px 18px;
-      border-radius: 16px;
-      border: 1px solid transparent;
-      background: #fff;
-      color: var(--text);
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      transition: all 0.2s ease;
-      border-color: transparent;
-    }
-
-    .nav-link.on,
-    .nav-link:hover {
-      background: rgba(255, 104, 59, 0.08);
-      border-color: rgba(255, 104, 59, 0.18);
-      color: var(--accent);
-    }
-
-    .sidebar .logout {
-      margin-top: auto;
-      padding: 14px 18px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: #fff;
-      color: var(--accent-2);
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .app-main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      background: var(--background);
-    }
-
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 24px 30px;
-      border-bottom: 1px solid var(--border);
-      background: #fff;
-    }
-
-    .topbar .title-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .topbar .title-group .tool-name {
-      font-family: var(--font-serif);
-      font-size: 20px;
-      font-weight: 400;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--accent-2);
-    }
-
-    .topbar .title-group .subtitle {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    .topbar .controls {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .date-filter {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 12px 16px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: var(--surface-strong);
-    }
-
-    .date-filter label {
-      font-size: 9px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
-    .date-filter input {
-      border: none;
-      background: transparent;
-      color: var(--accent-2);
-      font-size: 12px;
-      width: 110px;
-    }
-
-    .date-filter input:focus {
-      outline: none;
-    }
-
-    .topbar button {
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      background: #fff;
-      color: var(--accent-2);
-      padding: 12px 16px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    .topbar button.primary {
-      border-color: rgba(255, 104, 59, 0.22);
-      background: rgba(255, 104, 59, 0.1);
-      color: var(--accent);
-    }
-
-    .page-content {
-      padding: 30px;
-      flex: 1;
-      overflow-y: auto;
-    }
-
-    .page-panel {
-      max-width: 980px;
-      min-height: calc(100vh - 128px);
-      padding: 42px;
-      border-radius: 24px;
-      background: #fff;
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
-    }
-
-    .page-panel h1 {
-      font-family: var(--font-serif);
-      font-size: 30px;
-      letter-spacing: 0.08em;
-      margin-bottom: 14px;
-      color: var(--accent-2);
-    }
-
-    .page-panel p {
-      max-width: 660px;
-      line-height: 1.8;
-      color: var(--text-muted);
-      font-size: 14px;
-    }
-
-    .chat-panel {
-      width: 350px;
-      border-left: 1px solid var(--border);
-      background: #fff;
-      display: flex;
-      flex-direction: column;
-      padding: 24px;
-      overflow-y: auto;
-      transition: transform 0.3s ease, width 0.3s ease;
-    }
-
-    .chat-panel.collapsed {
-      width: 0;
-      border-left: none;
-      transform: translateX(100%);
-      padding: 0;
-      overflow: hidden;
-    }
-
-    .chat-panel h2 {
-      font-size: 12px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      margin-bottom: 6px;
-      color: var(--accent-2);
-    }
-
-    .chat-panel p {
-      margin: 0 0 18px;
-      color: var(--text-muted);
-      font-size: 13px;
-      line-height: 1.7;
-    }
-
-    .chat-placeholder {
-      padding: 18px;
-      border-radius: 18px;
-      background: var(--surface-strong);
-      color: var(--text-muted);
-      font-size: 13px;
-      line-height: 1.6;
-      min-height: 120px;
-    }
-
-    .auth-card,
-    .source-card,
-    .upload-card {
-      background: #fff;
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      box-shadow: var(--shadow);
-      padding: 28px;
-      max-width: 640px;
-      margin: 0 auto;
-    }
-
-    .auth-grid {
-      display: grid;
-      grid-template-columns: 0.5fr 1.5fr;
-      min-height: calc(100vh - 56px);
-      gap: 32px;
-      align-items: center;
-      padding: 40px;
-    }
-
-    .auth-panel {
-      background: var(--accent);
-      color: #fff;
-      border-radius: 32px;
-      padding: 32px 28px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      min-height: 360px;
-      box-shadow: var(--shadow);
-    }
-
-    .auth-panel h1 {
-      margin: 0;
-      font-size: 34px;
-      line-height: 1.05;
-      font-family: var(--font-serif);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-    }
-
-    .auth-panel p {
-      max-width: 380px;
-      color: rgba(255, 255, 255, 0.84);
-      line-height: 1.8;
-      font-size: 14px;
-    }
-
-    .auth-panel .note {
-      font-size: 11px;
-      letter-spacing: 0.12em;
-      color: rgba(255, 255, 255, 0.55);
-      text-transform: uppercase;
-    }
-
-    .login-form {
-      display: grid;
-      gap: 18px;
-      padding: 42px 36px;
-    }
-
-    .login-form h2 {
-      margin: 0;
-      font-size: 24px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--accent-2);
-    }
-
-    .login-form label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 11px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
-    .login-form input {
-      width: 100%;
-      padding: 14px 16px;
-      border-radius: 14px;
-      border: 1px solid rgba(64, 7, 69, 0.12);
-      background: #fff;
-      color: var(--accent-2);
-      outline: none;
-    }
-
-    .login-form .hint {
-      font-size: 13px;
-      color: var(--text-muted);
-      margin-top: -6px;
-    }
-
-    .login-form button {
-      margin-top: 12px;
-      width: 100%;
-      padding: 16px;
-      border: none;
-      border-radius: 16px;
-      background: var(--accent);
-      color: #fff;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
-    .source-grid {
-      display: grid;
-      gap: 18px;
-      margin-top: 22px;
-    }
-
-    .source-card {
-      border-color: transparent;
-      transition: transform 0.2s ease, border-color 0.2s ease;
-    }
-
-    .source-card:hover {
-      transform: translateY(-3px);
-      border-color: rgba(255, 104, 59, 0.18);
-    }
-
-    .source-card h3 {
-      margin: 0 0 10px;
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .source-card p {
-      margin: 0 0 16px;
-      color: var(--text-muted);
-      line-height: 1.7;
-      font-size: 13px;
-    }
-
-    .source-card ul {
-      margin: 0;
-      padding-left: 18px;
-      color: var(--text-muted);
-      font-size: 13px;
-      line-height: 1.7;
-    }
-
-    .source-card button,
-    .upload-action {
-      width: 100%;
-      margin-top: 14px;
-      padding: 14px 18px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: #fff;
-      color: var(--accent-2);
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .source-card button.primary,
-    .upload-action.primary {
-      background: var(--accent);
-      color: #fff;
-      border-color: transparent;
-    }
-
-    .upload-grid {
-      display: grid;
-      gap: 16px;
-      margin-top: 28px;
-    }
-
-    .upload-card {
-      display: grid;
-      gap: 12px;
-    }
-
-    .upload-card .label {
-      font-size: 11px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
-    .upload-card .title {
-      font-weight: 700;
-      color: var(--accent-2);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-    }
-
-    .upload-card .copy {
-      color: var(--text-muted);
-      font-size: 13px;
-      line-height: 1.7;
-    }
-
-    .upload-card .zone {
-      padding: 24px;
-      border-radius: 18px;
-      border: 1px dashed var(--border);
-      color: var(--text-muted);
-      text-align: center;
-      transition: border-color 0.2s ease, background 0.2s ease;
-    }
-
-    .upload-card .zone:hover {
-      border-color: var(--accent);
-      background: rgba(255, 104, 59, 0.06);
-    }
-
-    .unlock-note {
-      margin: 24px 0 0;
-      font-size: 12px;
-      color: var(--text-muted);
-      text-align: center;
-    }
-
-    .helper-note {
-      margin-top: 12px;
-      color: var(--text-muted);
-      font-size: 12px;
-    }
-
-    .info-label {
-      font-size: 11px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      margin-bottom: 6px;
-    }
-
-    .brand-pill {
-      background: rgba(53, 31, 105, 0.08);
-      color: var(--accent-2);
-      padding: 10px 14px;
-      border-radius: 999px;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      font-weight: 700;
-    }
-
-    .centered {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: calc(100vh - 40px);
-    }
-
-    .chat-toggle-btn {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      background: var(--accent);
-      border: none;
-      color: #fff;
-      font-size: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      box-shadow: 0 8px 24px rgba(255, 104, 59, 0.3);
-      transition: all 0.3s ease;
-      z-index: 999;
-    }
-
-    .chat-toggle-btn:hover {
-      transform: scale(1.1);
-      box-shadow: 0 12px 32px rgba(255, 104, 59, 0.4);
-    }
-
-    .chat-toggle-btn.open {
-      display: none;
-    }
-  </style>
+  <title>mayday marketing · Social Performance Agent</title>
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Tweak defaults — host can rewrite this block on disk
+    window.TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "accent": "orange",
+      "density": "cozy",
+      "theme": "light"
+    }/*EDITMODE-END*/;
+  </script>
 </head>
 <body>
-  <div id="login-screen" class="screen on">
+
+  <!-- ========================== LOGIN ========================== -->
+  <div id="login-screen" class="screen on" data-screen-label="Login">
     <div class="auth-card">
       <div class="auth-grid">
         <div class="auth-panel">
           <div>
-            <div class="brand">mayday marketing</div>
-            <h1>Social Performance Agent</h1>
+            <div style="opacity:0.85; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; font-weight:600;">mayday marketing</div>
+            <h1 style="margin-top:18px;">Social Performance Agent</h1>
           </div>
-          <div>
-            <p>Welkom bij de nieuwe UI-shell prototype. Eerst bevestigen we je klantnaam, daarna kiezen we de gewenste startflow.</p>
-          </div>
-          <div class="note">Stap 1 | UI-shell prototype</div>
+          <p>Welkom bij de UI-shell. Eerst bevestigen we je klantnaam, daarna kies je de gewenste startflow.</p>
+          <div class="note">Stap 1 · UI-shell prototype</div>
         </div>
         <div class="login-form">
           <div>
-            <h2>Login</h2>
+            <h2 style="letter-spacing: 1.56px">Login</h2>
             <p class="hint">Vul je merknaam en geheime code in om verder te gaan.</p>
           </div>
           <div>
             <label for="brand-input">Brand / klantnaam</label>
-            <input id="brand-input" type="text" placeholder="bv. mayday marketing">
+            <input id="brand-input" type="text" placeholder="bv. Studio Aurore">
           </div>
           <div>
             <label for="code-input">Logincode</label>
@@ -630,204 +48,327 @@
     </div>
   </div>
 
-  <div id="source-screen" class="screen">
+  <!-- ========================== SOURCE ========================== -->
+  <div id="source-screen" class="screen" data-screen-label="Source">
     <div class="auth-card">
       <div class="brand">mayday marketing</div>
       <div style="margin-top: 16px;">
-        <h1>Hoe wil je starten?</h1>
-        <p>Kies de gewenste onboardingflow voor de nieuwe tool.</p>
+        <h1 style="font-family:var(--font-serif); font-size:30px; font-weight:400; letter-spacing:0.04em; color:var(--text); margin:0 0 8px;">Hoe wil je starten?</h1>
+        <p class="muted" style="margin:0; font-size:14px; line-height:1.7;">Kies de gewenste onboardingflow voor de tool.</p>
       </div>
       <div class="source-grid">
         <div class="source-card">
           <h3>Automatisch</h3>
-          <p>Gebruik de live Metricool / Google Drive flow. Dit wordt de standaard voor klanten met een bestaande koppeling.</p>
+          <p>Gebruik de live Metricool / Google Drive flow. Standaard voor klanten met een bestaande koppeling.</p>
           <ul>
             <li>Directe dataflow</li>
             <li>Merkcontext uit Drive</li>
             <li>Beste UX voor terugkerende klanten</li>
           </ul>
-          <button class="primary" onclick="chooseSource('automatisch')">Kies Automatisch</button>
+          <button class="primary" onclick="chooseSource('automatisch')">Kies Automatisch →</button>
         </div>
         <div class="source-card">
           <h3>Handmatig</h3>
-          <p>Upload CSV-bestanden als fallback. Deze route blijft bestaan voor losse analyses en klanten zonder Metricool.</p>
+          <p>Upload CSV-bestanden als fallback. Blijft bestaan voor losse analyses en klanten zonder Metricool.</p>
           <ul>
             <li>Upload CSV</li>
             <li>Geen Drive-koppeling nodig</li>
             <li>Backward compatible</li>
           </ul>
-          <button onclick="chooseSource('handmatig')">Kies Handmatig</button>
+          <button onclick="chooseSource('handmatig')">Kies Handmatig →</button>
         </div>
       </div>
       <p class="unlock-note">Ingelogd als <strong id="source-brand">—</strong></p>
     </div>
   </div>
 
-  <div id="manual-screen" class="screen">
+  <!-- ========================== MANUAL UPLOAD ========================== -->
+  <div id="manual-screen" class="screen" data-screen-label="Manual upload">
     <div class="auth-card">
-      <div class="brand">mayday marketing</div>
-      <div style="margin-top: 16px; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:16px;">
         <div>
-          <h1>Handmatige upload</h1>
-          <p>Upload CSV-bestanden die later gebruikt worden in de dashboardflow.</p>
+          <div class="brand">mayday marketing</div>
+          <h1 style="font-family:var(--font-serif); font-size:28px; font-weight:400; letter-spacing:0.04em; color:var(--text); margin:14px 0 6px;">Handmatige upload</h1>
+          <p class="muted" style="margin:0; font-size:13px;">Upload CSV-bestanden die later gebruikt worden in de dashboardflow.</p>
         </div>
-        <button onclick="showScreen('source-screen')">← Terug</button>
+        <button class="btn" onclick="showScreen('source-screen')">← Terug</button>
       </div>
       <div class="upload-grid">
         <div class="upload-card">
           <div class="label">Verplicht</div>
-          <div class="title">📱 Instagram CSV</div>
-          <div class="copy">Upload een export van Instagram Reels of posts. Deze export dient als basis voor het prototype.</div>
-          <div class="zone" onclick="alert('Upload placeholder; geen echte upload in stap 1.')">Sleep hier of klik</div>
+          <div class="title">Instagram CSV</div>
+          <div class="copy">Export van Instagram Reels of posts. Basis voor het prototype.</div>
+          <div class="zone">Sleep hier of klik</div>
         </div>
         <div class="upload-card">
           <div class="label">Aanbevolen</div>
-          <div class="title">📘 Facebook CSV</div>
-          <div class="copy">Upload een export van Facebook content voor een bredere analyse.</div>
-          <div class="zone" onclick="alert('Upload placeholder; geen echte upload in stap 1.')">Sleep hier of klik</div>
+          <div class="title">Facebook CSV</div>
+          <div class="copy">Export van Facebook content voor een bredere analyse.</div>
+          <div class="zone">Sleep hier of klik</div>
         </div>
         <div class="upload-card">
           <div class="label">Aanbevolen</div>
-          <div class="title">💶 Meta Ads CSV</div>
-          <div class="copy">Upload een advertentie-export wanneer je campagne-inzicht wilt toevoegen.</div>
-          <div class="zone" onclick="alert('Upload placeholder; geen echte upload in stap 1.')">Sleep hier of klik</div>
+          <div class="title">Meta Ads CSV</div>
+          <div class="copy">Advertentie-export voor campagne-inzicht.</div>
+          <div class="zone">Sleep hier of klik</div>
         </div>
       </div>
       <button class="upload-action primary" onclick="showScreen('app-screen')">Dashboard openen →</button>
     </div>
   </div>
 
-  <div id="app-screen" class="screen">
+  <!-- ========================== APP ========================== -->
+  <div id="app-screen" class="screen" data-screen-label="Dashboard">
     <div class="page-shell">
+
+      <!-- Sidebar -->
       <aside class="sidebar">
-        <div class="brand">mayday marketing</div>
-        <div class="brand-pill" id="sidebar-brand">Klant: —</div>
-        <div class="nav-links">
-          <button class="nav-link on" data-page="overview" onclick="switchPage(event)">Overview</button>
-          <button class="nav-link" data-page="library" onclick="switchPage(event)">Library</button>
-          <button class="nav-link" data-page="analysis" onclick="switchPage(event)">Analysis</button>
+        <div class="brand">mayday<br><span>marketing · social agent</span></div>
+        <div class="brand-pill">
+          <span style="width:6px; height:6px; border-radius:50%; background:var(--good);"></span>
+          <span id="sidebar-brand">Klant: Studio Aurore</span>
         </div>
-        <button class="logout" onclick="logout()">Afmelden</button>
+
+        <div class="nav-links">
+          <div class="nav-section">Workspace</div>
+          <button class="nav-link on" data-page="overview">
+            <span class="icon">◐</span>
+            <span>Overview</span>
+          </button>
+          <button class="nav-link" data-page="library">
+            <span class="icon">▦</span>
+            <span>Library</span>
+            <span class="badge">14</span>
+          </button>
+          <button class="nav-link" data-page="analysis">
+            <span class="icon">✦</span>
+            <span>Analysis</span>
+          </button>
+
+          <div class="nav-section" style="margin-top:14px;">Connectors</div>
+          <button class="nav-link" disabled style="opacity:0.7; cursor:default;">
+            <span class="icon">◉</span>
+            <span>Metricool</span>
+            <span class="badge" style="background:rgba(47,143,95,0.16); color:var(--good);">Live</span>
+          </button>
+          <button class="nav-link" disabled style="opacity:0.7; cursor:default;">
+            <span class="icon">◉</span>
+            <span>Meta Ads</span>
+            <span class="badge" style="background:rgba(47,143,95,0.16); color:var(--good);">Live</span>
+          </button>
+          <button class="nav-link" disabled style="opacity:0.7; cursor:default;">
+            <span class="icon">◌</span>
+            <span>Google Drive</span>
+            <span class="badge">Soon</span>
+          </button>
+        </div>
+
+        <div id="sidebar-brand-sub" style="font-size:10px; color:var(--text-soft); letter-spacing:0.06em; padding:0 6px;">Connected · 4 mnd data</div>
+        <button class="logout" onclick="logout()">
+          <span style="font-size:14px;">↪</span>
+          Afmelden
+        </button>
       </aside>
 
+      <!-- Main -->
       <main class="app-main">
         <div class="topbar">
           <div class="title-group">
-            <div class="tool-name">mayday marketing Social Performance Agent</div>
-            <div class="subtitle">Dashboard shell met nieuwe branding en pagestructuur.</div>
+            <div class="crumbs"><span>Dashboard</span><span class="sep">/</span><span>Overview</span></div>
+            <h1 class="page-title">Overview</h1>
           </div>
           <div class="controls">
             <div class="date-filter">
-              <label for="from-date">Van</label>
-              <input id="from-date" type="date" value="2026-01-01">
-              <label for="to-date">Tot</label>
-              <input id="to-date" type="date" value="2026-04-30">
+              <label>Periode</label>
+              <input type="date" value="2026-01-01">
+              <span class="sep">→</span>
+              <input type="date" value="2026-04-30">
             </div>
-            <button class="primary" onclick="alert('Datumfilter is nog niet actief in deze prototype.')">Toepassen</button>
-            <button onclick="toggleChat()">Chat</button>
+            <button class="btn">⤓ Export</button>
+            <button class="btn primary" onclick="window.toggleChat()">
+              <span class="dot" style="background:#fff;"></span>
+              Vraag de Agent
+            </button>
           </div>
         </div>
 
         <section class="page-content">
-          <div id="page-overview" class="page-panel">
-            <h1>Hier komt Overview</h1>
-            <p>In deze pagina verschijnt later een performance overzicht met KPI-cards, growth metrics en sparklines. Voor stap 1 tonen we alleen de nieuwe shell en navigatie.</p>
+
+          <!-- ========== OVERVIEW PAGE ========== -->
+          <div id="page-overview" class="dash-page">
+            <div class="kpi-grid" id="kpi-grid"></div>
+
+            <div class="row-2">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2 class="panel-title">Performance over tijd</h2>
+                    <div class="panel-sub">Wekelijkse reach per kanaal · 1 jan – 30 apr 2026</div>
+                  </div>
+                  <div class="panel-actions">
+                    <div class="period-toggle">
+                      <button class="on">4 mnd</button>
+                      <button>30 dagen</button>
+                      <button>7 dagen</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="chart-legend" id="trend-legend"></div>
+                <div id="trend-chart" style="margin-top:10px;"></div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2 class="panel-title">Kanaal-mix</h2>
+                    <div class="panel-sub">Aandeel van totale reach</div>
+                  </div>
+                </div>
+                <div id="channel-mix" class="channel-mix"></div>
+
+                <div style="margin-top:24px; padding-top:18px; border-top:1px solid var(--border);">
+                  <div class="info-label" style="font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-soft); font-weight:700; margin-bottom:10px;">Posting cadens</div>
+                  <div id="cadence" class="cadence"></div>
+                  <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:10px; color:var(--text-soft); letter-spacing:0.06em;">
+                    <span>Minder</span>
+                    <span style="display:inline-flex; gap:3px; align-items:center;">
+                      <span style="width:10px; height:10px; border-radius:3px; background:var(--surface-strong);"></span>
+                      <span style="width:10px; height:10px; border-radius:3px; background:rgba(255,104,59,0.18);"></span>
+                      <span style="width:10px; height:10px; border-radius:3px; background:rgba(255,104,59,0.4);"></span>
+                      <span style="width:10px; height:10px; border-radius:3px; background:rgba(255,104,59,0.7);"></span>
+                      <span style="width:10px; height:10px; border-radius:3px; background:var(--accent);"></span>
+                    </span>
+                    <span>Meer</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div class="row-2" style="grid-template-columns: 1.2fr 0.8fr;">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2 class="panel-title">Top performers</h2>
+                    <div class="panel-sub">Best presterende posts in deze periode</div>
+                  </div>
+                  <button class="btn tiny" onclick="document.querySelector('[data-page=&quot;library&quot;]').click()">Bekijk alle →</button>
+                </div>
+                <div id="top-posts" class="top-posts"></div>
+              </section>
+
+              <section class="panel" style="background:linear-gradient(170deg, var(--accent-soft), transparent 70%); border-color:rgba(255,104,59,0.18);">
+                <div class="panel-header">
+                  <div>
+                    <h2 class="panel-title">Insight van de week</h2>
+                    <div class="panel-sub">Auto-gegenereerd door de Agent</div>
+                  </div>
+                </div>
+                <div style="font-family:var(--font-serif); font-size:24px; line-height:1.35; color:var(--text); letter-spacing:0.005em; text-wrap:pretty;">
+                  Reels met <em style="color:var(--accent);">achter de schermen</em> content drijven 1.8× meer engagement dan productfoto's — verdubbel de cadens in mei.
+                </div>
+                <div style="display:flex; gap:8px; margin-top:18px; flex-wrap:wrap;">
+                  <span class="brand-pill" style="background:var(--surface); color:var(--text);">Format · Reel</span>
+                  <span class="brand-pill" style="background:var(--surface); color:var(--text);">+47% engage</span>
+                </div>
+                <button class="btn primary" style="margin-top:18px; width:100%; justify-content:center;" onclick="window.toggleChat()">
+                  Bespreek met de Agent →
+                </button>
+              </section>
+            </div>
           </div>
-          <div id="page-library" class="page-panel" style="display:none;">
-            <h1>Hier komt Library</h1>
-            <p>Op de librarypagina komen straks de visuele contentcards met thumbnails, postdetails en filters voor IG, FB en paid content.</p>
+
+          <!-- ========== LIBRARY PAGE ========== -->
+          <div id="page-library" class="dash-page" style="display:none;">
+            <div class="lib-toolbar">
+              <div class="chip-row" id="lib-filters"></div>
+              <div style="display:flex; gap:10px; align-items:center;">
+                <span id="lib-count" style="font-size:11px; color:var(--text-soft); letter-spacing:0.06em; text-transform:uppercase; font-weight:700;">14 posts</span>
+                <div class="search-input">
+                  <input type="text" placeholder="Zoek in captions…">
+                </div>
+                <select id="lib-sort" class="btn" style="padding:9px 12px;">
+                  <option value="reach">Sorteer: Reach</option>
+                  <option value="engagement">Sorteer: Engagement</option>
+                  <option value="recent">Sorteer: Recent</option>
+                </select>
+                <div class="toggle-group" id="lib-view-toggle">
+                  <button data-view="grid" class="on">▦ Grid</button>
+                  <button data-view="table">☰ Tabel</button>
+                </div>
+              </div>
+            </div>
+            <div id="lib-results"></div>
           </div>
-          <div id="page-analysis" class="page-panel" style="display:none;">
-            <h1>Hier komt Analysis</h1>
-            <p>De analysispagina wordt later gevuld met inzichten, trends en reviewpunten. Nu ligt de focus op design en navigatie.</p>
+
+          <!-- ========== ANALYSIS PAGE ========== -->
+          <div id="page-analysis" class="dash-page" style="display:none;">
+            <div id="analysis-content"></div>
           </div>
+
         </section>
       </main>
 
+      <!-- Chat panel -->
       <aside class="chat-panel collapsed" id="chat-panel">
-        <h2>Analyse Chat</h2>
-        <p>De chat blijft voorlopig in de bestaande layout en wordt later in stap 6 uitgebreid met Metricool MCP + Meta Ads MCP.</p>
-        <div class="chat-placeholder">Hier komt het chatpaneel met vragen en antwoorden over de data. Voor stap 1 is dit een stijlplaceholder.</div>
+        <div class="chat-head">
+          <div>
+            <h2 class="title">Performance Agent</h2>
+            <div class="sub"><span class="dot"></span> Online · context: Studio Aurore</div>
+          </div>
+          <button class="close" id="chat-close-btn" title="Sluiten">×</button>
+        </div>
+        <div class="chat-body" id="chat-body"></div>
+        <div class="chat-prompts" id="chat-prompts"></div>
+        <form class="chat-input" id="chat-form">
+          <input id="chat-input-field" type="text" placeholder="Vraag iets over je data…" autocomplete="off">
+          <button type="submit">Stuur</button>
+        </form>
       </aside>
+
     </div>
   </div>
 
-  <button class="chat-toggle-btn" id="chat-toggle-btn" onclick="toggleChatPanel()">💬</button>
+  <!-- Floating chat toggle -->
+  <button class="chat-toggle-btn" id="chat-toggle-btn">
+    <span class="blip"></span>
+    Vraag de Agent
+  </button>
 
-  <script>
-    const state = {
-      brand: '',
-      page: 'overview'
-    };
+  <!-- Tweaks panel -->
+  <div class="tweaks-panel" id="tweaks-panel">
+    <h3>
+      Tweaks
+      <button id="tweaks-close">×</button>
+    </h3>
 
-    const loginButton = document.getElementById('login-button');
-    const brandInput = document.getElementById('brand-input');
-    const codeInput = document.getElementById('code-input');
-    const sourceBrand = document.getElementById('source-brand');
-    const sidebarBrand = document.getElementById('sidebar-brand');
+    <div class="tweaks-section">
+      <div class="tweaks-label">Accent kleur</div>
+      <div class="tweak-swatches">
+        <button class="tweak-swatch" data-tweak-accent="orange" data-c="orange" title="Mayday oranje"></button>
+        <button class="tweak-swatch" data-tweak-accent="purple" data-c="purple" title="Diep paars"></button>
+        <button class="tweak-swatch" data-tweak-accent="teal" data-c="teal" title="Teal"></button>
+        <button class="tweak-swatch" data-tweak-accent="rose" data-c="rose" title="Rosé"></button>
+      </div>
+    </div>
 
-    loginButton.addEventListener('click', () => {
-      const brand = brandInput.value.trim();
-      const code = codeInput.value.trim();
-      if (!brand || !code) {
-        alert('Vul zowel brandnaam als logincode in om door te gaan.');
-        return;
-      }
-      state.brand = brand;
-      sourceBrand.textContent = brand;
-      sidebarBrand.textContent = `Klant: ${brand}`;
-      showScreen('source-screen');
-    });
+    <div class="tweaks-section">
+      <div class="tweaks-label">Dichtheid</div>
+      <div class="tweak-row">
+        <button class="tweak-opt" data-tweak-density="cozy">Comfortabel</button>
+        <button class="tweak-opt" data-tweak-density="compact">Compact</button>
+      </div>
+    </div>
 
-    function showScreen(id) {
-      document.querySelectorAll('.screen').forEach((screen) => {
-        screen.classList.toggle('on', screen.id === id);
-      });
-    }
+    <div class="tweaks-section">
+      <div class="tweaks-label">Thema</div>
+      <div class="tweak-row">
+        <button class="tweak-opt" data-tweak-theme="light">Licht</button>
+        <button class="tweak-opt" data-tweak-theme="dark">Donker</button>
+      </div>
+    </div>
+  </div>
 
-    function chooseSource(type) {
-      if (type === 'handmatig') {
-        showScreen('manual-screen');
-      } else {
-        showScreen('app-screen');
-      }
-    }
-
-    function switchPage(event) {
-      const button = event.currentTarget;
-      const page = button.dataset.page;
-      state.page = page;
-      document.querySelectorAll('.nav-link').forEach((link) => {
-        link.classList.toggle('on', link === button);
-      });
-      document.getElementById('page-overview').style.display = page === 'overview' ? 'block' : 'none';
-      document.getElementById('page-library').style.display = page === 'library' ? 'block' : 'none';
-      document.getElementById('page-analysis').style.display = page === 'analysis' ? 'block' : 'none';
-    }
-
-    function logout() {
-      state.brand = '';
-      brandInput.value = '';
-      codeInput.value = '';
-      sourceBrand.textContent = '—';
-      sidebarBrand.textContent = 'Klant: —';
-      document.getElementById('page-overview').style.display = 'block';
-      document.getElementById('page-library').style.display = 'none';
-      document.getElementById('page-analysis').style.display = 'none';
-      document.querySelectorAll('.nav-link').forEach((link) => link.classList.toggle('on', link.dataset.page === 'overview'));
-      showScreen('login-screen');
-    }
-
-    function toggleChat() {
-      alert('Chatpaneel is een visuele placeholder in stap 1. Later wordt dit werkend gemaakt.');
-    }
-
-    function toggleChatPanel() {
-      const chatPanel = document.getElementById('chat-panel');
-      const toggleBtn = document.getElementById('chat-toggle-btn');
-      chatPanel.classList.toggle('collapsed');
-      toggleBtn.classList.toggle('open');
-    }
-  </script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
