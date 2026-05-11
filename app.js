@@ -165,10 +165,9 @@
       if (i % 4 === 0 || i === ts.weeks.length - 1) {
         xlabels += `<text x="${xAt(i)}" y="${h - 8}" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55">${wk}</text>`;
       }
-                  <td class="right">${p.performance || 'n/a'}</td>
+    });
 
     // Series paths (areas + lines)
-              ${renderBenchmarkRow(list)}
     let paths = "";
     ts.series.forEach((s, idx) => {
       const pathPts = s.values.map((v, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(2)},${yAt(v).toFixed(2)}`).join(" ");
