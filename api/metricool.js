@@ -63,7 +63,7 @@ module.exports = async (req, res) => {
     switch (action) {
 
       case 'getBrands': {
-        const data = await mc('/v2/brands', mcToken, mcUserId);
+        const data = await mc(`/admin/simpleProfiles?blogId=${mcUserId}`, mcToken, mcUserId);
         return res.status(200).json(data);
       }
 
