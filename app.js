@@ -321,6 +321,25 @@
     return "";
   }
 
+  const TYPE_LABELS = {
+    FEED_CAROUSEL_ALBUM: "Carrousel",
+    CAROUSEL_ALBUM: "Carrousel",
+    GRAPH_IMAGE: "Foto",
+    IMAGE: "Foto",
+    GRAPH_VIDEO: "Video",
+    VIDEO: "Video",
+    REELS: "Reel",
+    REEL: "Reel",
+    STORY: "Story",
+    STATUS: "Status",
+    LINK: "Link",
+  };
+  function friendlyType(raw, fallback) {
+    if (!raw) return fallback;
+    const k = String(raw).toUpperCase();
+    return TYPE_LABELS[k] || fallback;
+  }
+
   function normalizePost(raw, platform, defaultType) {
     if (!raw || typeof raw !== "object") return null;
     const published = raw.published || raw.created || raw.publishedAt || raw.start || raw.date;
@@ -340,10 +359,11 @@
       ? engagementRaw
       : (reach ? (interactions / reach) * 100 : 0);
     const ctr = reach ? (clicks / reach) * 100 : 0;
-    const caption = pickStr(raw, "text", "caption", "name", "description", "title") || "—";
-    const thumb = pickStr(raw, "imageUrl", "image", "thumbnail", "picture");
+    const caption = pickStr(raw, "text", "caption", "name", "description", "title", "message", "firstcomment") || "—";
+    const thumb = pickStr(raw, "imageUrl", "image", "thumbnail", "picture", "fullPicture", "mediaUrl");
     const url = pickStr(raw, "url", "permalink");
-    const type = pickStr(raw, "type") || defaultType;
+    const rawType = pickStr(raw, "type", "mediaType", "mediaProductType");
+    const type = friendlyType(rawType, defaultType);
 
     return {
       id: pickStr(raw, "id") || url || `${platform}-${published || Math.random()}`,
@@ -353,6 +373,16 @@
       interactions, engagement, ctr,
       caption, thumb, url,
     };
+  }
+
+  function aggregatePosts(posts) {
+    return posts.reduce((acc, p) => {
+      acc.reach += p.reach || 0;
+      acc.clicks += p.clicks || 0;
+      acc.interactions += p.interactions || 0;
+      acc.count += 1;
+      return acc;
+    }, { reach: 0, clicks: 0, interactions: 0, count: 0 });
   }
 
   function arrayOrEmpty(x) { return Array.isArray(x) ? x : []; }
@@ -366,32 +396,24 @@
     const allPosts = [...igPosts, ...igReels, ...fbPosts].filter(Boolean);
     const adsCampaigns = ads.filter(Boolean);
 
-    // KPI snapshots
-    const cur = raw.current || {};
-    const prv = raw.previous || {};
+    // Previous period posts — used for true period-over-period deltas.
+    const igPostsPrev = arrayOrEmpty(raw.postsPrev?.igPosts).map(p => normalizePost(p, "ig", "Post"));
+    const igReelsPrev = arrayOrEmpty(raw.postsPrev?.igReels).map(p => normalizePost(p, "ig", "Reel"));
+    const fbPostsPrev = arrayOrEmpty(raw.postsPrev?.fbPosts).map(p => normalizePost(p, "fb", "Post"));
+    const allPostsPrev = [...igPostsPrev, ...igReelsPrev, ...fbPostsPrev].filter(Boolean);
 
-    const reachCur = pick(cur.instagram, "reach", "impressionsUnique") + pick(cur.facebook, "reach", "impressionsUnique");
-    const reachPrv = pick(prv.instagram, "reach", "impressionsUnique") + pick(prv.facebook, "reach", "impressionsUnique");
+    // All KPIs derive from posts data — internally consistent with the trend chart.
+    const curAgg = aggregatePosts(allPosts);
+    const prvAgg = aggregatePosts(allPostsPrev);
 
-    const clicksCur = pick(cur.instagram, "linkClicks", "clicks", "profileClicks") + pick(cur.facebook, "clicks", "linkclicks");
-    const clicksPrv = pick(prv.instagram, "linkClicks", "clicks", "profileClicks") + pick(prv.facebook, "clicks", "linkclicks");
-
-    // Engagement rate fallback: derive from posts in current window.
-    const totalInteractions = allPosts.reduce((s, p) => s + p.interactions, 0);
-    const totalPostReach = allPosts.reduce((s, p) => s + p.reach, 0);
-    const erCur = totalPostReach ? (totalInteractions / totalPostReach) * 100 : 0;
-    // Previous period engagement rate from snapshot fields if present.
-    const erPrvFromValues = pick(prv.instagram, "engagement", "engagementRate", "engagement_rate");
-    const erPrv = erPrvFromValues > 1 ? erPrvFromValues : (erPrvFromValues > 0 ? erPrvFromValues * 100 : 0);
-
-    const postsCur = allPosts.length;
-    // No reliable "previous posts count" without another fetch — leave delta absent.
+    const erCur = curAgg.reach ? (curAgg.interactions / curAgg.reach) * 100 : 0;
+    const erPrv = prvAgg.reach ? (prvAgg.interactions / prvAgg.reach) * 100 : 0;
 
     const kpis = [
-      buildKpi("Totale reach", reachCur, reachPrv, fmt.k, "pct"),
+      buildKpi("Totale reach", curAgg.reach, prvAgg.reach, fmt.k, "pct"),
       buildKpi("Engagement rate", erCur, erPrv, (n) => fmt.pct(n), "pp"),
-      buildKpi("Posts gepubliceerd", postsCur, null, (n) => String(n), "pct"),
-      buildKpi("Clicks", clicksCur, clicksPrv, fmt.k, "pct"),
+      buildKpi("Posts gepubliceerd", curAgg.count, prvAgg.count, (n) => String(n), "pct"),
+      buildKpi("Clicks", curAgg.clicks, prvAgg.clicks, fmt.k, "pct"),
     ];
 
     // Sparklines: 12 weekly buckets of reach per KPI where applicable.
@@ -441,9 +463,10 @@
         id: p.id,
         caption: p.caption,
         type: p.type,
+        platform: p.platform,
         date: p.dateLabel,
         engagement: p.engagement.toFixed(1) + "%",
-        thumb: p.thumb || gradientFor(i),
+        thumb: p.thumb && p.thumb.startsWith("http") ? `url("${p.thumb}") center/cover` : (p.thumb || gradientFor(i)),
       }));
 
     // Cadence: 7 days × 13 weeks heatmap of post counts.
@@ -713,7 +736,7 @@
         <div class="meta">
           <div class="caption">${p.caption}</div>
           <div class="submeta">
-            <span>${p.type}</span><span>·</span><span>${p.date}</span><span>·</span><span>IG</span>
+            <span>${p.type}</span><span>·</span><span>${p.date}</span><span>·</span><span>${platformShort(p.platform)}</span>
           </div>
         </div>
         <div class="stat">

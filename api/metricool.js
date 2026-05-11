@@ -91,8 +91,8 @@ module.exports = async (req, res) => {
         return res.status(200).json(data);
       }
 
-      // One-shot dashboard fetch: current + previous KPI snapshots, posts in period,
-      // and ad campaigns. Runs all requests in parallel.
+      // One-shot dashboard fetch: posts (current + previous period) + ad campaigns.
+      // All KPIs are derived client-side from posts data.
       case 'getDashboard': {
         if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
         const start = toMetricoolDate(startDate);
@@ -102,32 +102,38 @@ module.exports = async (req, res) => {
         const startMs = Date.parse(startDate);
         const endMs = Date.parse(endDate);
         const windowMs = endMs - startMs;
+        const prevStartDate = new Date(startMs - windowMs - 86400000).toISOString().slice(0, 10);
         const prevEndDate = new Date(startMs - 86400000).toISOString().slice(0, 10);
+        const prevStart = toMetricoolDate(prevStartDate);
         const prevEnd = toMetricoolDate(prevEndDate);
 
-        const dateRange = `&start=${start}&end=${end}`;
+        const cur = `&start=${start}&end=${end}`;
+        const prv = `&start=${prevStart}&end=${prevEnd}`;
 
         const [
-          igCurrent, fbCurrent,
-          igPrevious, fbPrevious,
           igPosts, igReels, fbPosts,
+          igPostsPrev, igReelsPrev, fbPostsPrev,
           adsCampaigns,
         ] = await Promise.all([
-          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}&date=${end}`, mcToken, mcUserId), 'ig-values-current'),
-          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}&date=${end}`, mcToken, mcUserId), 'fb-values-current'),
-          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}&date=${prevEnd}`, mcToken, mcUserId), 'ig-values-previous'),
-          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}&date=${prevEnd}`, mcToken, mcUserId), 'fb-values-previous'),
-          safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId), 'ig-posts'),
-          safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId), 'ig-reels'),
-          safeCall(mc(`/stats/facebook/posts?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId), 'fb-posts'),
-          safeCall(mc(`/stats/facebookads/campaigns?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId), 'fb-ads-campaigns'),
+          safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${cur}`, mcToken, mcUserId), 'ig-posts'),
+          safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${cur}`, mcToken, mcUserId), 'ig-reels'),
+          safeCall(mc(`/stats/facebook/posts?blogId=${mcBlogId}${cur}`, mcToken, mcUserId), 'fb-posts'),
+          safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${prv}`, mcToken, mcUserId), 'ig-posts-prev'),
+          safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${prv}`, mcToken, mcUserId), 'ig-reels-prev'),
+          safeCall(mc(`/stats/facebook/posts?blogId=${mcBlogId}${prv}`, mcToken, mcUserId), 'fb-posts-prev'),
+          safeCall(mc(`/stats/facebookads/campaigns?blogId=${mcBlogId}${cur}`, mcToken, mcUserId), 'fb-ads-campaigns'),
         ]);
 
+        // Diagnostic: log shape of first post so we can map caption/thumb field names.
+        const sampleIg = Array.isArray(igPosts) ? igPosts[0] : (Array.isArray(igReels) ? igReels[0] : null);
+        const sampleFb = Array.isArray(fbPosts) ? fbPosts[0] : null;
+        if (sampleIg) console.log('[metricool] sample IG post keys:', Object.keys(sampleIg), 'sample:', JSON.stringify(sampleIg).slice(0, 800));
+        if (sampleFb) console.log('[metricool] sample FB post keys:', Object.keys(sampleFb), 'sample:', JSON.stringify(sampleFb).slice(0, 800));
+
         return res.status(200).json({
-          period: { startDate, endDate, prevStartDate: new Date(startMs - windowMs - 86400000).toISOString().slice(0, 10), prevEndDate },
-          current: { instagram: igCurrent, facebook: fbCurrent },
-          previous: { instagram: igPrevious, facebook: fbPrevious },
+          period: { startDate, endDate, prevStartDate, prevEndDate },
           posts: { igPosts, igReels, fbPosts },
+          postsPrev: { igPosts: igPostsPrev, igReels: igReelsPrev, fbPosts: fbPostsPrev },
           adsCampaigns,
         });
       }
