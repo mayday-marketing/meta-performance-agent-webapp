@@ -24,7 +24,7 @@
     page: "overview",
     libraryView: "grid",
     libraryFilter: "all",
-    librarySort: { key: "reach", dir: "desc" },
+    librarySort: { key: "date", dir: "desc" },
     chatMessages: [],
     period: { start: null, end: null },
     overview: null,                   // populated by fetchOverview()
@@ -680,6 +680,7 @@
     renderChannelMix();
     renderTopPosts();
     renderCadence();
+    renderLibrary();
   }
 
   function renderKpis() {
@@ -862,24 +863,67 @@
   // Expose retry for inline error button
   window.__refreshOverview = refreshOverview;
 
-  /* ---------- Library (mock, stap 4) ---------- */
+  /* ---------- Library (live data uit getDashboard) ---------- */
 
-  function platformLabel(p) { return { ig: "Instagram", fb: "Facebook", ads: "Meta Ads" }[p]; }
-  function platformShort(p) { return { ig: "IG", fb: "FB", ads: "ADS" }[p]; }
+  function platformLabel(p) { return { ig: "Instagram", fb: "Facebook", ads: "Meta Ads" }[p] || p; }
+  function platformShort(p) { return { ig: "IG", fb: "FB", ads: "ADS" }[p] || (p || "").toUpperCase(); }
+
+  // Tab-key per platform & type
+  function librarySourceOf(post) {
+    if (post.platform === "ig") return post.type === "Reel" ? "ig-reels" : "ig-posts";
+    if (post.platform === "fb") return "fb-posts";
+    if (post.platform === "ads") return "ads";
+    return "other";
+  }
+
+  function getLibraryAllPosts() {
+    if (!state.overview) return [];
+    const organic = arrayOrEmpty(state.overview.allPosts);
+    const ads = arrayOrEmpty(state.overview.adsCampaigns);
+    return [...organic, ...ads];
+  }
+
+  function getLibraryFilterDefs() {
+    const all = getLibraryAllPosts();
+    const count = (key) => all.filter(p => librarySourceOf(p) === key).length;
+    return [
+      { key: "all",      label: "Alle",            count: all.length },
+      { key: "ig-posts", label: "Instagram posts", count: count("ig-posts") },
+      { key: "ig-reels", label: "Instagram reels", count: count("ig-reels") },
+      { key: "fb-posts", label: "Facebook posts",  count: count("fb-posts") },
+      { key: "ads",      label: "Meta Ads",        count: count("ads") },
+    ];
+  }
+
+  function sortLibrary(list, key, dir) {
+    const sign = dir === "asc" ? 1 : -1;
+    return list.slice().sort((a, b) => {
+      let av = a[key], bv = b[key];
+      // Dates compare numerically; strings localeCompare; numbers subtract.
+      if (av instanceof Date) av = av.getTime();
+      if (bv instanceof Date) bv = bv.getTime();
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;            // nulls always last
+      if (bv == null) return -1;
+      if (typeof av === "string") return av.localeCompare(bv) * sign;
+      return (av - bv) * sign;
+    });
+  }
+
+  function computePerformance(post, avg) {
+    if (post.platform === "ads") return null;      // ads engagement is structureel anders
+    if (!avg || !post.engagement) return null;
+    if (post.engagement >= avg * 1.2) return "Good";
+    if (post.engagement <= avg * 0.7) return "Bad";
+    return "Average";
+  }
 
   function getFilteredLibrary() {
-    let list = DATA.library.slice();
-    if (state.libraryFilter !== "all") list = list.filter(p => p.platform === state.libraryFilter);
-    const dir = state.librarySort.dir === "asc" ? 1 : -1;
-    const field = state.librarySort.key;
-    list.sort((a, b) => {
-      const av = a[field], bv = b[field];
-      if (av == null) return 1 * dir;
-      if (bv == null) return -1 * dir;
-      if (typeof av === "string") return av.localeCompare(bv) * dir;
-      return (av - bv) * dir;
-    });
-    return list;
+    let list = getLibraryAllPosts();
+    if (state.libraryFilter !== "all") {
+      list = list.filter(p => librarySourceOf(p) === state.libraryFilter);
+    }
+    return sortLibrary(list, state.librarySort.key, state.librarySort.dir);
   }
 
   function performanceExplanation(level) {
@@ -914,36 +958,53 @@
     });
   }
 
+  function libThumb(post, idx, opts = {}) {
+    const fallback = gradientFor(idx);
+    const cleanUrl = safeUrl(post.thumb);
+    const isHttp = cleanUrl && cleanUrl.startsWith("http");
+    const imgClass = opts.imgClass || "post-thumb-img";
+    const imgHtml = isHttp
+      ? `<img class="${imgClass}" src="${escapeHtml(cleanUrl)}" referrerpolicy="no-referrer" loading="lazy" alt="" onerror="this.style.display='none'">`
+      : "";
+    return { bg: fallback, imgHtml };
+  }
+
   function renderLibraryGrid(list) {
-    return `<div class="lib-grid">${list.map(p => `
-      <article class="lib-card" data-post="${p.id}">
-        <div class="thumb thumb-pattern" style="background:${p.thumb}; aspect-ratio: 1;">
+    if (!list.length) return renderLibraryEmpty();
+    return `<div class="lib-grid">${list.map((p, i) => {
+      const t = libThumb(p, i);
+      return `
+      <article class="lib-card" data-post="${escapeHtml(p.id)}">
+        <div class="thumb thumb-pattern" style="background:${t.bg}">
+          ${t.imgHtml}
           <div class="pill-row">
-            <span class="pill">${platformShort(p.platform)} · ${p.type}</span>
-            <span class="pill engage">${p.engagement.toFixed(1)}%</span>
+            <span class="pill">${platformShort(p.platform)} · ${escapeHtml(p.type)}</span>
+            <span class="pill engage">${(p.engagement || 0).toFixed(1)}%</span>
           </div>
         </div>
         <div class="body">
-          <div class="caption">${p.caption}</div>
-          <div class="meta"><span>${p.date}</span><span>·</span><span>${p.type}</span></div>
+          <div class="caption">${escapeHtml(p.caption)}</div>
+          <div class="meta"><span>${escapeHtml(p.dateLabel)}</span><span>·</span><span>${escapeHtml(p.type)}</span></div>
           <div class="stats">
             <div class="s"><div class="n">${fmt.k(p.reach)}</div><div class="l">Reach</div></div>
-            <div class="s"><div class="n">${p.engagement.toFixed(1)}%</div><div class="l">Engage</div></div>
-            <div class="s"><div class="n">${p.ctr.toFixed(1)}%</div><div class="l">CTR</div></div>
+            <div class="s"><div class="n">${(p.engagement || 0).toFixed(1)}%</div><div class="l">Engage</div></div>
+            <div class="s"><div class="n">${(p.ctr || 0).toFixed(1)}%</div><div class="l">CTR</div></div>
           </div>
         </div>
-      </article>
-    `).join("")}</div>`;
+      </article>`;
+    }).join("")}</div>`;
   }
 
   function renderRetentionBlocks(retention) {
+    // Metricool API exposeert geen percentile retention per post in dashboard-endpoints.
+    // 5 inactieve blocks tonen behoudt de tabel-layout; data komt later via Meta Ads MCP.
     if (!retention) return `<div class="retention-row">${Array(5).fill('<span class="block inactive"></span>').join('')}</div>`;
     const checkpoints = [
-      { label: '3s', value: retention.p3, threshold: 3 },
+      { label: '3s',  value: retention.p3,  threshold: 3 },
       { label: '25%', value: retention.p25, threshold: 25 },
       { label: '50%', value: retention.p50, threshold: 50 },
       { label: '75%', value: retention.p75, threshold: 75 },
-      { label: '95%', value: retention.p95, threshold: 95 }
+      { label: '95%', value: retention.p95, threshold: 95 },
     ];
     return `<div class="retention-row">${checkpoints.map(cp =>
       `<span class="block ${cp.value >= cp.threshold ? 'active' : 'inactive'}" title="${cp.label}: ${cp.value}%"></span>`
@@ -954,9 +1015,10 @@
     if (!list.length) return '';
     const avg = (field) => Math.round(list.reduce((sum, item) => sum + (item[field] || 0), 0) / list.length);
     const avgPerf = list.reduce((sum, item) => sum + (item.engagement || 0), 0) / list.length;
-    const platformName = state.libraryFilter === 'all' ? 'Globaal gemiddelde' : `${platformLabel(state.libraryFilter)} gemiddelde`;
+    const filterLabel = getLibraryFilterDefs().find(f => f.key === state.libraryFilter)?.label || "Alle";
+    const platformName = state.libraryFilter === 'all' ? 'Globaal gemiddelde' : `${filterLabel} gemiddelde`;
     return `<tr class="benchmark-row">
-      <td>CLIENT BENCHMARK — ${platformName}</td><td></td><td></td><td></td>
+      <td>CLIENT BENCHMARK — ${escapeHtml(platformName)}</td><td></td><td></td><td></td>
       <td class="right">${fmt.int(avg('views'))}</td>
       <td class="right">${fmt.int(avg('reach'))}</td>
       <td class="right">${fmt.int(avg('likes'))}</td>
@@ -969,68 +1031,131 @@
     </tr>`;
   }
 
+  function sortArrow(field) {
+    if (state.librarySort.key !== field) return "";
+    return `<span class="sort-arrow">${state.librarySort.dir === "asc" ? "↑" : "↓"}</span>`;
+  }
+
   function renderLibraryTable(list) {
+    if (!list.length) return renderLibraryEmpty();
+    const avgEng = list.reduce((s, p) => s + (p.engagement || 0), 0) / list.length;
     return `<div class="lib-table"><table>
       <thead><tr>
         <th>Post</th>
-        <th class="sortable" data-sort="platform">Platform</th>
-        <th class="sortable" data-sort="type">Type</th>
-        <th class="sortable" data-sort="date">Datum</th>
-        <th class="right sortable" data-sort="views">Views</th>
-        <th class="right sortable" data-sort="reach">Reach</th>
-        <th class="right sortable" data-sort="likes">Likes</th>
-        <th class="right sortable" data-sort="comments">Comments</th>
-        <th class="right sortable" data-sort="shares">Shares</th>
-        <th class="right sortable" data-sort="saves">Saves</th>
+        <th class="sortable" data-sort="platform">Platform${sortArrow("platform")}</th>
+        <th class="sortable" data-sort="type">Type${sortArrow("type")}</th>
+        <th class="sortable" data-sort="date">Datum${sortArrow("date")}</th>
+        <th class="right sortable" data-sort="views">Views${sortArrow("views")}</th>
+        <th class="right sortable" data-sort="reach">Reach${sortArrow("reach")}</th>
+        <th class="right sortable" data-sort="likes">Likes${sortArrow("likes")}</th>
+        <th class="right sortable" data-sort="comments">Comments${sortArrow("comments")}</th>
+        <th class="right sortable" data-sort="shares">Shares${sortArrow("shares")}</th>
+        <th class="right sortable" data-sort="saves">Saves${sortArrow("saves")}</th>
         <th class="right">Retention</th>
-        <th class="right sortable" data-sort="engagement">Engage</th>
-        <th class="right sortable" data-sort="ctr">CTR</th>
+        <th class="right sortable" data-sort="engagement">Engage${sortArrow("engagement")}</th>
+        <th class="right sortable" data-sort="ctr">CTR${sortArrow("ctr")}</th>
         <th class="right">Performantie</th>
       </tr></thead>
       <tbody>
         ${renderBenchmarkRow(list)}
-        ${list.map(p => `
-          <tr data-post="${p.id}">
-            <td><span class="row-thumb thumb-pattern" style="background:${p.thumb}"></span><span class="row-caption">${p.caption}</span></td>
+        ${list.map((p, i) => {
+          const t = libThumb(p, i, { imgClass: "row-thumb-img" });
+          const performance = computePerformance(p, avgEng);
+          const perfHtml = performance
+            ? `<button class="perf-button ${performance.toLowerCase()}" data-performance="${performance}">${performance}</button>`
+            : `<span class="muted">n/a</span>`;
+          return `
+          <tr data-post="${escapeHtml(p.id)}">
+            <td><span class="row-thumb thumb-pattern" style="background:${t.bg}">${t.imgHtml}</span><span class="row-caption">${escapeHtml(p.caption)}</span></td>
             <td><span class="platform-tag ${p.platform}">${platformLabel(p.platform)}</span></td>
-            <td>${p.type}</td>
-            <td>${p.dateRange || p.date}</td>
+            <td>${escapeHtml(p.type)}</td>
+            <td>${escapeHtml(p.dateLabel)}</td>
             <td class="right">${fmt.int(p.views)}</td>
             <td class="right">${fmt.int(p.reach)}</td>
             <td class="right">${fmt.int(p.likes)}</td>
             <td class="right">${fmt.int(p.comments)}</td>
             <td class="right">${fmt.int(p.shares)}</td>
             <td class="right">${fmt.int(p.saves)}</td>
-            <td class="right">${renderRetentionBlocks(p.retention)}</td>
-            <td class="right">${p.engagement.toFixed(1)}%</td>
-            <td class="right">${p.ctr.toFixed(1)}%</td>
-            <td class="right"><button class="perf-button ${p.performance ? p.performance.toLowerCase() : ''}" data-performance="${p.performance || 'Average'}">${p.performance || 'n/a'}</button></td>
-          </tr>
-        `).join("")}
+            <td class="right">${renderRetentionBlocks(null)}</td>
+            <td class="right">${(p.engagement || 0).toFixed(1)}%</td>
+            <td class="right">${(p.ctr || 0).toFixed(1)}%</td>
+            <td class="right">${perfHtml}</td>
+          </tr>`;
+        }).join("")}
       </tbody>
     </table></div>`;
   }
 
+  function renderLibraryEmpty() {
+    return `<div class="panel" style="text-align:center; padding:48px 24px;">
+      <p class="muted" style="margin:0;">Geen posts gevonden in deze periode.</p>
+    </div>`;
+  }
+
+  function renderLibrarySkeleton() {
+    return `<div class="lib-grid">${Array(8).fill(`
+      <article class="lib-card skeleton">
+        <div class="thumb skel-line" style="aspect-ratio:1; border-radius:0;"></div>
+        <div class="body">
+          <div class="skel-line" style="width:80%; height:11px;"></div>
+          <div class="skel-line" style="width:50%; height:9px; margin-top:6px;"></div>
+        </div>
+      </article>
+    `).join("")}</div>`;
+  }
+
   function renderLibrary() {
-    $("#lib-filters").innerHTML = DATA.libraryFilters.map(f => `
+    const filtersEl = $("#lib-filters");
+    const resultsEl = $("#lib-results");
+    const countEl   = $("#lib-count");
+    const sortEl    = $("#lib-sort");
+    if (!filtersEl || !resultsEl) return;
+
+    // Filter chips — derived counts from live data.
+    const defs = getLibraryFilterDefs();
+    filtersEl.innerHTML = defs.map(f => `
       <button class="chip ${state.libraryFilter === f.key ? "on" : ""}" data-filter="${f.key}">
         ${f.label} <span class="count">${f.count}</span>
       </button>
     `).join("");
     $$("#lib-filters .chip").forEach(b => {
-      b.addEventListener("click", () => { state.libraryFilter = b.dataset.filter; renderLibrary(); });
+      b.addEventListener("click", () => {
+        state.libraryFilter = b.dataset.filter;
+        renderLibrary();
+      });
     });
-    $("#lib-sort").value = state.librarySort.key;
-    $("#lib-sort").onchange = (e) => { state.librarySort.key = e.target.value; renderLibrary(); };
+
+    // Sort dropdown — sync to current state, default desc op key-change.
+    if (sortEl) {
+      sortEl.value = state.librarySort.key;
+      sortEl.onchange = (e) => {
+        state.librarySort.key = e.target.value;
+        state.librarySort.dir = "desc";
+        renderLibrary();
+      };
+    }
     $$("#lib-view-toggle button").forEach(b => {
       b.classList.toggle("on", b.dataset.view === state.libraryView);
       b.onclick = () => { state.libraryView = b.dataset.view; renderLibrary(); };
     });
+
+    // Loading / error states (overview owns het foutbericht — library toont enkel skeleton/lege staat).
+    if (state.overviewError && !state.overview) {
+      resultsEl.innerHTML = `<div class="panel"><p class="muted" style="margin:0;">Library is niet beschikbaar zolang het dashboard niet laadt.</p></div>`;
+      if (countEl) countEl.textContent = "—";
+      return;
+    }
+    if (state.overviewLoading || !state.overview) {
+      resultsEl.innerHTML = renderLibrarySkeleton();
+      if (countEl) countEl.textContent = "…";
+      return;
+    }
+
     const list = getFilteredLibrary();
-    $("#lib-results").innerHTML = state.libraryView === "grid"
+    resultsEl.innerHTML = state.libraryView === "grid"
       ? renderLibraryGrid(list)
       : renderLibraryTable(list);
-    $("#lib-count").textContent = `${list.length} posts`;
+    if (countEl) countEl.textContent = `${list.length} posts`;
     bindLibraryInteractions();
   }
 
