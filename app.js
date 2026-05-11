@@ -804,10 +804,12 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindLogin();
     bindTweaks();
-    // Pre-fill demo brand
+    state.brand = DATA.brand;
     $("#brand-input").value = DATA.brand;
     $("#code-input").value = "agent123";
     $("#sidebar-brand").textContent = `Klant: ${DATA.brand}`;
+    // TODO: vervang door echte auth bij stap 3 — tijdelijk login overgeslagen
+    showScreen("app-screen");
   });
 
 })();
