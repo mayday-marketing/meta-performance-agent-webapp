@@ -319,8 +319,8 @@
       const ads = arrayOrEmpty(result.adsCampaigns);
       state.overview = transformDashboard(dashboardRaw, ads);
       state.overview._rawDashboard = dashboardRaw;
-      renderTrendChart();
-      renderChannelMix();
+      renderOverview(); // Re-render all panels: KPIs, trend, channel mix, top posts, cadence
+
     } catch (err) {
       if (myId !== adsFetchId) return;
       // Silent fail — keep ads-line at 0, no user-facing error.
@@ -398,6 +398,9 @@
     const ts = pick(raw, "timestamp");
     const published = ts || raw.created || raw.published || raw.publishedAt || raw.start || raw.date;
     const date = published ? new Date(published) : null;
+    // Ad-campaign specific: active period [start, stop]. Posts will have these as 0.
+    const startMs = pick(raw, "start");
+    const stopMs = pick(raw, "stop") || pick(raw, "updated");
     const reach = pick(raw, "reach", "impressionsUnique");
     const impressions = pick(raw, "impressions");
     const likes = pick(raw, "likes", "reactions");
@@ -425,10 +428,28 @@
       id: pickStr(raw, "id", "postId") || url || `${platform}-${published || Math.random()}`,
       platform, type,
       date, dateLabel: date ? fmt.dateNL(date) : "—",
+      startMs, stopMs,
       reach, impressions, likes, comments, shares, saves, clicks, views,
       interactions, engagement, ctr,
       caption, thumb, url,
     };
+  }
+
+  // Pro-rata reach voor ads-campagnes binnen een datumbereik.
+  // Een campagne die van mrt 2025 tot mei 2026 liep krijgt voor een feb-mei 2026 window
+  // alleen het deel reach toegekend dat met het window overlapt.
+  function adsReachInRange(campaigns, rangeStartMs, rangeEndMs) {
+    let total = 0;
+    for (const c of campaigns) {
+      if (!c.startMs || !c.stopMs || c.stopMs <= c.startMs) continue;
+      const overlapStart = Math.max(c.startMs, rangeStartMs);
+      const overlapEnd = Math.min(c.stopMs, rangeEndMs);
+      if (overlapEnd <= overlapStart) continue;
+      const totalMs = c.stopMs - c.startMs;
+      const overlapMs = overlapEnd - overlapStart;
+      total += (c.reach || 0) * (overlapMs / totalMs);
+    }
+    return Math.round(total);
   }
 
   function aggregatePosts(posts) {
@@ -462,11 +483,19 @@
     const curAgg = aggregatePosts(allPosts);
     const prvAgg = aggregatePosts(allPostsPrev);
 
+    // Pro-rata ads reach for both periods so the delta blijft apples-to-apples.
+    const periodStartMs = new Date(raw.period.startDate).getTime();
+    const periodEndMs = new Date(raw.period.endDate).getTime() + 86400000 - 1;
+    const prevStartMs = new Date(raw.period.prevStartDate).getTime();
+    const prevEndMs = new Date(raw.period.prevEndDate).getTime() + 86400000 - 1;
+    const adsReachCur = adsReachInRange(adsCampaigns, periodStartMs, periodEndMs);
+    const adsReachPrv = adsReachInRange(adsCampaigns, prevStartMs, prevEndMs);
+
     const erCur = curAgg.reach ? (curAgg.interactions / curAgg.reach) * 100 : 0;
     const erPrv = prvAgg.reach ? (prvAgg.interactions / prvAgg.reach) * 100 : 0;
 
     const kpis = [
-      buildKpi("Totale reach", curAgg.reach, prvAgg.reach, fmt.k, "pct"),
+      buildKpi("Totale reach", curAgg.reach + adsReachCur, prvAgg.reach + adsReachPrv, fmt.k, "pct"),
       buildKpi("Engagement rate", erCur, erPrv, (n) => fmt.pct(n), "pp"),
       buildKpi("Posts gepubliceerd", curAgg.count, prvAgg.count, (n) => String(n), "pct"),
       buildKpi("Clicks", curAgg.clicks, prvAgg.clicks, fmt.k, "pct"),
@@ -489,7 +518,7 @@
     const trendWeeks = enumerateWeeks(raw.period.startDate, raw.period.endDate);
     const trendIG = trendWeeks.map(w => sumPostsField([...igPosts, ...igReels].filter(Boolean), w, "reach"));
     const trendFB = trendWeeks.map(w => sumPostsField(fbPosts.filter(Boolean), w, "reach"));
-    const trendAds = trendWeeks.map(w => sumAdsReachInWeek(adsCampaigns, w));
+    const trendAds = trendWeeks.map(w => adsReachInWeek(adsCampaigns, w));
 
     const timeseries = {
       weeks: trendWeeks.map((w, i) => `wk ${i + 1}`),
@@ -500,10 +529,10 @@
       ],
     };
 
-    // Channel mix
-    const igReach = trendIG.reduce((s, v) => s + v, 0);
-    const fbReach = trendFB.reduce((s, v) => s + v, 0);
-    const adsReach = trendAds.reduce((s, v) => s + v, 0);
+    // Channel mix — independent of week-bucketing. Real period totals.
+    const igReach = [...igPosts, ...igReels].filter(Boolean).reduce((s, p) => s + (p.reach || 0), 0);
+    const fbReach = fbPosts.filter(Boolean).reduce((s, p) => s + (p.reach || 0), 0);
+    const adsReach = adsReachCur; // reuse from KPI calc above
     const totalChannelReach = igReach + fbReach + adsReach || 1;
     const channels = [
       { label: "Instagram", color: "#ff683b", value: Math.round((igReach / totalChannelReach) * 100) },
@@ -517,9 +546,7 @@
       .slice(0, 5)
       .map((p, i) => {
         const cleanUrl = safeUrl(p.thumb);
-        const thumb = cleanUrl && cleanUrl.startsWith("http")
-          ? `url("${cleanUrl}") center/cover, ${gradientFor(i)}`
-          : (p.thumb || gradientFor(i));
+        const isHttp = cleanUrl && cleanUrl.startsWith("http");
         return {
           id: p.id,
           caption: p.caption,
@@ -527,7 +554,8 @@
           platform: p.platform,
           date: p.dateLabel,
           engagement: p.engagement.toFixed(1) + "%",
-          thumb,
+          imageUrl: isHttp ? cleanUrl : null,
+          fallbackBg: gradientFor(i),
         };
       });
 
@@ -596,15 +624,10 @@
   function countPostsInWeek(posts, week) {
     return posts.reduce((s, p) => s + (p.date && inWeek(p.date, week) ? 1 : 0), 0);
   }
-  function sumAdsReachInWeek(campaigns, week) {
-    let total = 0;
-    for (const c of campaigns) {
-      if (!c.date) continue;
-      const cStart = c.date;
-      // No reliable end date; assume single-week attribution at start.
-      if (inWeek(cStart, week)) total += c.reach || 0;
-    }
-    return total;
+  function adsReachInWeek(campaigns, week) {
+    // Day after week.end to make the range inclusive of the last day.
+    const endMs = week.end.getTime() + 86400000 - 1;
+    return adsReachInRange(campaigns, week.start.getTime(), endMs);
   }
 
   function gradientFor(i) {
@@ -794,7 +817,8 @@
     }
     root.innerHTML = list.map((p, i) => `
       <div class="top-post" data-post="${escapeHtml(p.id)}">
-        <div class="post-thumb thumb-pattern" style="background:${p.thumb}">
+        <div class="post-thumb thumb-pattern" style="background:${p.fallbackBg}">
+          ${p.imageUrl ? `<img class="post-thumb-img" src="${escapeHtml(p.imageUrl)}" referrerpolicy="no-referrer" loading="lazy" alt="" onerror="this.style.display='none'">` : ""}
           <span class="glyph">${i + 1}</span>
           ${p.type === "Reel" ? `<span class="play-icon">▶</span>` : ""}
         </div>

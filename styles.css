@@ -1196,6 +1196,26 @@ a { color: inherit; text-decoration: none; }
     radial-gradient(circle at 30% 30%, rgba(255,255,255,0.25), transparent 40%),
     radial-gradient(circle at 70% 70%, rgba(0,0,0,0.18), transparent 50%);
   pointer-events: none;
+  z-index: 2;
+}
+/* Hide brand-pattern overlay when a real image is rendered on top */
+.thumb-pattern:has(.post-thumb-img)::before { display: none; }
+
+/* Real post thumbnails from Metricool (Instagram CDN, etc.) */
+.post-thumb-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+  display: block;
+}
+.post-thumb .glyph,
+.post-thumb .play-icon {
+  position: relative;
+  z-index: 3;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.5);
 }
 
 /* Platform icon glyph (text) */
