@@ -271,6 +271,8 @@
 
   /* ---------- Overview: fetch + render ---------- */
 
+  let adsFetchId = 0;
+
   async function refreshOverview() {
     if (!state.session?.hasMetricool) {
       state.overviewError = "Voor deze klant is geen Metricool-koppeling geconfigureerd.";
@@ -281,19 +283,25 @@
     state.overviewError = null;
     renderOverview();
 
+    // Cancel any in-flight ads fetch from previous period.
+    adsFetchId++;
+
     try {
       const raw = await metricoolCall("getDashboard", {
         startDate: state.period.start,
         endDate: state.period.end,
       });
-      state.overview = transformDashboard(raw);
+      state.overview = transformDashboard(raw, null); // ads still loading
+      state.overview._rawDashboard = raw;
       state.overviewLoading = false;
       renderOverview();
+
+      // Fire ads-campaigns async — don't block dashboard.
+      refreshAdsCampaigns(state.period.start, state.period.end);
     } catch (err) {
       state.overviewLoading = false;
       state.overviewError = err.message || "Onbekende fout bij laden Metricool-data.";
       if (err.status === 401) {
-        // Session expired — bounce to login.
         clearSession();
         setTimeout(() => showScreen("login-screen"), 600);
       }
@@ -301,7 +309,47 @@
     }
   }
 
+  async function refreshAdsCampaigns(startDate, endDate) {
+    const myId = ++adsFetchId;
+    try {
+      const result = await metricoolCall("getAdsCampaigns", { startDate, endDate });
+      if (myId !== adsFetchId) return; // outdated fetch — discard
+      if (!state.overview?._rawDashboard) return;
+      const dashboardRaw = state.overview._rawDashboard;
+      const ads = arrayOrEmpty(result.adsCampaigns);
+      state.overview = transformDashboard(dashboardRaw, ads);
+      state.overview._rawDashboard = dashboardRaw;
+      renderTrendChart();
+      renderChannelMix();
+    } catch (err) {
+      if (myId !== adsFetchId) return;
+      // Silent fail — keep ads-line at 0, no user-facing error.
+      console.warn("[ads] fetch failed:", err.message);
+      if (state.overview) {
+        state.overview.adsLoading = false;
+        renderTrendChart();
+      }
+    }
+  }
+
   /* ---------- Metricool → app shape ---------- */
+
+  function escapeHtml(s) {
+    if (s == null) return "";
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+  function safeUrl(s) {
+    // Block javascript:, data: (except images), and weird schemes.
+    if (!s) return "";
+    const lower = s.toLowerCase().trim();
+    if (lower.startsWith("javascript:") || lower.startsWith("vbscript:")) return "";
+    return s.replace(/["'<>]/g, "");
+  }
 
   function safe(obj) { return (obj && !obj.__error) ? obj : {}; }
   function pick(obj, ...keys) {
@@ -324,8 +372,10 @@
   const TYPE_LABELS = {
     FEED_CAROUSEL_ALBUM: "Carrousel",
     CAROUSEL_ALBUM: "Carrousel",
+    CAROUSEL: "Carrousel",
     GRAPH_IMAGE: "Foto",
     IMAGE: "Foto",
+    PHOTO: "Foto",
     GRAPH_VIDEO: "Video",
     VIDEO: "Video",
     REELS: "Reel",
@@ -333,6 +383,8 @@
     STORY: "Story",
     STATUS: "Status",
     LINK: "Link",
+    SHARE: "Share",
+    EVENT: "Event",
   };
   function friendlyType(raw, fallback) {
     if (!raw) return fallback;
@@ -342,7 +394,9 @@
 
   function normalizePost(raw, platform, defaultType) {
     if (!raw || typeof raw !== "object") return null;
-    const published = raw.published || raw.created || raw.publishedAt || raw.start || raw.date;
+    // Prefer numeric Unix-ms timestamp (locale-safe); fall back to string dates.
+    const ts = pick(raw, "timestamp");
+    const published = ts || raw.created || raw.published || raw.publishedAt || raw.start || raw.date;
     const date = published ? new Date(published) : null;
     const reach = pick(raw, "reach", "impressionsUnique");
     const impressions = pick(raw, "impressions");
@@ -359,14 +413,16 @@
       ? engagementRaw
       : (reach ? (interactions / reach) * 100 : 0);
     const ctr = reach ? (clicks / reach) * 100 : 0;
-    const caption = pickStr(raw, "text", "caption", "name", "description", "title", "message", "firstcomment") || "—";
+    // IG: content. FB: text. Other fallbacks for safety.
+    const captionRaw = pickStr(raw, "content", "text", "caption", "name", "description", "title", "message", "firstcomment");
+    const caption = captionRaw ? captionRaw.replace(/\s+/g, " ").trim() : "—";
     const thumb = pickStr(raw, "imageUrl", "image", "thumbnail", "picture", "fullPicture", "mediaUrl");
-    const url = pickStr(raw, "url", "permalink");
+    const url = pickStr(raw, "url", "permalinkUrl", "permalink", "link");
     const rawType = pickStr(raw, "type", "mediaType", "mediaProductType");
     const type = friendlyType(rawType, defaultType);
 
     return {
-      id: pickStr(raw, "id") || url || `${platform}-${published || Math.random()}`,
+      id: pickStr(raw, "id", "postId") || url || `${platform}-${published || Math.random()}`,
       platform, type,
       date, dateLabel: date ? fmt.dateNL(date) : "—",
       reach, impressions, likes, comments, shares, saves, clicks, views,
@@ -387,11 +443,11 @@
 
   function arrayOrEmpty(x) { return Array.isArray(x) ? x : []; }
 
-  function transformDashboard(raw) {
+  function transformDashboard(raw, adsCampaignsRaw) {
     const igPosts = arrayOrEmpty(raw.posts?.igPosts).map(p => normalizePost(p, "ig", "Post"));
     const igReels = arrayOrEmpty(raw.posts?.igReels).map(p => normalizePost(p, "ig", "Reel"));
     const fbPosts = arrayOrEmpty(raw.posts?.fbPosts).map(p => normalizePost(p, "fb", "Post"));
-    const ads = arrayOrEmpty(raw.adsCampaigns).map(c => normalizePost(c, "ads", "Campagne"));
+    const ads = arrayOrEmpty(adsCampaignsRaw).map(c => normalizePost(c, "ads", "Campagne"));
 
     const allPosts = [...igPosts, ...igReels, ...fbPosts].filter(Boolean);
     const adsCampaigns = ads.filter(Boolean);
@@ -459,15 +515,21 @@
     const topPosts = [...allPosts]
       .sort((a, b) => b.engagement - a.engagement)
       .slice(0, 5)
-      .map((p, i) => ({
-        id: p.id,
-        caption: p.caption,
-        type: p.type,
-        platform: p.platform,
-        date: p.dateLabel,
-        engagement: p.engagement.toFixed(1) + "%",
-        thumb: p.thumb && p.thumb.startsWith("http") ? `url("${p.thumb}") center/cover` : (p.thumb || gradientFor(i)),
-      }));
+      .map((p, i) => {
+        const cleanUrl = safeUrl(p.thumb);
+        const thumb = cleanUrl && cleanUrl.startsWith("http")
+          ? `url("${cleanUrl}") center/cover, ${gradientFor(i)}`
+          : (p.thumb || gradientFor(i));
+        return {
+          id: p.id,
+          caption: p.caption,
+          type: p.type,
+          platform: p.platform,
+          date: p.dateLabel,
+          engagement: p.engagement.toFixed(1) + "%",
+          thumb,
+        };
+      });
 
     // Cadence: 7 days × 13 weeks heatmap of post counts.
     const cadenceWeeks = enumerateWeeks(raw.period.startDate, raw.period.endDate, 13);
@@ -489,6 +551,7 @@
       cadence,
       allPosts,
       adsCampaigns,
+      adsLoading: !adsCampaignsRaw,
       _raw: raw,
     };
   }
@@ -702,9 +765,11 @@
         ${grid}${ylabels}${xlabels}${paths}
       </svg>
     `;
-    legend.innerHTML = ts.series.map(s =>
-      `<span class="item"><span class="swatch" style="background:${s.color}"></span>${s.label}</span>`
-    ).join("");
+    const adsLoading = state.overview.adsLoading;
+    legend.innerHTML = ts.series.map(s => {
+      const suffix = (s.label === "Meta Ads" && adsLoading) ? ` <em style="opacity:0.55; font-style:normal;">· laden…</em>` : "";
+      return `<span class="item"><span class="swatch" style="background:${s.color}"></span>${s.label}${suffix}</span>`;
+    }).join("");
   }
 
   function renderChannelMix() {
@@ -728,15 +793,15 @@
       return;
     }
     root.innerHTML = list.map((p, i) => `
-      <div class="top-post" data-post="${p.id}">
+      <div class="top-post" data-post="${escapeHtml(p.id)}">
         <div class="post-thumb thumb-pattern" style="background:${p.thumb}">
           <span class="glyph">${i + 1}</span>
           ${p.type === "Reel" ? `<span class="play-icon">▶</span>` : ""}
         </div>
         <div class="meta">
-          <div class="caption">${p.caption}</div>
+          <div class="caption">${escapeHtml(p.caption)}</div>
           <div class="submeta">
-            <span>${p.type}</span><span>·</span><span>${p.date}</span><span>·</span><span>${platformShort(p.platform)}</span>
+            <span>${escapeHtml(p.type)}</span><span>·</span><span>${p.date}</span><span>·</span><span>${platformShort(p.platform)}</span>
           </div>
         </div>
         <div class="stat">

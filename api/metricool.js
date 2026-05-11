@@ -113,7 +113,6 @@ module.exports = async (req, res) => {
         const [
           igPosts, igReels, fbPosts,
           igPostsPrev, igReelsPrev, fbPostsPrev,
-          adsCampaigns,
         ] = await Promise.all([
           safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${cur}`, mcToken, mcUserId), 'ig-posts'),
           safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${cur}`, mcToken, mcUserId), 'ig-reels'),
@@ -121,21 +120,31 @@ module.exports = async (req, res) => {
           safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${prv}`, mcToken, mcUserId), 'ig-posts-prev'),
           safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${prv}`, mcToken, mcUserId), 'ig-reels-prev'),
           safeCall(mc(`/stats/facebook/posts?blogId=${mcBlogId}${prv}`, mcToken, mcUserId), 'fb-posts-prev'),
-          safeCall(mc(`/stats/facebookads/campaigns?blogId=${mcBlogId}${cur}`, mcToken, mcUserId), 'fb-ads-campaigns'),
         ]);
-
-        // Diagnostic: log shape of first post so we can map caption/thumb field names.
-        const sampleIg = Array.isArray(igPosts) ? igPosts[0] : (Array.isArray(igReels) ? igReels[0] : null);
-        const sampleFb = Array.isArray(fbPosts) ? fbPosts[0] : null;
-        if (sampleIg) console.log('[metricool] sample IG post keys:', Object.keys(sampleIg), 'sample:', JSON.stringify(sampleIg).slice(0, 800));
-        if (sampleFb) console.log('[metricool] sample FB post keys:', Object.keys(sampleFb), 'sample:', JSON.stringify(sampleFb).slice(0, 800));
 
         return res.status(200).json({
           period: { startDate, endDate, prevStartDate, prevEndDate },
           posts: { igPosts, igReels, fbPosts },
           postsPrev: { igPosts: igPostsPrev, igReels: igReelsPrev, fbPosts: fbPostsPrev },
-          adsCampaigns,
         });
+      }
+
+      // Separate slow endpoint — fetched async after dashboard renders so trage
+      // ads-call het hoofdscherm niet blokkeert. Eigen 50s timeout.
+      case 'getAdsCampaigns': {
+        if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
+        const start = toMetricoolDate(startDate);
+        const end = toMetricoolDate(endDate);
+        try {
+          const data = await mc(
+            `/stats/facebookads/campaigns?blogId=${mcBlogId}&start=${start}&end=${end}`,
+            mcToken, mcUserId, 50000
+          );
+          return res.status(200).json({ adsCampaigns: data });
+        } catch (e) {
+          console.error('[metricool] ads-campaigns failed:', e.message);
+          return res.status(200).json({ adsCampaigns: [], error: e.message });
+        }
       }
 
       case 'getOverview': {
