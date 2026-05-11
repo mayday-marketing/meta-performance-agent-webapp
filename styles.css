@@ -1211,3 +1211,31 @@ a { color: inherit; text-decoration: none; }
   .row-3 { grid-template-columns: 1fr; }
   .insight-grid { grid-template-columns: 1fr; }
 }
+
+/* Skeleton loaders (stap 3 — live data fetch) */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+.kpi-card.skeleton { pointer-events: none; }
+.kpi-card.skeleton:hover { transform: none; box-shadow: none; }
+.skel-line {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg,
+    rgba(64,7,69,0.06) 0%,
+    rgba(64,7,69,0.12) 50%,
+    rgba(64,7,69,0.06) 100%);
+  background-size: 200px 100%;
+  background-repeat: no-repeat;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+[data-theme="dark"] .skel-line {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.06) 0%,
+    rgba(255,255,255,0.14) 50%,
+    rgba(255,255,255,0.06) 100%);
+  background-size: 200px 100%;
+}
+
+#login-error { display: block; }

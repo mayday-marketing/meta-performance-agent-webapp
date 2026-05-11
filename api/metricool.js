@@ -20,7 +20,6 @@ function verifyToken(token, clientId) {
   } catch { return false; }
 }
 
-// Dates arrive as JS Date strings or YYYY-MM-DD — convert to YYYYMMDD integer for Metricool
 function toMetricoolDate(dateStr) {
   return dateStr.replace(/-/g, '');
 }
@@ -34,6 +33,10 @@ async function mc(path, mcToken, mcUserId) {
     throw new Error(`Metricool ${res.status}: ${text}`);
   }
   return res.json();
+}
+
+function safeCall(promise) {
+  return promise.catch((e) => ({ __error: e.message }));
 }
 
 module.exports = async (req, res) => {
@@ -68,38 +71,71 @@ module.exports = async (req, res) => {
   try {
     switch (action) {
 
-      // Returns brand profile + blogId
       case 'getBrands': {
         const data = await mc(`/admin/simpleProfiles?blogId=${mcBlogId}`, mcToken, mcUserId);
         return res.status(200).json(data);
       }
 
-      // Returns IG KPIs + FB KPIs for Overview page
+      // One-shot dashboard fetch: current + previous KPI snapshots, posts in period,
+      // and ad campaigns. Runs all requests in parallel.
+      case 'getDashboard': {
+        if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
+        const start = toMetricoolDate(startDate);
+        const end = toMetricoolDate(endDate);
+
+        // Previous period = same length window ending one day before startDate.
+        const startMs = Date.parse(startDate);
+        const endMs = Date.parse(endDate);
+        const windowMs = endMs - startMs;
+        const prevEndDate = new Date(startMs - 86400000).toISOString().slice(0, 10);
+        const prevEnd = toMetricoolDate(prevEndDate);
+
+        const dateRange = `&start=${start}&end=${end}`;
+
+        const [
+          igCurrent, fbCurrent,
+          igPrevious, fbPrevious,
+          igPosts, igReels, fbPosts,
+          adsCampaigns,
+        ] = await Promise.all([
+          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}&date=${end}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}&date=${end}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}&date=${prevEnd}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}&date=${prevEnd}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/facebook/posts?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/facebookads/campaigns?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId)),
+        ]);
+
+        return res.status(200).json({
+          period: { startDate, endDate, prevStartDate: new Date(startMs - windowMs - 86400000).toISOString().slice(0, 10), prevEndDate },
+          current: { instagram: igCurrent, facebook: fbCurrent },
+          previous: { instagram: igPrevious, facebook: fbPrevious },
+          posts: { igPosts, igReels, fbPosts },
+          adsCampaigns,
+        });
+      }
+
       case 'getOverview': {
         const date = endDate ? toMetricoolDate(endDate) : '';
         const dateParam = date ? `&date=${date}` : '';
         const [ig, fb] = await Promise.all([
-          mc(`/stats/values/instagram?blogId=${mcBlogId}${dateParam}`, mcToken, mcUserId)
-            .catch(e => ({ error: e.message })),
-          mc(`/stats/values/facebook?blogId=${mcBlogId}${dateParam}`, mcToken, mcUserId)
-            .catch(e => ({ error: e.message })),
+          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}${dateParam}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}${dateParam}`, mcToken, mcUserId)),
         ]);
         return res.status(200).json({ instagram: ig, facebook: fb });
       }
 
-      // Returns IG posts + reels + FB posts for Library page
       case 'getPosts': {
         if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
         const start = toMetricoolDate(startDate);
         const end = toMetricoolDate(endDate);
         const dateParams = `&start=${start}&end=${end}`;
         const [igPosts, igReels, fbPosts] = await Promise.all([
-          mc(`/stats/instagram/posts?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)
-            .catch(e => ({ error: e.message })),
-          mc(`/stats/instagram/reels?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)
-            .catch(e => ({ error: e.message })),
-          mc(`/stats/facebook/posts?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)
-            .catch(e => ({ error: e.message })),
+          safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/facebook/posts?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)),
         ]);
         return res.status(200).json({ igPosts, igReels, fbPosts });
       }

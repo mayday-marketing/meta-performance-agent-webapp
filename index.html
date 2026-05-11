@@ -25,8 +25,7 @@
             <div style="opacity:0.85; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; font-weight:600;">mayday marketing</div>
             <h1 style="margin-top:18px;">Social Performance Agent</h1>
           </div>
-          <p>Welkom bij de UI-shell. Eerst bevestigen we je klantnaam, daarna kies je de gewenste startflow.</p>
-          <div class="note">Stap 1 · UI-shell prototype</div>
+          <p>Log in met je klantcode om de dashboard-data van Metricool en Google Drive te zien.</p>
         </div>
         <div class="login-form">
           <div>
@@ -34,15 +33,15 @@
             <p class="hint">Vul je merknaam en geheime code in om verder te gaan.</p>
           </div>
           <div>
-            <label for="brand-input">Brand / klantnaam</label>
-            <input id="brand-input" type="text" placeholder="bv. Studio Aurore">
+            <label for="brand-input">Klantcode</label>
+            <input id="brand-input" type="text" placeholder="bv. spotto" autocomplete="username">
           </div>
           <div>
-            <label for="code-input">Logincode</label>
-            <input id="code-input" type="text" placeholder="bv. agent123">
+            <label for="code-input">Wachtwoord</label>
+            <input id="code-input" type="password" placeholder="••••••••" autocomplete="current-password">
           </div>
           <button id="login-button" type="button" onclick="login()">Login</button>
-          <p class="helper-note">Deze prototype werkt lokaal en toont alleen de UI-shell. Er is nog geen backend-koppeling.</p>
+          <p class="helper-note">Beveiligde sessie via Metricool en Google Drive. Sessie verloopt na 10 uur.</p>
         </div>
       </div>
     </div>
@@ -126,7 +125,7 @@
         <div class="brand">mayday<br><span>marketing · social agent</span></div>
         <div class="brand-pill">
           <span style="width:6px; height:6px; border-radius:50%; background:var(--good);"></span>
-          <span id="sidebar-brand">Klant: Studio Aurore</span>
+          <span id="sidebar-brand">Klant: —</span>
         </div>
 
         <div class="nav-links">
@@ -163,7 +162,7 @@
           </button>
         </div>
 
-        <div id="sidebar-brand-sub" style="font-size:10px; color:var(--text-soft); letter-spacing:0.06em; padding:0 6px;">Connected · 4 mnd data</div>
+        <div id="sidebar-brand-sub" style="font-size:10px; color:var(--text-soft); letter-spacing:0.06em; padding:0 6px;">—</div>
         <button class="logout" onclick="logout()">
           <span style="font-size:14px;">↪</span>
           Afmelden
@@ -180,9 +179,9 @@
           <div class="controls">
             <div class="date-filter">
               <label>Periode</label>
-              <input type="date" value="2026-01-01">
+              <input type="date">
               <span class="sep">→</span>
-              <input type="date" value="2026-04-30">
+              <input type="date">
             </div>
             <button class="btn">⤓ Export</button>
             <button class="btn primary" onclick="window.toggleChat()">
@@ -203,7 +202,7 @@
                 <div class="panel-header">
                   <div>
                     <h2 class="panel-title">Performance over tijd</h2>
-                    <div class="panel-sub">Wekelijkse reach per kanaal · 1 jan – 30 apr 2026</div>
+                    <div class="panel-sub">Wekelijkse reach per kanaal</div>
                   </div>
                   <div class="panel-actions">
                     <div class="period-toggle">
@@ -313,7 +312,7 @@
         <div class="chat-head">
           <div>
             <h2 class="title">Performance Agent</h2>
-            <div class="sub"><span class="dot"></span> Online · context: Studio Aurore</div>
+            <div class="sub"><span class="dot"></span> <span id="chat-context-label">Online</span></div>
           </div>
           <button class="close" id="chat-close-btn" title="Sluiten">×</button>
         </div>
