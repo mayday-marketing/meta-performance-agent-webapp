@@ -20,6 +20,11 @@ function verifyToken(token, clientId) {
   } catch { return false; }
 }
 
+// Dates arrive as JS Date strings or YYYY-MM-DD — convert to YYYYMMDD integer for Metricool
+function toMetricoolDate(dateStr) {
+  return dateStr.replace(/-/g, '');
+}
+
 async function mc(path, mcToken, mcUserId) {
   const sep = path.includes('?') ? '&' : '?';
   const url = `${BASE}${path}${sep}userId=${mcUserId}`;
@@ -38,7 +43,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, clientId, token, blogId, startDate, endDate } = req.body || {};
+  const { action, clientId, token, startDate, endDate } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -58,35 +63,45 @@ module.exports = async (req, res) => {
 
   const mcToken = client.metricool_token;
   const mcUserId = client.metricool_user_id;
+  const mcBlogId = client.metricool_blog_id || mcUserId;
 
   try {
     switch (action) {
 
+      // Returns brand profile + blogId
       case 'getBrands': {
-        const data = await mc(`/admin/simpleProfiles?blogId=${mcUserId}`, mcToken, mcUserId);
+        const data = await mc(`/admin/simpleProfiles?blogId=${mcBlogId}`, mcToken, mcUserId);
         return res.status(200).json(data);
       }
 
+      // Returns IG KPIs + FB KPIs for Overview page
       case 'getOverview': {
-        if (!blogId) return res.status(400).json({ error: 'blogId vereist.' });
-        if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
-        const base = `?blogId=${blogId}&init=${startDate}&end=${endDate}`;
+        const date = endDate ? toMetricoolDate(endDate) : '';
+        const dateParam = date ? `&date=${date}` : '';
         const [ig, fb] = await Promise.all([
-          mc(`/v2/analytics/instagram${base}`, mcToken, mcUserId).catch(e => ({ error: e.message })),
-          mc(`/v2/analytics/facebook${base}`, mcToken, mcUserId).catch(e => ({ error: e.message })),
+          mc(`/stats/values/instagram?blogId=${mcBlogId}${dateParam}`, mcToken, mcUserId)
+            .catch(e => ({ error: e.message })),
+          mc(`/stats/values/facebook?blogId=${mcBlogId}${dateParam}`, mcToken, mcUserId)
+            .catch(e => ({ error: e.message })),
         ]);
         return res.status(200).json({ instagram: ig, facebook: fb });
       }
 
+      // Returns IG posts + reels + FB posts for Library page
       case 'getPosts': {
-        if (!blogId) return res.status(400).json({ error: 'blogId vereist.' });
         if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
-        const base = `?blogId=${blogId}&init=${startDate}&end=${endDate}`;
-        const [igPosts, fbPosts] = await Promise.all([
-          mc(`/v2/analytics/instagram/reels${base}`, mcToken, mcUserId).catch(e => ({ error: e.message })),
-          mc(`/v2/analytics/facebook/posts${base}`, mcToken, mcUserId).catch(e => ({ error: e.message })),
+        const start = toMetricoolDate(startDate);
+        const end = toMetricoolDate(endDate);
+        const dateParams = `&start=${start}&end=${end}`;
+        const [igPosts, igReels, fbPosts] = await Promise.all([
+          mc(`/stats/instagram/posts?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)
+            .catch(e => ({ error: e.message })),
+          mc(`/stats/instagram/reels?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)
+            .catch(e => ({ error: e.message })),
+          mc(`/stats/facebook/posts?blogId=${mcBlogId}${dateParams}`, mcToken, mcUserId)
+            .catch(e => ({ error: e.message })),
         ]);
-        return res.status(200).json({ instagram: igPosts, facebook: fbPosts });
+        return res.status(200).json({ igPosts, igReels, fbPosts });
       }
 
       default:
