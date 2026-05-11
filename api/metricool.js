@@ -24,19 +24,34 @@ function toMetricoolDate(dateStr) {
   return dateStr.replace(/-/g, '');
 }
 
-async function mc(path, mcToken, mcUserId) {
+async function mc(path, mcToken, mcUserId, timeoutMs = 10000) {
   const sep = path.includes('?') ? '&' : '?';
   const url = `${BASE}${path}${sep}userId=${mcUserId}`;
-  const res = await fetch(url, { headers: { 'X-Mc-Auth': mcToken } });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Metricool ${res.status}: ${text}`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: { 'X-Mc-Auth': mcToken },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Metricool ${res.status}: ${text.slice(0, 300)}`);
+    }
+    return await res.json();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`Metricool timeout (${timeoutMs}ms): ${path}`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
-function safeCall(promise) {
-  return promise.catch((e) => ({ __error: e.message }));
+function safeCall(promise, label) {
+  return promise.catch((e) => {
+    console.error(`[metricool] ${label || ''} failed:`, e.message);
+    return { __error: e.message };
+  });
 }
 
 module.exports = async (req, res) => {
@@ -98,14 +113,14 @@ module.exports = async (req, res) => {
           igPosts, igReels, fbPosts,
           adsCampaigns,
         ] = await Promise.all([
-          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}&date=${end}`, mcToken, mcUserId)),
-          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}&date=${end}`, mcToken, mcUserId)),
-          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}&date=${prevEnd}`, mcToken, mcUserId)),
-          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}&date=${prevEnd}`, mcToken, mcUserId)),
-          safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId)),
-          safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId)),
-          safeCall(mc(`/stats/facebook/posts?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId)),
-          safeCall(mc(`/stats/facebookads/campaigns?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId)),
+          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}&date=${end}`, mcToken, mcUserId), 'ig-values-current'),
+          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}&date=${end}`, mcToken, mcUserId), 'fb-values-current'),
+          safeCall(mc(`/stats/values/instagram?blogId=${mcBlogId}&date=${prevEnd}`, mcToken, mcUserId), 'ig-values-previous'),
+          safeCall(mc(`/stats/values/facebook?blogId=${mcBlogId}&date=${prevEnd}`, mcToken, mcUserId), 'fb-values-previous'),
+          safeCall(mc(`/stats/instagram/posts?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId), 'ig-posts'),
+          safeCall(mc(`/stats/instagram/reels?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId), 'ig-reels'),
+          safeCall(mc(`/stats/facebook/posts?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId), 'fb-posts'),
+          safeCall(mc(`/stats/facebookads/campaigns?blogId=${mcBlogId}${dateRange}`, mcToken, mcUserId), 'fb-ads-campaigns'),
         ]);
 
         return res.status(200).json({
