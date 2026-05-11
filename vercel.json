@@ -13,6 +13,9 @@
     },
     "api/drive.js": {
       "maxDuration": 30
+    },
+    "api/metricool.js": {
+      "maxDuration": 15
     }
   },
   "rewrites": [

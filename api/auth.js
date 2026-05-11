@@ -45,5 +45,6 @@ module.exports = async (req, res) => {
     brandName: client.brandName || clientId,
     sheetId: client.sheetId || null,
     hasDrive: !!client.driveFolderId,
+    hasMetricool: !!client.metricool_token,
   });
 };
