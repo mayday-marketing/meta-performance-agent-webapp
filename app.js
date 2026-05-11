@@ -92,11 +92,62 @@
   function chooseSource(type) {
     if (type === "handmatig") {
       showScreen("manual-screen");
+      hydrateManualContext();
     } else {
       showScreen("app-screen");
     }
   }
   window.chooseSource = chooseSource;
+
+  /* ---------- Brand context (handmatige flow) ---------- */
+
+  function countWords(s) {
+    const trimmed = (s || "").trim();
+    if (!trimmed) return 0;
+    return trimmed.split(/\s+/).length;
+  }
+
+  function updateSidebarContext() {
+    const pill = $("#sidebar-context");
+    const count = $("#sidebar-context-count");
+    if (!pill || !count) return;
+    const ctx = state.session?.clientContext || "";
+    const n = countWords(ctx);
+    if (n > 0) {
+      count.textContent = `${n} woord${n === 1 ? "" : "en"}`;
+      pill.style.display = "";
+    } else {
+      pill.style.display = "none";
+    }
+  }
+
+  function updateManualContextCount() {
+    const ta = $("#manual-context");
+    const out = $("#manual-context-count");
+    if (!ta || !out) return;
+    const n = countWords(ta.value);
+    out.textContent = n > 0 ? `${n} woord${n === 1 ? "" : "en"} · auto-saved` : "";
+  }
+
+  function hydrateManualContext() {
+    const ta = $("#manual-context");
+    if (!ta) return;
+    ta.value = state.session?.clientContext || "";
+    updateManualContextCount();
+  }
+
+  function bindManualContext() {
+    const ta = $("#manual-context");
+    if (!ta) return;
+    ta.addEventListener("input", updateManualContextCount);
+    ta.addEventListener("blur", () => {
+      if (!state.session) return;
+      state.session.clientContext = ta.value.trim();
+      saveSession(state.session);
+      updateSidebarContext();
+      updateManualContextCount();
+    });
+  }
 
   function logout() {
     clearSession();
@@ -152,6 +203,7 @@
       $("#source-brand").textContent = data.brandName;
       $("#sidebar-brand").textContent = `Klant: ${data.brandName}`;
       $("#sidebar-brand-sub").textContent = data.hasMetricool ? "Connected · Metricool live" : "Connected";
+      updateSidebarContext();
       const ctxLabel = $("#chat-context-label");
       if (ctxLabel) ctxLabel.textContent = `Online · context: ${data.brandName}`;
 
@@ -1300,11 +1352,13 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindLogin();
     bindTweaks();
+    bindManualContext();
 
     const existing = loadSession();
     if (existing && existing.token) {
       $("#sidebar-brand").textContent = `Klant: ${existing.brandName}`;
       $("#sidebar-brand-sub").textContent = existing.hasMetricool ? "Connected · Metricool live" : "Connected";
+      updateSidebarContext();
       if (existing.hasMetricool || existing.hasDrive) {
         showScreen("app-screen");
       } else {
