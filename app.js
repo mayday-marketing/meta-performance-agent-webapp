@@ -30,6 +30,10 @@
     overview: null,                   // populated by fetchOverview()
     overviewLoading: false,
     overviewError: null,
+    analysisCache: {},                // { [periodKey]: { summary, winners, losers, recs } }
+    analysisLoading: false,
+    analysisError: null,
+    analysisGenId: 0,                 // guard tegen out-of-order responses bij periode-wissel
   };
 
   /* ---------- Session persistence ---------- */
@@ -153,6 +157,9 @@
     clearSession();
     state.overview = null;
     state.overviewError = null;
+    state.analysisCache = {};
+    state.analysisLoading = false;
+    state.analysisError = null;
     dashboardInited = false;
     $("#brand-input").value = "";
     $("#code-input").value = "";
@@ -326,14 +333,21 @@
   let adsFetchId = 0;
 
   async function refreshOverview() {
+    // Een periode-wissel invalideert elke lopende analyse-generatie.
+    state.analysisGenId++;
+    state.analysisLoading = false;
+    state.analysisError = null;
+
     if (!state.session?.hasMetricool) {
       state.overviewError = "Voor deze klant is geen Metricool-koppeling geconfigureerd.";
       renderOverview();
+      renderAnalysis();
       return;
     }
     state.overviewLoading = true;
     state.overviewError = null;
     renderOverview();
+    renderAnalysis();
 
     // Cancel any in-flight ads fetch from previous period.
     adsFetchId++;
@@ -347,6 +361,7 @@
       state.overview._rawDashboard = raw;
       state.overviewLoading = false;
       renderOverview();
+      renderAnalysis();
 
       // Fire ads-campaigns async — don't block dashboard.
       refreshAdsCampaigns(state.period.start, state.period.end);
@@ -358,6 +373,7 @@
         setTimeout(() => showScreen("login-screen"), 600);
       }
       renderOverview();
+      renderAnalysis();
     }
   }
 
@@ -1211,49 +1227,308 @@
     bindLibraryInteractions();
   }
 
-  /* ---------- Analysis (mock, stap 5) ---------- */
+  /* ---------- Analysis (stap 5) ---------- */
 
-  function renderAnalysis() {
-    const ins = DATA.insights;
-    $("#analysis-content").innerHTML = `
+  function analysisPeriodKey() {
+    return `${state.period.start}|${state.period.end}`;
+  }
+
+  function periodDays() {
+    const s = new Date(state.period.start), e = new Date(state.period.end);
+    return Math.max(1, Math.round((e - s) / 86400000) + 1);
+  }
+
+  function periodLabelShort() {
+    const s = new Date(state.period.start), e = new Date(state.period.end);
+    return `${fmt.dateNL(s)} – ${fmt.dateNL(e)}`;
+  }
+
+  // Aggregeer overview-data tot een compacte JSON voor de LLM.
+  // We sturen géén ruwe posts-array (te duur in tokens) — wel groeperingen,
+  // top/bottom-uittreksels en samenvattingen die het patroon vasthouden.
+  function buildAnalysisSummary() {
+    const ov = state.overview;
+    if (!ov) return null;
+    const posts = arrayOrEmpty(ov.allPosts);
+    const ads = arrayOrEmpty(ov.adsCampaigns);
+
+    const groupBy = (arr, keyFn) => {
+      const m = {};
+      for (const p of arr) {
+        const k = keyFn(p);
+        if (!k) continue;
+        if (!m[k]) m[k] = { count: 0, totalReach: 0, totalInteractions: 0, totalEngagement: 0, withEngagement: 0 };
+        m[k].count += 1;
+        m[k].totalReach += p.reach || 0;
+        m[k].totalInteractions += p.interactions || 0;
+        if (p.engagement) { m[k].totalEngagement += p.engagement; m[k].withEngagement += 1; }
+      }
+      const out = {};
+      for (const k of Object.keys(m)) {
+        const g = m[k];
+        out[k] = {
+          count: g.count,
+          totalReach: Math.round(g.totalReach),
+          avgReach: g.count ? Math.round(g.totalReach / g.count) : 0,
+          avgEngagement: g.withEngagement ? +(g.totalEngagement / g.withEngagement).toFixed(2) : 0,
+        };
+      }
+      return out;
+    };
+
+    const slimPost = (p) => ({
+      caption: (p.caption || "").slice(0, 140),
+      platform: p.platform,
+      type: p.type,
+      date: p.dateLabel,
+      reach: p.reach || 0,
+      engagement: +(p.engagement || 0).toFixed(2),
+      likes: p.likes || 0,
+      comments: p.comments || 0,
+      shares: p.shares || 0,
+      saves: p.saves || 0,
+    });
+
+    const byEngagement = [...posts].filter(p => p.reach >= 100).sort((a, b) => b.engagement - a.engagement);
+    const byReach = [...posts].sort((a, b) => b.reach - a.reach);
+    const top10 = byEngagement.slice(0, 10).map(slimPost);
+    const bottom5 = byEngagement.slice(-5).reverse().map(slimPost);
+
+    const days = ["Zo", "Ma", "Di", "Wo", "Do", "Vr", "Za"];
+    const dayCounts = Array(7).fill(0);
+    for (const p of posts) {
+      if (p.date instanceof Date) dayCounts[p.date.getDay()] += 1;
+    }
+    const busiestIdx = dayCounts.indexOf(Math.max(...dayCounts));
+    const quietestIdx = dayCounts.indexOf(Math.min(...dayCounts.filter(v => v >= 0)));
+
+    return {
+      kpis: ov.kpis.map(k => ({
+        label: k.label,
+        value: k.value,
+        delta: k.delta != null ? +k.delta.toFixed(2) : null,
+        direction: k.direction,
+        unit: k.unit,
+      })),
+      channels: ov.channels.map(c => ({ label: c.label, sharePct: c.value })),
+      byPlatform: groupBy(posts, p => ({ ig: "Instagram", fb: "Facebook" })[p.platform]),
+      byType: groupBy(posts, p => p.type),
+      cadence: {
+        totalPosts: posts.length,
+        postsPerWeek: +((posts.length / Math.max(1, periodDays() / 7))).toFixed(1),
+        postsPerDay: days.map((d, i) => ({ day: d, count: dayCounts[i] })),
+        busiestDay: days[busiestIdx],
+        quietestDay: days[quietestIdx],
+      },
+      topPostsByEngagement: top10,
+      bottomPostsByEngagement: bottom5,
+      topPostsByReach: byReach.slice(0, 5).map(slimPost),
+      ads: {
+        campaignCount: ads.length,
+        totalReach: ads.reduce((s, a) => s + (a.reach || 0), 0),
+        topCampaigns: [...ads].sort((a, b) => (b.reach || 0) - (a.reach || 0)).slice(0, 3).map(a => ({
+          name: (a.caption || "").slice(0, 100),
+          reach: a.reach || 0,
+          clicks: a.clicks || 0,
+          ctr: +(a.ctr || 0).toFixed(2),
+        })),
+      },
+    };
+  }
+
+  async function generateAnalysis() {
+    if (!state.overview) return;
+    const key = analysisPeriodKey();
+    const myId = ++state.analysisGenId;
+    state.analysisLoading = true;
+    state.analysisError = null;
+    renderAnalysis();
+
+    const summary = buildAnalysisSummary();
+    if (!summary) {
+      state.analysisLoading = false;
+      state.analysisError = "Geen data om te analyseren.";
+      renderAnalysis();
+      return;
+    }
+
+    try {
+      const result = await apiPost("/api/analysis", {
+        clientId: state.session.clientId,
+        token: state.session.token,
+        brandName: state.session.brandName,
+        period: {
+          startDate: state.period.start,
+          endDate: state.period.end,
+          days: periodDays(),
+        },
+        summary,
+        clientContext: state.session.clientContext || "",
+      });
+      if (myId !== state.analysisGenId) return; // outdated — gebruiker wisselde periode
+      state.analysisCache[key] = result.analysis;
+      state.analysisLoading = false;
+      state.analysisError = null;
+      renderAnalysis();
+    } catch (err) {
+      if (myId !== state.analysisGenId) return;
+      state.analysisLoading = false;
+      state.analysisError = err.message || "Onbekende fout bij genereren analyse.";
+      if (err.status === 401) {
+        clearSession();
+        setTimeout(() => showScreen("login-screen"), 600);
+      }
+      renderAnalysis();
+    }
+  }
+  window.__generateAnalysis = generateAnalysis;
+
+  function renderAnalysisEmpty(html) {
+    return `<div class="panel" style="text-align:center; padding:48px 24px;">${html}</div>`;
+  }
+
+  function renderAnalysisInsights(a) {
+    const summaryBlock = a.summary ? `
+      <section class="panel analysis-narrative" style="margin-bottom: var(--grid-gap);">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Analyse · ${escapeHtml(periodLabelShort())}</h2>
+            <div class="panel-sub">Door de Agent gegenereerd · ${periodDays()} dagen</div>
+          </div>
+          <button class="btn tiny" onclick="window.__generateAnalysis()">↻ Regenereren</button>
+        </div>
+        <div class="narrative-body">${escapeHtml(a.summary)}</div>
+      </section>` : "";
+
+    const insightItem = (it, deltaDir) => {
+      const cleanDelta = (it.delta || "").trim();
+      return `
+        <div class="insight-item">
+          ${deltaDir && cleanDelta ? `<div class="delta ${deltaDir}">${escapeHtml(cleanDelta)}</div>` : ""}
+          <div class="heading">${escapeHtml(it.heading || "")}</div>
+          <div class="body">${escapeHtml(it.body || "")}</div>
+          ${it.tag ? `<div class="tag">${escapeHtml(it.tag)}</div>` : ""}
+        </div>`;
+    };
+
+    const winners = arrayOrEmpty(a.winners);
+    const losers = arrayOrEmpty(a.losers);
+    const recs = arrayOrEmpty(a.recs);
+
+    return `
+      ${summaryBlock}
       <div class="insight-grid">
         <div class="insight-card win">
           <div class="head"><span class="pill">Wat werkt</span><h3>Winners</h3></div>
           <div class="insight-list">
-            ${ins.winners.map(w => `
-              <div class="insight-item">
-                <div class="delta up">${w.delta}</div>
-                <div class="heading">${w.heading}</div>
-                <div class="body">${w.body}</div>
-                <div class="tag">${w.tag}</div>
-              </div>`).join("")}
+            ${winners.map(w => insightItem(w, "up")).join("")}
           </div>
         </div>
         <div class="insight-card lose">
           <div class="head"><span class="pill">Onder presteert</span><h3>Losers</h3></div>
           <div class="insight-list">
-            ${ins.losers.map(w => `
-              <div class="insight-item">
-                <div class="delta down">${w.delta}</div>
-                <div class="heading">${w.heading}</div>
-                <div class="body">${w.body}</div>
-                <div class="tag">${w.tag}</div>
-              </div>`).join("")}
+            ${losers.map(w => insightItem(w, "down")).join("")}
           </div>
         </div>
         <div class="insight-card rec">
           <div class="head"><span class="pill">Aanbevelingen</span><h3>Next steps</h3></div>
           <div class="insight-list">
-            ${ins.recs.map(w => `
-              <div class="insight-item">
-                <div class="heading">${w.heading}</div>
-                <div class="body">${w.body}</div>
-                <div class="tag">${w.tag}</div>
-              </div>`).join("")}
+            ${recs.map(w => insightItem(w, null)).join("")}
           </div>
         </div>
-      </div>
-    `;
+      </div>`;
+  }
+
+  function renderAnalysisLoadingSkeleton() {
+    const card = `
+      <div class="insight-card">
+        <div class="head"><div class="skel-line" style="width:80px; height:14px;"></div><div class="skel-line" style="width:120px; height:18px;"></div></div>
+        <div class="insight-list">
+          ${Array(2).fill(`
+            <div class="insight-item">
+              <div class="skel-line" style="width:60%; height:12px;"></div>
+              <div class="skel-line" style="width:90%; height:11px; margin-top:8px;"></div>
+              <div class="skel-line" style="width:75%; height:11px; margin-top:4px;"></div>
+            </div>`).join("")}
+        </div>
+      </div>`;
+    return `
+      <section class="panel" style="margin-bottom: var(--grid-gap);">
+        <div class="skel-line" style="width:40%; height:18px;"></div>
+        <div class="skel-line" style="width:90%; height:12px; margin-top:14px;"></div>
+        <div class="skel-line" style="width:70%; height:12px; margin-top:6px;"></div>
+      </section>
+      <div class="insight-grid">${card}${card}${card}</div>`;
+  }
+
+  function renderAnalysis() {
+    const root = $("#analysis-content");
+    if (!root) return;
+
+    // Manual-flow klanten: geen dashboard-data, dus geen analyse mogelijk.
+    if (state.session && !state.session.hasMetricool) {
+      root.innerHTML = renderAnalysisEmpty(`
+        <p class="muted" style="margin:0 0 12px;">Analyse op basis van dashboard-data is alleen beschikbaar voor klanten met een Metricool-koppeling.</p>
+        <p class="muted" style="margin:0; font-size:13px;">Voor handmatig geüploade CSV's: gebruik de chat-agent voor een ad-hoc analyse.</p>
+        <button class="btn primary" style="margin-top:18px;" onclick="window.toggleChat()">Open de Agent →</button>
+      `);
+      return;
+    }
+
+    // Overview-fout — kunnen geen analyse maken zonder data.
+    if (state.overviewError && !state.overview) {
+      root.innerHTML = renderAnalysisEmpty(`
+        <p class="muted" style="margin:0;">Analyse is niet beschikbaar zolang het dashboard niet laadt.</p>
+        <p class="muted" style="margin:8px 0 0; font-size:13px;">${escapeHtml(state.overviewError)}</p>
+      `);
+      return;
+    }
+
+    // Wachten op dashboard-data.
+    if (state.overviewLoading || !state.overview) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">Wachten op dashboard-data…</p>`);
+      return;
+    }
+
+    const postsCount = arrayOrEmpty(state.overview.allPosts).length;
+    if (postsCount === 0) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen posts in deze periode om te analyseren.</p>`);
+      return;
+    }
+
+    // LLM-generatie bezig.
+    if (state.analysisLoading) {
+      root.innerHTML = renderAnalysisLoadingSkeleton();
+      return;
+    }
+
+    // Cache-hit voor huidige periode → toon resultaat.
+    const cached = state.analysisCache[analysisPeriodKey()];
+    if (cached) {
+      root.innerHTML = renderAnalysisInsights(cached);
+      return;
+    }
+
+    // Fout bij laatste generatie.
+    if (state.analysisError) {
+      root.innerHTML = renderAnalysisEmpty(`
+        <p style="color:#c0392b; margin:0;">${escapeHtml(state.analysisError)}</p>
+        <button class="btn primary" style="margin-top:14px;" onclick="window.__generateAnalysis()">Opnieuw proberen</button>
+      `);
+      return;
+    }
+
+    // Empty state — gebruiker moet expliciet de analyse triggeren.
+    root.innerHTML = `
+      <div class="panel" style="text-align:center; padding:56px 24px;">
+        <div style="font-family:var(--font-serif); font-size:22px; color:var(--text); margin-bottom:8px;">Analyse genereren?</div>
+        <p class="muted" style="margin:0 auto 22px; max-width:520px;">
+          De Agent leest ${postsCount} posts en eventuele campagnes uit deze periode (${escapeHtml(periodLabelShort())}) en levert winners, losers en concrete aanbevelingen. Duurt zo'n 5 seconden.
+        </p>
+        <button class="btn primary" onclick="window.__generateAnalysis()">
+          Genereer analyse voor ${escapeHtml(periodLabelShort())} →
+        </button>
+      </div>`;
   }
 
   /* ---------- Chat panel (mock, stap 6) ---------- */
