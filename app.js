@@ -829,7 +829,8 @@
     if (!raw || typeof raw !== "object") return null;
     return {
       date: raw.date ? new Date(raw.date) : null,
-      campaignId: String(raw.campaign_id || ""),
+      adId: String(raw.ad_id || ""),
+      adName: String(raw.ad_name || ""),
       campaignName: String(raw.campaign_name || ""),
       reach: Number(raw.reach) || 0,
       impressions: Number(raw.impressions) || 0,
@@ -853,16 +854,16 @@
     }, 0);
   }
 
-  // Aggregeer Windsor daily ads-rows tot campagne-pseudo-posts voor de Library (Blok B).
+  // Aggregeer Windsor daily ads-rows tot pseudo-posts per UNIEKE ADVERTENTIE (Blok B + Q2).
   // Reach wordt gesommeerd over dagen (consistent met de KPI-berekening hierboven;
   // dit overschat unieke reach licht — bekende beperking van daily rows).
   function aggregateWindsorAds(adsRows) {
-    const byCampaign = {};
+    const byAd = {};
     for (const r of adsRows) {
       if (!r) continue;
-      const id = r.campaignId || r.campaignName || "onbekend";
-      const g = byCampaign[id] || (byCampaign[id] = {
-        id, name: r.campaignName || id,
+      const id = r.adId || r.adName || "onbekend";
+      const g = byAd[id] || (byAd[id] = {
+        id, name: r.adName || id, campaign: r.campaignName || "",
         reach: 0, impressions: 0, clicks: 0, spend: 0, lastDate: null,
         vp25: 0, vp50: 0, vp75: 0, vp95: 0, vp100: 0, vplays: 0,
       });
@@ -872,13 +873,14 @@
       g.spend += r.spend || 0;
       g.vp25 += r.vp25 || 0; g.vp50 += r.vp50 || 0; g.vp75 += r.vp75 || 0;
       g.vp95 += r.vp95 || 0; g.vp100 += r.vp100 || 0; g.vplays += r.vplays || 0;
+      if (!g.campaign && r.campaignName) g.campaign = r.campaignName;
       if (r.date && (!g.lastDate || r.date > g.lastDate)) g.lastDate = r.date;
     }
-    return Object.values(byCampaign).map(g => {
+    return Object.values(byAd).map(g => {
       const ctr = g.impressions ? (g.clicks / g.impressions) * 100 : 0;
       // Retentiecurve (Blok F): percentage van video-plays dat elk checkpoint haalt.
       const retention = g.vplays > 0 ? {
-        p3:  100, // ~start; Meta levert geen 3s-checkpoint op campagne-niveau
+        p3:  100, // ~start; Meta levert geen apart 3s-checkpoint op deze breakdown
         p25: Math.round((g.vp25 / g.vplays) * 100),
         p50: Math.round((g.vp50 / g.vplays) * 100),
         p75: Math.round((g.vp75 / g.vplays) * 100),
@@ -887,7 +889,8 @@
       return {
         id: `ads-${g.id}`,
         platform: "ads",
-        type: "Campagne",
+        type: "Advertentie",
+        subtitle: g.campaign,           // campagne als context-subregel in de Library
         date: g.lastDate,
         dateLabel: g.lastDate ? fmt.dateNL(g.lastDate) : "—",
         startMs: 0, stopMs: 0,
@@ -1024,6 +1027,13 @@
       });
       state.overview = transformWindsorDashboard(raw);
       state.overviewLoading = false;
+      // Surfacing: lege staat met een verborgen connector-fout → toon de echte reden
+      // i.p.v. een misleidend "geen data". Helpt grote-bereik-problemen diagnosticeren.
+      const igErr = raw?.errors?.instagram;
+      if (igErr && state.overview.allPosts.length === 0) {
+        state.overview = null; // val terug op de standaard fout-weergave i.p.v. lege panels
+        state.overviewError = `Windsor kon geen Instagram-data ophalen voor dit bereik: ${igErr}`;
+      }
       renderOverview();
       if (typeof renderAnalysis === "function") renderAnalysis();
     } catch (err) {
@@ -1476,7 +1486,7 @@
         </div>
         <div class="body">
           <div class="caption">${escapeHtml(p.caption)}</div>
-          <div class="meta"><span>${escapeHtml(p.dateLabel)}</span><span>·</span><span>${escapeHtml(p.type)}</span></div>
+          <div class="meta"><span>${escapeHtml(p.dateLabel)}</span><span>·</span><span>${escapeHtml(p.type)}</span>${p.subtitle ? `<span>·</span><span>${escapeHtml(p.subtitle)}</span>` : ""}</div>
           <div class="stats">
             <div class="s"><div class="n">${fmt.k(p.reach)}</div><div class="l">Reach</div></div>
             <div class="s"><div class="n">${(p.engagement || 0).toFixed(1)}%</div><div class="l">Engage</div></div>
@@ -1569,7 +1579,7 @@
             : `<span class="muted" title="${escapeHtml(perfTooltip(p))}">n/a</span>`;
           return `
           <tr data-post="${escapeHtml(p.id)}">
-            <td><span class="row-thumb thumb-pattern" style="background:${t.bg}">${t.imgHtml}</span><span class="row-caption">${escapeHtml(p.caption)}</span></td>
+            <td><span class="row-thumb thumb-pattern" style="background:${t.bg}">${t.imgHtml}</span><span class="row-caption">${escapeHtml(p.caption)}${p.subtitle ? ` <span class="muted">· ${escapeHtml(p.subtitle)}</span>` : ""}</span></td>
             <td><span class="platform-tag ${p.platform}">${platformLabel(p.platform)}</span></td>
             <td>${escapeHtml(p.type)}</td>
             <td>${escapeHtml(p.dateLabel)}</td>
@@ -1718,8 +1728,8 @@
     if (s.hasWindsor) {
       return {
         sources: ["Windsor.ai"],
-        platforms: ["Instagram (organic)", "Meta Ads (campagne-niveau)"],
-        present: ["Caption, type, datum", "Reach, views, likes, comments, shares, saves", "Engagement", "Gem. kijktijd (reels)", "Meta Ads: reach, clicks, spend, CTR, retentiecurve"],
+        platforms: ["Instagram (organic)", "Meta Ads (per advertentie)"],
+        present: ["Caption, type, datum", "Reach, views, likes, comments, shares, saves", "Engagement", "Gem. kijktijd (reels)", "Meta Ads per advertentie: reach, clicks, spend, CTR, retentiecurve"],
         missing: [
           ["Facebook organic", "Connector-slug nog niet bevestigd in Windsor — tijdelijk niet opgehaald."],
           ["Retentiecurve organic", "Instagram's API exposeert dit niet voor organic content; alleen gem. kijktijd is beschikbaar."],
