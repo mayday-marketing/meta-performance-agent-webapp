@@ -112,10 +112,11 @@ module.exports = async (req, res) => {
           'media_reel_total_interactions',
         ].join(',');
 
+        // Daily-per-campaign rows zodat we de Meta Ads-lijn per week kunnen aggregeren
+        // zonder pro-rata-schattingen (zoals we voor Metricool moesten doen).
         const ADS_FIELDS = [
-          'campaign_id', 'campaign_name', 'ad_id', 'ad_name',
-          'impressions', 'reach', 'clicks', 'spend',
-          'date_start', 'date_stop', 'cpm', 'cpc', 'ctr',
+          'date', 'campaign_id', 'campaign_name',
+          'impressions', 'reach', 'clicks', 'spend', 'cpm', 'cpc', 'ctr',
         ].join(',');
 
         const [igData, adsData] = await Promise.all([

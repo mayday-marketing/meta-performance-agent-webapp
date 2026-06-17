@@ -85,6 +85,16 @@
     });
   }
 
+  function windsorCall(action, extra = {}) {
+    if (!state.session) throw new Error("Niet ingelogd");
+    return apiPost("/api/windsor", {
+      action,
+      clientId: state.session.clientId,
+      token: state.session.token,
+      ...extra,
+    });
+  }
+
   /* ---------- Screen flow ---------- */
 
   function showScreen(id) {
@@ -207,6 +217,7 @@
         sheetId: data.sheetId,
         hasMetricool: !!data.hasMetricool,
         hasDrive: !!data.hasDrive,
+        hasWindsor: !!data.hasWindsor,
       });
       $("#source-brand").textContent = data.brandName;
       $("#sidebar-brand").textContent = `Klant: ${data.brandName}`;
@@ -339,8 +350,13 @@
     state.analysisLoading = false;
     state.analysisError = null;
 
+    // Windsor-flow voor klanten met windsor_api_key — voorrang boven Metricool.
+    if (state.session?.hasWindsor) {
+      return refreshOverviewWindsor();
+    }
+
     if (!state.session?.hasMetricool) {
-      state.overviewError = "Voor deze klant is geen Metricool-koppeling geconfigureerd.";
+      state.overviewError = "Voor deze klant is geen Metricool- of Windsor-koppeling geconfigureerd.";
       renderOverview();
       renderAnalysis();
       return;
@@ -651,6 +667,195 @@
       adsLoading: !adsCampaignsRaw,
       _raw: raw,
     };
+  }
+
+  /* ---------- Windsor → app shape ---------- */
+
+  function normalizeWindsorIgPost(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const date = raw.timestamp ? new Date(raw.timestamp) : null;
+    const reach = Number(raw.media_reach) || 0;
+    const likes = Number(raw.media_like_count) || 0;
+    const comments = Number(raw.media_comments_count) || 0;
+    const shares = Number(raw.media_shares) || 0;
+    const saves = Number(raw.media_saved) || 0;
+    const views = Number(raw.media_views) || 0;
+    const engagementFromApi = Number(raw.media_engagement) || 0;
+    const interactions = engagementFromApi || (likes + comments + shares + saves);
+    const engagement = reach ? (interactions / reach) * 100 : 0;
+    const captionRaw = typeof raw.media_caption === "string" ? raw.media_caption : "";
+    const caption = captionRaw ? captionRaw.replace(/\s+/g, " ").trim() : "—";
+    const rawType = raw.media_product_type || raw.media_type;
+    const type = friendlyType(rawType, "Post");
+    return {
+      id: String(raw.media_id || `ig-${raw.timestamp || Math.random()}`),
+      platform: "ig",
+      type,
+      date,
+      dateLabel: date ? fmt.dateNL(date) : "—",
+      startMs: 0, stopMs: 0,
+      reach, impressions: views, likes, comments, shares, saves,
+      clicks: 0, views,
+      interactions, engagement, ctr: 0,
+      caption,
+      thumb: typeof raw.media_thumbnail_url === "string" ? raw.media_thumbnail_url
+           : typeof raw.media_url === "string" ? raw.media_url : "",
+      url: typeof raw.media_permalink === "string" ? raw.media_permalink : "",
+    };
+  }
+
+  function normalizeWindsorAdRow(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    return {
+      date: raw.date ? new Date(raw.date) : null,
+      campaignId: String(raw.campaign_id || ""),
+      campaignName: String(raw.campaign_name || ""),
+      reach: Number(raw.reach) || 0,
+      impressions: Number(raw.impressions) || 0,
+      clicks: Number(raw.clicks) || 0,
+      spend: Number(raw.spend) || 0,
+    };
+  }
+
+  function sumAdsRowsInWeek(adsRows, week) {
+    return adsRows.reduce((s, r) => {
+      if (!r?.date) return s;
+      return s + (inWeek(r.date, week) ? (r.reach || 0) : 0);
+    }, 0);
+  }
+
+  function transformWindsorDashboard(raw) {
+    const igPostsRaw = arrayOrEmpty(raw.instagram?.data);
+    const adsRowsRaw = arrayOrEmpty(raw.ads?.data);
+
+    const igPosts = igPostsRaw.map(normalizeWindsorIgPost).filter(Boolean);
+    const adsRows = adsRowsRaw.map(normalizeWindsorAdRow).filter(Boolean);
+
+    const allPosts = igPosts; // FB organic via Windsor nog niet gewired
+
+    const curAgg = aggregatePosts(allPosts);
+    const adsReachCur = adsRows.reduce((s, r) => s + (r.reach || 0), 0);
+    const adsClicksCur = adsRows.reduce((s, r) => s + (r.clicks || 0), 0);
+
+    const erCur = curAgg.reach ? (curAgg.interactions / curAgg.reach) * 100 : 0;
+
+    const kpis = [
+      buildKpi("Totale reach", curAgg.reach + adsReachCur, null, fmt.k, "pct"),
+      buildKpi("Engagement rate", erCur, null, (n) => fmt.pct(n), "pp"),
+      buildKpi("Posts gepubliceerd", curAgg.count, null, (n) => String(n), "pct"),
+      buildKpi("Clicks", curAgg.clicks + adsClicksCur, null, fmt.k, "pct"),
+    ];
+
+    const startDate = raw.period.startDate;
+    const endDate = raw.period.endDate;
+
+    // KPI sparklines
+    const sparkWeeks = enumerateWeeks(startDate, endDate, 12);
+    kpis[0].spark = sparkWeeks.map(w => sumPostsField(allPosts, w, "reach") + sumAdsRowsInWeek(adsRows, w));
+    const weekER = sparkWeeks.map(w => {
+      const r = sumPostsField(allPosts, w, "reach");
+      const i = sumPostsField(allPosts, w, "interactions");
+      return r ? (i / r) * 100 : 0;
+    });
+    kpis[1].spark = weekER;
+    kpis[2].spark = sparkWeeks.map(w => countPostsInWeek(allPosts, w));
+    kpis[3].spark = sparkWeeks.map(w => sumPostsField(allPosts, w, "clicks") + adsRows.reduce((s, r) => s + (r.date && inWeek(r.date, w) ? (r.clicks || 0) : 0), 0));
+
+    // Trend chart
+    const trendWeeks = enumerateWeeks(startDate, endDate);
+    const trendIG = trendWeeks.map(w => sumPostsField(igPosts, w, "reach"));
+    const trendFB = trendWeeks.map(_ => 0); // geen FB organic via Windsor in deze iteratie
+    const trendAds = trendWeeks.map(w => sumAdsRowsInWeek(adsRows, w));
+    const timeseries = {
+      weeks: trendWeeks.map((w, i) => `wk ${i + 1}`),
+      series: [
+        { label: "Instagram", color: "#ff683b", values: trendIG },
+        { label: "Facebook",  color: "#351f69", values: trendFB },
+        { label: "Meta Ads",  color: "#1f9b8a", values: trendAds },
+      ],
+    };
+
+    // Channel mix
+    const igReach = trendIG.reduce((s, v) => s + v, 0);
+    const fbReach = 0;
+    const adsReach = adsReachCur;
+    const totalChannelReach = igReach + fbReach + adsReach || 1;
+    const channels = [
+      { label: "Instagram", color: "#ff683b", value: Math.round((igReach / totalChannelReach) * 100) },
+      { label: "Facebook",  color: "#351f69", value: 0 },
+      { label: "Meta Ads",  color: "#1f9b8a", value: Math.round((adsReach / totalChannelReach) * 100) },
+    ];
+
+    // Top posts (organic IG, top 5 op engagement-rate)
+    const topPosts = [...allPosts]
+      .sort((a, b) => b.engagement - a.engagement)
+      .slice(0, 5)
+      .map((p, i) => {
+        const cleanUrl = safeUrl(p.thumb);
+        const isHttp = cleanUrl && cleanUrl.startsWith("http");
+        return {
+          id: p.id,
+          caption: p.caption,
+          type: p.type,
+          platform: p.platform,
+          date: p.dateLabel,
+          engagement: p.engagement.toFixed(1) + "%",
+          imageUrl: isHttp ? cleanUrl : null,
+          fallbackBg: gradientFor(i),
+        };
+      });
+
+    // Cadence
+    const cadenceWeeks = enumerateWeeks(startDate, endDate, 13);
+    const cadence = [];
+    for (let d = 0; d < 7; d++) {
+      const row = [];
+      for (let w = 0; w < cadenceWeeks.length; w++) {
+        row.push(allPosts.filter(p => p.date && p.date.getDay() === ((d + 1) % 7) && inWeek(p.date, cadenceWeeks[w])).length);
+      }
+      cadence.push(row);
+    }
+
+    return {
+      kpis,
+      timeseries,
+      channels,
+      topPosts,
+      cadenceWeeks,
+      cadence,
+      allPosts,
+      adsCampaigns: [], // niet relevant in Windsor-flow (daily data, geen campagne-objecten)
+      adsLoading: false, // Windsor levert ads in dezelfde call → geen aparte wachttijd
+      _raw: raw,
+      _source: "windsor",
+    };
+  }
+
+  async function refreshOverviewWindsor() {
+    state.overviewLoading = true;
+    state.overviewError = null;
+    renderOverview();
+    if (typeof renderAnalysis === "function") renderAnalysis();
+
+    try {
+      const raw = await windsorCall("getDashboard", {
+        startDate: state.period.start,
+        endDate: state.period.end,
+      });
+      state.overview = transformWindsorDashboard(raw);
+      state.overviewLoading = false;
+      renderOverview();
+      if (typeof renderAnalysis === "function") renderAnalysis();
+    } catch (err) {
+      state.overviewLoading = false;
+      state.overviewError = err.message || "Onbekende fout bij laden Windsor-data.";
+      if (err.status === 401) {
+        clearSession();
+        setTimeout(() => showScreen("login-screen"), 600);
+      }
+      renderOverview();
+      if (typeof renderAnalysis === "function") renderAnalysis();
+    }
   }
 
   function buildKpi(label, current, previous, formatter, deltaUnit) {

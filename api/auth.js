@@ -46,5 +46,6 @@ module.exports = async (req, res) => {
     sheetId: client.sheetId || null,
     hasDrive: !!client.driveFolderId,
     hasMetricool: !!client.metricool_token,
+    hasWindsor: !!client.windsor_api_key,
   });
 };
