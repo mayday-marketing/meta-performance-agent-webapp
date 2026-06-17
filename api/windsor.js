@@ -140,29 +140,48 @@ module.exports = async (req, res) => {
           'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
         ].join(',');
 
+        // Creative-type — geverifieerd via /fields. IG-velden geven het exacte format
+        // (REELS / CAROUSEL_ALBUM / IMAGE / VIDEO); object_type is de FB-zijde fallback.
+        // Apart/niet-fataal: een lege of ongeldige fetch laat de rest ongemoeid.
+        const ADS_CREATIVE_FIELDS = [
+          'date', 'ad_id',
+          'effective_instagram_media__media_type',
+          'effective_instagram_media__media_product_type',
+          'object_type',
+        ].join(',');
+
         // Ruimere fetch-timeout (55s, binnen het 60s-functiebudget) zodat grotere
         // datumbereiken niet voortijdig afgebroken worden.
         const FETCH_MS = 55000;
-        const [igData, adsData, adsAdData, adsVideoData] = await Promise.all([
+        const [igData, adsData, adsAdData, adsVideoData, adsCreativeData] = await Promise.all([
           safeCall(windsor('instagram', apiKey, { fields: IG_FIELDS, ...dateParams }, FETCH_MS), 'ig'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads-ad'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_VIDEO_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads-video'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_CREATIVE_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads-creative'),
         ]);
 
-        // Merge de video-velden in de ad-level rows op (datum, ad_id). Best-effort.
-        if (adsAdData && Array.isArray(adsAdData.data) && adsVideoData && Array.isArray(adsVideoData.data)) {
-          const vid = {};
-          for (const r of adsVideoData.data) vid[`${r.date}|${r.ad_id}`] = r;
-          const VKEYS = [
+        // Merge de video- én creative-velden in de ad-level rows op (datum, ad_id). Best-effort.
+        if (adsAdData && Array.isArray(adsAdData.data)) {
+          const mergeInto = (src, keys) => {
+            if (!src || !Array.isArray(src.data)) return;
+            const idx = {};
+            for (const r of src.data) idx[`${r.date}|${r.ad_id}`] = r;
+            for (const r of adsAdData.data) {
+              const m = idx[`${r.date}|${r.ad_id}`];
+              if (m) for (const k of keys) if (m[k] != null) r[k] = m[k];
+            }
+          };
+          mergeInto(adsVideoData, [
             'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
             'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
             'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
-          ];
-          for (const r of adsAdData.data) {
-            const v = vid[`${r.date}|${r.ad_id}`];
-            if (v) for (const k of VKEYS) if (v[k] != null) r[k] = v[k];
-          }
+          ]);
+          mergeInto(adsCreativeData, [
+            'effective_instagram_media__media_type',
+            'effective_instagram_media__media_product_type',
+            'object_type',
+          ]);
         }
 
         return res.status(200).json({
@@ -178,6 +197,7 @@ module.exports = async (req, res) => {
             // Video-fetch faalt niet-fataal; tóch meesturen zodat een ontbrekende
             // retentiecurve te herleiden is i.p.v. stil opgeslokt te worden.
             adsVideo: adsVideoData && adsVideoData.__error ? adsVideoData.__error : null,
+            adsCreative: adsCreativeData && adsCreativeData.__error ? adsCreativeData.__error : null,
           },
         });
       }

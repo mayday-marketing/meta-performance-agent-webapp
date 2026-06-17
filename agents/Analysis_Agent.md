@@ -108,7 +108,7 @@ Voor winners en losers, kies uit deze invalshoeken — neem de meest relevante 2
 - **Cadens** — frequentie, posting-dagen, gaps
 - **Specifieke posts** — outliers met concrete getallen (titel, datum)
 - **Period-over-period** — wat veranderde t.o.v. vorige periode (delta in KPIs)
-- **Paid** — gebruik `ads`. Als `ads.level === "ad"` heb je per-advertentie data: vergelijk `bestAdsByEngagement` vs `worstAdsByEngagement` op engagement/CTR, en benoem spend en (indien aanwezig) retentie. Als `ads.level === "campaign"` blijft het op campagne-niveau (reach/engagement). NOOIT conversies of ROAS.
+- **Paid** — gebruik `ads`. Als `ads.level === "ad"` heb je per-advertentie data: vergelijk `bestAdsByEngagement` vs `worstAdsByEngagement` op engagement/CTR, en benoem spend en (indien aanwezig) retentie. Elke ad heeft een `adType` (`Reel`/`Carrousel`/`Foto`/`Video`/`Post`) — gebruik dat om format-conclusies binnen paid te trekken (bv. "Reel-ads halen hogere engagement dan foto-ads"). Als `ads.level === "campaign"` blijft het op campagne-niveau (reach/engagement). NOOIT conversies of ROAS.
 
 Voor recommendations, focus op:
 - **Wat moet de klant volgende week doen** (1 concrete actie)

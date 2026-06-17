@@ -847,6 +847,10 @@
       campaignId: String(raw.campaign_id || ""),
       campaignName: String(raw.campaign_name || ""),
       thumb: typeof raw.image_url === "string" ? raw.image_url : "",
+      // Creative-type (geverifieerde Windsor-velden) — bepaalt het getoonde ad-type.
+      igMediaType: String(raw.effective_instagram_media__media_type || ""),
+      igProductType: String(raw.effective_instagram_media__media_product_type || ""),
+      objectType: String(raw.object_type || ""),
       reach: Number(raw.reach) || 0,
       impressions: Number(raw.impressions) || 0,
       clicks: Number(raw.clicks) || 0,
@@ -880,6 +884,25 @@
   // campagne-niveau (fallback wanneer de ad-level fetch faalt → één card per campagne).
   // Reach wordt gesommeerd over dagen (consistent met de KPI-berekening hierboven;
   // dit overschat unieke reach licht — bekende beperking van daily rows).
+  // Leid het getoonde ad-type af uit de creative-velden. IG-velden zijn het meest
+  // specifiek (Reel/Carrousel/Foto/Video); object_type is de FB-zijde fallback;
+  // als laatste redmiddel onderscheidt video-afspeeldata Video van Foto.
+  function adCreativeType(g) {
+    const pt = (g.igProductType || "").toUpperCase(); // FEED / REELS / STORY
+    const mt = (g.igMediaType || "").toUpperCase();    // IMAGE / VIDEO / CAROUSEL_ALBUM
+    const ot = (g.objectType || "").toUpperCase();     // VIDEO / PHOTO / SHARE / STATUS
+    if (pt === "REELS") return "Reel";
+    if (pt === "STORY") return "Story";
+    if (mt === "CAROUSEL_ALBUM") return "Carrousel";
+    if (mt === "VIDEO") return "Video";
+    if (mt === "IMAGE") return "Foto";
+    if (ot === "VIDEO") return "Video";
+    if (ot === "PHOTO") return "Foto";
+    if (ot === "SHARE" || ot === "STATUS") return "Post";
+    if ((g.vplays || 0) > 0) return "Video";
+    return "Advertentie"; // type onbekend → neutrale fallback
+  }
+
   function aggregateWindsorAds(adsRows) {
     const groups = {};
     for (const r of adsRows) {
@@ -890,6 +913,7 @@
         id, isAd,
         name: isAd ? (r.adName || id) : (r.campaignName || id),
         campaign: r.campaignName || "", thumb: "",
+        igMediaType: "", igProductType: "", objectType: "",
         reach: 0, impressions: 0, clicks: 0, spend: 0, lastDate: null,
         likes: 0, comments: 0, shares: 0, saves: 0,
         vp25: 0, vp50: 0, vp75: 0, vp95: 0, vp100: 0, vplays: 0,
@@ -904,6 +928,10 @@
       g.vp95 += r.vp95 || 0; g.vp100 += r.vp100 || 0; g.vplays += r.vplays || 0;
       if (!g.campaign && r.campaignName) g.campaign = r.campaignName;
       if (!g.thumb && r.thumb) g.thumb = r.thumb;
+      // Creative-type is constant per advertentie — eerste niet-lege waarde volstaat.
+      if (!g.igMediaType && r.igMediaType) g.igMediaType = r.igMediaType;
+      if (!g.igProductType && r.igProductType) g.igProductType = r.igProductType;
+      if (!g.objectType && r.objectType) g.objectType = r.objectType;
       if (r.date && (!g.lastDate || r.date > g.lastDate)) g.lastDate = r.date;
     }
     return Object.values(groups).map(g => {
@@ -921,7 +949,8 @@
       return {
         id: `ads-${g.id}`,
         platform: "ads",
-        type: g.isAd ? "Advertentie" : "Campagne",
+        isAd: g.isAd,                          // robuuste ad-vs-campagne-vlag (los van de label-string)
+        type: g.isAd ? adCreativeType(g) : "Campagne",
         subtitle: g.isAd ? g.campaign : "",   // campagne als context-subregel bij ad-cards
         date: g.lastDate,
         dateLabel: g.lastDate ? fmt.dateNL(g.lastDate) : "—",
@@ -2034,7 +2063,8 @@
     const slimAd = (a) => {
       const out = {
         name: (a.caption || "").slice(0, 100),
-        level: a.type === "Advertentie" ? "ad" : "campaign",
+        level: a.isAd ? "ad" : "campaign",
+        adType: a.isAd ? a.type : null,   // Reel / Carrousel / Foto / Video / Post
         campaign: a.subtitle || null,
         reach: a.reach || 0,
         impressions: a.impressions || 0,
@@ -2053,7 +2083,7 @@
       return out;
     };
 
-    const adLevel = ads.filter(a => a.type === "Advertentie");
+    const adLevel = ads.filter(a => a.isAd);
     const byEng = (arr) => [...arr].filter(a => (a.reach || 0) >= 100).sort((x, y) => (y.engagement || 0) - (x.engagement || 0));
     const engAds = byEng(adLevel);
 
