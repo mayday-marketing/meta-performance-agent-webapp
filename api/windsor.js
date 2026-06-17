@@ -176,8 +176,31 @@ module.exports = async (req, res) => {
         });
       }
 
+      // Veld-ontdekking: vraagt de autoritatieve veldenlijst van een connector op
+      // (account-specifiek). Geeft de velden terug die matchen op video/engagement-termen,
+      // zodat we de juiste veldnamen kunnen instellen zonder te gokken.
+      case 'getFields': {
+        const conn = connector || 'facebook';
+        const url = `${BASE}/${conn}/fields?api_key=${encodeURIComponent(apiKey)}`;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 25000);
+        try {
+          const r = await fetch(url, { signal: ctrl.signal });
+          const text = await r.text();
+          let data;
+          try { data = JSON.parse(text); } catch { return res.status(200).json({ connector: conn, raw: text.slice(0, 3000) }); }
+          const list = Array.isArray(data) ? data
+            : (Array.isArray(data.data) ? data.data : (Array.isArray(data.fields) ? data.fields : []));
+          const rx = /video|p25|p50|p75|p95|p100|react|comment|share|save|engag|\blike|play|view|watch/i;
+          const matched = list
+            .filter(f => rx.test(JSON.stringify(f)))
+            .map(f => ({ id: f.id || f.field || f.name, name: f.name || f.label, type: f.type }));
+          return res.status(200).json({ connector: conn, total: list.length, matched });
+        } finally { clearTimeout(timer); }
+      }
+
       default:
-        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData' en 'getDashboard' beschikbaar).` });
+        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData', 'getDashboard', 'getFields' beschikbaar).` });
     }
   } catch (err) {
     return res.status(502).json({ error: err.message });
