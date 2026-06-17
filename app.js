@@ -1955,6 +1955,10 @@
       comments: p.comments || 0,
       shares: p.shares || 0,
       saves: p.saves || 0,
+      // Classifier-output (Blok A) — door de agent te gebruiken als voor-geclassificeerd signaal.
+      performance: p.performance || null,      // "Good" | "Average" | "Bad" | null (=n/a)
+      perfRatio: p.perfRatio != null ? p.perfRatio : null, // ratio t.o.v. bucket-mediaan
+      perfBucket: p.perfBucket || null,        // bv. "Instagram · Reel"
     });
 
     const byEngagement = [...posts].filter(p => p.reach >= 100).sort((a, b) => b.engagement - a.engagement);
@@ -1969,6 +1973,31 @@
     }
     const busiestIdx = dayCounts.indexOf(Math.max(...dayCounts));
     const quietestIdx = dayCounts.indexOf(Math.min(...dayCounts.filter(v => v >= 0)));
+
+    // Classifier-signaal (Blok A) — per bucket de Good/Average/Bad-verdeling, plus
+    // expliciete over- en onderpresteerders. De agent hoeft niets te herrekenen.
+    const buckets = {};
+    for (const p of posts) {
+      const b = p.perfBucket;
+      if (!b) continue;
+      const bd = buckets[b] || (buckets[b] = { bucket: b, count: 0, good: 0, average: 0, bad: 0, na: 0 });
+      bd.count += 1;
+      if (p.performance === "Good") bd.good += 1;
+      else if (p.performance === "Average") bd.average += 1;
+      else if (p.performance === "Bad") bd.bad += 1;
+      else bd.na += 1;
+    }
+    const performanceBreakdown = Object.values(buckets).sort((a, b) => b.count - a.count);
+
+    const rated = posts.filter(p => p.perfRatio != null);
+    const overperformers = rated
+      .filter(p => p.performance === "Good")
+      .sort((a, b) => b.perfRatio - a.perfRatio)
+      .slice(0, 5).map(slimPost);
+    const underperformers = rated
+      .filter(p => p.performance === "Bad")
+      .sort((a, b) => a.perfRatio - b.perfRatio)
+      .slice(0, 5).map(slimPost);
 
     return {
       kpis: ov.kpis.map(k => ({
@@ -1991,16 +2020,52 @@
       topPostsByEngagement: top10,
       bottomPostsByEngagement: bottom5,
       topPostsByReach: byReach.slice(0, 5).map(slimPost),
-      ads: {
-        campaignCount: ads.length,
-        totalReach: ads.reduce((s, a) => s + (a.reach || 0), 0),
-        topCampaigns: [...ads].sort((a, b) => (b.reach || 0) - (a.reach || 0)).slice(0, 3).map(a => ({
-          name: (a.caption || "").slice(0, 100),
-          reach: a.reach || 0,
-          clicks: a.clicks || 0,
-          ctr: +(a.ctr || 0).toFixed(2),
-        })),
-      },
+      // Classifier-signaal (Blok A): verdeling per bucket + concrete over/onderpresteerders.
+      performanceBreakdown,
+      overperformers,
+      underperformers,
+      ads: buildAdsSummary(ads),
+    };
+  }
+
+  // Per-ad/paid samenvatting (Blok 2). Onderscheidt campagne- en ad-niveau, en neemt
+  // retentie alleen mee als de curve echt gevuld is (anders niets — geen fake data).
+  function buildAdsSummary(ads) {
+    const slimAd = (a) => {
+      const out = {
+        name: (a.caption || "").slice(0, 100),
+        level: a.type === "Advertentie" ? "ad" : "campaign",
+        campaign: a.subtitle || null,
+        reach: a.reach || 0,
+        impressions: a.impressions || 0,
+        clicks: a.clicks || 0,
+        ctr: +(a.ctr || 0).toFixed(2),
+        engagement: +(a.engagement || 0).toFixed(2),
+        spend: a.spend != null ? +(a.spend).toFixed(2) : null,
+      };
+      // Retentie alleen meesturen als de curve daadwerkelijk gevuld is (zie task_3c228fd4).
+      if (a.retention && a.retention.p50 != null) {
+        out.retention = {
+          p25: a.retention.p25, p50: a.retention.p50,
+          p75: a.retention.p75, p95: a.retention.p95,
+        };
+      }
+      return out;
+    };
+
+    const adLevel = ads.filter(a => a.type === "Advertentie");
+    const byEng = (arr) => [...arr].filter(a => (a.reach || 0) >= 100).sort((x, y) => (y.engagement || 0) - (x.engagement || 0));
+    const engAds = byEng(adLevel);
+
+    return {
+      level: adLevel.length ? "ad" : "campaign",  // welk granulariteitsniveau de data heeft
+      campaignCount: ads.length,
+      totalReach: ads.reduce((s, a) => s + (a.reach || 0), 0),
+      totalSpend: +(ads.reduce((s, a) => s + (a.spend || 0), 0)).toFixed(2),
+      topByReach: [...ads].sort((a, b) => (b.reach || 0) - (a.reach || 0)).slice(0, 3).map(slimAd),
+      bestAdsByEngagement: engAds.slice(0, 3).map(slimAd),
+      // Alleen los meesturen als er genoeg ads zijn om best/worst te onderscheiden.
+      worstAdsByEngagement: engAds.length > 4 ? engAds.slice(-3).reverse().map(slimAd) : [],
     };
   }
 
