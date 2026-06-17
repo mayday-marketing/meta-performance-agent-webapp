@@ -197,11 +197,17 @@ module.exports = async (req, res) => {
           try { data = JSON.parse(text); } catch { return res.status(200).json({ connector: conn, raw: text.slice(0, 3000) }); }
           const list = Array.isArray(data) ? data
             : (Array.isArray(data.data) ? data.data : (Array.isArray(data.fields) ? data.fields : []));
-          const rx = /video|p25|p50|p75|p95|p100|react|comment|share|save|engag|\blike|play|view|watch/i;
+          // Standaard-filter dekt video/engagement én creative-type-termen (type/format/
+          // creative/object/asset/placement/reel/carousel/media). Override via body.filter.
+          const rx = filter
+            ? new RegExp(filter, 'i')
+            : /video|p25|p50|p75|p95|p100|react|comment|share|save|engag|\blike|play|view|watch|type|format|creative|object|asset|placement|reel|carousel|carrousel|media|story/i;
           const matched = list
             .filter(f => rx.test(JSON.stringify(f)))
             .map(f => ({ id: f.id || f.field || f.name, name: f.name || f.label, type: f.type }));
-          return res.status(200).json({ connector: conn, total: list.length, matched });
+          // Volledige id-lijst meesturen zodat een veld dat de filter mist toch zichtbaar is.
+          const allIds = list.map(f => f.id || f.field || f.name).filter(Boolean);
+          return res.status(200).json({ connector: conn, total: list.length, matched, allIds });
         } finally { clearTimeout(timer); }
       }
 
