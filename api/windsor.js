@@ -119,10 +119,35 @@ module.exports = async (req, res) => {
           'impressions', 'reach', 'clicks', 'spend', 'cpm', 'cpc', 'ctr',
         ].join(',');
 
-        const [igData, adsData] = await Promise.all([
+        // Video-retentievelden in een APARTE call: zijn de veldnamen (nog) niet juist,
+        // dan faalt enkel deze call en blijft de kern-ads-data (reach/clicks/spend) intact.
+        const ADS_VIDEO_FIELDS = [
+          'date', 'campaign_id',
+          'video_p25_watched_actions', 'video_p50_watched_actions',
+          'video_p75_watched_actions', 'video_p95_watched_actions',
+          'video_p100_watched_actions', 'video_play_actions',
+        ].join(',');
+
+        const [igData, adsData, adsVideoData] = await Promise.all([
           safeCall(windsor('instagram', apiKey, { fields: IG_FIELDS, ...dateParams }), 'ig'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_FIELDS, ...dateParams }), 'fb-ads'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_VIDEO_FIELDS, ...dateParams }), 'fb-ads-video'),
         ]);
+
+        // Merge de video-velden in de daily ads-rows op (datum, campaign_id). Best-effort.
+        if (adsData && Array.isArray(adsData.data) && adsVideoData && Array.isArray(adsVideoData.data)) {
+          const vid = {};
+          for (const r of adsVideoData.data) vid[`${r.date}|${r.campaign_id}`] = r;
+          const VKEYS = [
+            'video_p25_watched_actions', 'video_p50_watched_actions',
+            'video_p75_watched_actions', 'video_p95_watched_actions',
+            'video_p100_watched_actions', 'video_play_actions',
+          ];
+          for (const r of adsData.data) {
+            const v = vid[`${r.date}|${r.campaign_id}`];
+            if (v) for (const k of VKEYS) if (v[k] != null) r[k] = v[k];
+          }
+        }
 
         return res.status(200).json({
           period: { startDate, endDate },

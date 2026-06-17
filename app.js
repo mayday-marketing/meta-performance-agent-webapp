@@ -19,11 +19,31 @@
     dateISO: (d) => d.toISOString().slice(0, 10),
   };
 
+  /* ---------- Performance classifier config (single source of truth) ----------
+     Zowel classifyPerformance() als renderMethodology() lezen hieruit, zodat
+     de code en de klantuitleg automatisch synchroon blijven. */
+  const PERFORMANCE_CONFIG = {
+    thresholds: { good: 1.2, bad: 0.7 },   // ratio t.o.v. bucket-mediaan
+    minBucketSize: 3,                       // < 3 posts in bucket → label "n/a"
+    // Gewichten per content-type. engagement = engagement_lite, save = save_rate,
+    // watchTime = watch_time_ratio (schaal-onafhankelijk t.o.v. bucket-mediaan).
+    formulas: {
+      photo:    { engagement: 0.5, save: 0.5, watchTime: 0 },
+      carousel: { engagement: 0.3, save: 0.7, watchTime: 0 },
+      reel:     { engagement: 0.2, save: 0.1, watchTime: 0.7 },
+      fbVideo:  { engagement: 0.3, save: 0.1, watchTime: 0.6 },
+      story:    { engagement: 0.4, save: 0.0, watchTime: 0, reachShare: 0.6 },
+    },
+    // Fallback voor reels/video's zonder watch-time data (oudere posts).
+    fallback: { engagement: 0.7, save: 0.3, watchTime: 0 },
+  };
+
   const state = {
     session: null,                    // { token, clientId, brandName, hasMetricool, hasDrive }
     page: "overview",
     libraryView: "grid",
     libraryFilter: "all",
+    librarySearch: "",
     librarySort: { key: "date", dir: "desc" },
     chatMessages: [],
     period: { start: null, end: null },
@@ -260,9 +280,10 @@
     bindDateFilter();
     bindPeriodToggle();
 
-    // Library + Analysis still use mock — render once.
     renderLibrary();
     renderAnalysis();
+    renderConnectors();   // dynamisch o.b.v. session (Blok D)
+    renderMethodology();  // statische pagina o.b.v. PERFORMANCE_CONFIG (Blok E)
     renderChat();
     bindNav();
     bindChatPanel();
@@ -311,11 +332,12 @@
     $$(".nav-link").forEach((l) => l.classList.toggle("on", l.dataset.page === page));
     $$(".dash-page").forEach((p) => p.style.display = p.id === `page-${page}` ? "block" : "none");
     const titles = {
-      overview: { title: "Overview", crumbs: ["Dashboard", "Overview"] },
-      library:  { title: "Library",  crumbs: ["Dashboard", "Library"] },
-      analysis: { title: "Analysis", crumbs: ["Dashboard", "Analysis"] }
+      overview:    { title: "Overview",    crumbs: ["Dashboard", "Overview"] },
+      library:     { title: "Library",     crumbs: ["Dashboard", "Library"] },
+      analysis:    { title: "Analysis",    crumbs: ["Dashboard", "Analysis"] },
+      methodology: { title: "Methodology", crumbs: ["Dashboard", "Methodology"] },
     };
-    const t = titles[page];
+    const t = titles[page] || titles.overview;
     $(".page-title").textContent = t.title;
     $(".crumbs").innerHTML = t.crumbs.map((c, i) =>
       i === 0 ? `<span>${c}</span>` : `<span class="sep">/</span><span>${c}</span>`
@@ -508,6 +530,9 @@
     const url = pickStr(raw, "url", "permalinkUrl", "permalink", "link");
     const rawType = pickStr(raw, "type", "mediaType", "mediaProductType");
     const type = friendlyType(rawType, defaultType);
+    // Gem. kijktijd in seconden — Metricool exposeert dit doorgaans niet (→ 0),
+    // defensief opgevangen voor het geval een endpoint het wél meelevert.
+    const avgWatchTime = pick(raw, "avgwatchtime", "averageWatchTime", "videoAvgTimeWatched");
 
     return {
       id: pickStr(raw, "id", "postId") || url || `${platform}-${published || Math.random()}`,
@@ -516,6 +541,7 @@
       startMs, stopMs,
       reach, impressions, likes, comments, shares, saves, clicks, views,
       interactions, engagement, ctr,
+      avgWatchTime,
       caption, thumb, url,
     };
   }
@@ -549,6 +575,95 @@
 
   function arrayOrEmpty(x) { return Array.isArray(x) ? x : []; }
 
+  /* ---------- Performance classifier (Blok A) ----------
+     Wijst per organic post een Good/Average/Bad/n-a-label toe, op basis van een
+     multi-score vergeleken met de mediaan van dezelfde (platform × type)-bucket
+     in de geselecteerde periode. Leest gewichten/thresholds uit PERFORMANCE_CONFIG.
+     Zet labels in-place op de post-objecten; ads worden overgeslagen (andere KPI's). */
+
+  function formulaKeyFor(post) {
+    const t = (post.type || "").toLowerCase();
+    if (t.startsWith("carrousel") || t.startsWith("carousel")) return "carousel";
+    if (t.startsWith("foto") || t.startsWith("photo")) return "photo";
+    if (t.startsWith("reel")) return "reel";
+    if (t.startsWith("story")) return "story";
+    if (t.startsWith("video")) return post.platform === "fb" ? "fbVideo" : "reel"; // IG-video → reel-formule
+    return "photo"; // "Post"/"Status"/"Link" e.d. → foto-achtige content
+  }
+
+  // engagement_lite — saves bewust NIET meegerekend (dubbeltelling met save_rate vermijden).
+  function engagementLite(p) {
+    return p.reach ? ((p.likes || 0) + (p.comments || 0) + (p.shares || 0)) / p.reach * 100 : 0;
+  }
+  function saveRate(p) {
+    return p.reach ? (p.saves || 0) / p.reach * 100 : 0;
+  }
+  function median(nums) {
+    const arr = nums.filter(n => typeof n === "number" && !Number.isNaN(n)).sort((a, b) => a - b);
+    if (!arr.length) return 0;
+    const mid = Math.floor(arr.length / 2);
+    return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+  }
+
+  function bucketLabel(platform, formulaKey) {
+    const plat = { ig: "IG", fb: "FB" }[platform] || (platform || "").toUpperCase();
+    const type = { photo: "foto's", carousel: "carrousels", reel: "reels", fbVideo: "video's", story: "stories" }[formulaKey] || formulaKey;
+    return `${plat}-${type}`;
+  }
+
+  function classifyPerformance(allPosts) {
+    const { thresholds, minBucketSize, fallback } = PERFORMANCE_CONFIG;
+
+    // 1. Groepeer in (platform × formule-type)-buckets — ads overslaan.
+    const buckets = {};
+    for (const p of allPosts) {
+      if (!p || p.platform === "ads") continue;
+      const fk = formulaKeyFor(p);
+      const key = `${p.platform}::${fk}`;
+      (buckets[key] = buckets[key] || []).push(p);
+    }
+
+    for (const key of Object.keys(buckets)) {
+      const posts = buckets[key];
+      const fk = key.split("::")[1];
+      const f = PERFORMANCE_CONFIG.formulas[fk] || PERFORMANCE_CONFIG.formulas.photo;
+      const label = bucketLabel(key.split("::")[0], fk);
+
+      // Noemer voor watch_time_ratio: mediaan avg-kijktijd over posts mét watch-data.
+      const medianWatch = median(posts.map(p => p.avgWatchTime || 0).filter(v => v > 0));
+
+      // 2. Multi-score per post.
+      const scored = posts.map(p => {
+        const eng = engagementLite(p);
+        const sav = saveRate(p);
+        const hasWatch = f.watchTime > 0 && medianWatch > 0 && (p.avgWatchTime || 0) > 0;
+        const wtr = hasWatch ? (p.avgWatchTime / medianWatch) : 0;
+        // Edge case: watch-gewogen type zonder watch-data → fallback-formule voor die post.
+        const w = (f.watchTime > 0 && !hasWatch) ? fallback : f;
+        const score = eng * (w.engagement || 0) + sav * (w.save || 0) + wtr * (w.watchTime || 0);
+        return { p, score };
+      });
+
+      // 3. Benchmark = mediaan van de bucket-scores.
+      const medianScore = median(scored.map(s => s.score));
+      const tooSmall = posts.length < minBucketSize;
+
+      for (const s of scored) {
+        s.p.perfScore = +s.score.toFixed(3);
+        s.p.perfBucket = label;
+        if (tooSmall || !medianScore) {
+          s.p.performance = null;   // "n/a"
+          s.p.perfRatio = null;
+          continue;
+        }
+        const ratio = s.score / medianScore;
+        s.p.perfRatio = +ratio.toFixed(2);
+        s.p.performance = ratio >= thresholds.good ? "Good" : (ratio < thresholds.bad ? "Bad" : "Average");
+      }
+    }
+    return allPosts;
+  }
+
   function transformDashboard(raw, adsCampaignsRaw) {
     const igPosts = arrayOrEmpty(raw.posts?.igPosts).map(p => normalizePost(p, "ig", "Post"));
     const igReels = arrayOrEmpty(raw.posts?.igReels).map(p => normalizePost(p, "ig", "Reel"));
@@ -556,6 +671,7 @@
     const ads = arrayOrEmpty(adsCampaignsRaw).map(c => normalizePost(c, "ads", "Campagne"));
 
     const allPosts = [...igPosts, ...igReels, ...fbPosts].filter(Boolean);
+    classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
     const adsCampaigns = ads.filter(Boolean);
 
     // Previous period posts — used for true period-over-period deltas.
@@ -687,6 +803,10 @@
     const caption = captionRaw ? captionRaw.replace(/\s+/g, " ").trim() : "—";
     const rawType = raw.media_product_type || raw.media_type;
     const type = friendlyType(rawType, "Post");
+    // Windsor levert reel-kijktijd in milliseconden → omzetten naar seconden.
+    const avgWatchTime = Number(raw.media_reel_avg_watch_time) > 0
+      ? Number(raw.media_reel_avg_watch_time) / 1000
+      : 0;
     return {
       id: String(raw.media_id || `ig-${raw.timestamp || Math.random()}`),
       platform: "ig",
@@ -697,6 +817,7 @@
       reach, impressions: views, likes, comments, shares, saves,
       clicks: 0, views,
       interactions, engagement, ctr: 0,
+      avgWatchTime,
       caption,
       thumb: typeof raw.media_thumbnail_url === "string" ? raw.media_thumbnail_url
            : typeof raw.media_url === "string" ? raw.media_url : "",
@@ -714,6 +835,14 @@
       impressions: Number(raw.impressions) || 0,
       clicks: Number(raw.clicks) || 0,
       spend: Number(raw.spend) || 0,
+      // Video-retentie (Blok F) — veldnamen nog te verifiëren op de live deploy;
+      // ontbreken ze, dan blijven deze 0 en wordt er geen curve getoond.
+      vp25:   Number(raw.video_p25_watched_actions)  || 0,
+      vp50:   Number(raw.video_p50_watched_actions)  || 0,
+      vp75:   Number(raw.video_p75_watched_actions)  || 0,
+      vp95:   Number(raw.video_p95_watched_actions)  || 0,
+      vp100:  Number(raw.video_p100_watched_actions) || 0,
+      vplays: Number(raw.video_play_actions) || 0,
     };
   }
 
@@ -724,6 +853,55 @@
     }, 0);
   }
 
+  // Aggregeer Windsor daily ads-rows tot campagne-pseudo-posts voor de Library (Blok B).
+  // Reach wordt gesommeerd over dagen (consistent met de KPI-berekening hierboven;
+  // dit overschat unieke reach licht — bekende beperking van daily rows).
+  function aggregateWindsorAds(adsRows) {
+    const byCampaign = {};
+    for (const r of adsRows) {
+      if (!r) continue;
+      const id = r.campaignId || r.campaignName || "onbekend";
+      const g = byCampaign[id] || (byCampaign[id] = {
+        id, name: r.campaignName || id,
+        reach: 0, impressions: 0, clicks: 0, spend: 0, lastDate: null,
+        vp25: 0, vp50: 0, vp75: 0, vp95: 0, vp100: 0, vplays: 0,
+      });
+      g.reach += r.reach || 0;
+      g.impressions += r.impressions || 0;
+      g.clicks += r.clicks || 0;
+      g.spend += r.spend || 0;
+      g.vp25 += r.vp25 || 0; g.vp50 += r.vp50 || 0; g.vp75 += r.vp75 || 0;
+      g.vp95 += r.vp95 || 0; g.vp100 += r.vp100 || 0; g.vplays += r.vplays || 0;
+      if (r.date && (!g.lastDate || r.date > g.lastDate)) g.lastDate = r.date;
+    }
+    return Object.values(byCampaign).map(g => {
+      const ctr = g.impressions ? (g.clicks / g.impressions) * 100 : 0;
+      // Retentiecurve (Blok F): percentage van video-plays dat elk checkpoint haalt.
+      const retention = g.vplays > 0 ? {
+        p3:  100, // ~start; Meta levert geen 3s-checkpoint op campagne-niveau
+        p25: Math.round((g.vp25 / g.vplays) * 100),
+        p50: Math.round((g.vp50 / g.vplays) * 100),
+        p75: Math.round((g.vp75 / g.vplays) * 100),
+        p95: Math.round(((g.vp95 || g.vp100) / g.vplays) * 100),
+      } : null;
+      return {
+        id: `ads-${g.id}`,
+        platform: "ads",
+        type: "Campagne",
+        date: g.lastDate,
+        dateLabel: g.lastDate ? fmt.dateNL(g.lastDate) : "—",
+        startMs: 0, stopMs: 0,
+        reach: g.reach, impressions: g.impressions,
+        likes: 0, comments: 0, shares: 0, saves: 0,
+        clicks: g.clicks, views: g.vplays,
+        interactions: 0, engagement: 0, ctr,
+        avgWatchTime: 0, spend: g.spend,
+        retention,
+        caption: g.name, thumb: "", url: "",
+      };
+    });
+  }
+
   function transformWindsorDashboard(raw) {
     const igPostsRaw = arrayOrEmpty(raw.instagram?.data);
     const adsRowsRaw = arrayOrEmpty(raw.ads?.data);
@@ -732,6 +910,8 @@
     const adsRows = adsRowsRaw.map(normalizeWindsorAdRow).filter(Boolean);
 
     const allPosts = igPosts; // FB organic via Windsor nog niet gewired
+    classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
+    const adsCampaigns = aggregateWindsorAds(adsRows); // campagne-cards voor Library (Blok B)
 
     const curAgg = aggregatePosts(allPosts);
     const adsReachCur = adsRows.reduce((s, r) => s + (r.reach || 0), 0);
@@ -824,7 +1004,7 @@
       cadenceWeeks,
       cadence,
       allPosts,
-      adsCampaigns: [], // niet relevant in Windsor-flow (daily data, geen campagne-objecten)
+      adsCampaigns, // geaggregeerde campagne-cards uit daily rows (Blok B)
       adsLoading: false, // Windsor levert ads in dezelfde call → geen aparte wachttijd
       _raw: raw,
       _source: "windsor",
@@ -1160,13 +1340,15 @@
   function getLibraryFilterDefs() {
     const all = getLibraryAllPosts();
     const count = (key) => all.filter(p => librarySourceOf(p) === key).length;
-    return [
+    const defs = [
       { key: "all",      label: "Alle",            count: all.length },
       { key: "ig-posts", label: "Instagram posts", count: count("ig-posts") },
       { key: "ig-reels", label: "Instagram reels", count: count("ig-reels") },
       { key: "fb-posts", label: "Facebook posts",  count: count("fb-posts") },
       { key: "ads",      label: "Meta Ads",        count: count("ads") },
     ];
+    // Verberg chips zonder data (count 0) — "Alle" blijft altijd staan.
+    return defs.filter(f => f.key === "all" || f.count > 0);
   }
 
   function sortLibrary(list, key, dir) {
@@ -1184,18 +1366,28 @@
     });
   }
 
-  function computePerformance(post, avg) {
-    if (post.platform === "ads") return null;      // ads engagement is structureel anders
-    if (!avg || !post.engagement) return null;
-    if (post.engagement >= avg * 1.2) return "Good";
-    if (post.engagement <= avg * 0.7) return "Bad";
-    return "Average";
+  // Label komt nu uit de bucketed classifier (classifyPerformance), gezet op de post.
+  function computePerformance(post) {
+    if (!post || post.platform === "ads") return null; // ads: geen organic-classifier
+    return post.performance || null;                    // null → "n/a" in de UI
+  }
+
+  // Tooltip die het "waarom" achter het label toont (per spec).
+  function perfTooltip(post) {
+    if (!post || post.perfRatio == null) {
+      return "Te weinig vergelijkbare posts in deze periode voor een betrouwbaar oordeel.";
+    }
+    return `Score ${post.perfRatio.toFixed(2)}× benchmark voor ${post.perfBucket || "deze content"} → ${post.performance}`;
   }
 
   function getFilteredLibrary() {
     let list = getLibraryAllPosts();
     if (state.libraryFilter !== "all") {
       list = list.filter(p => librarySourceOf(p) === state.libraryFilter);
+    }
+    const q = (state.librarySearch || "").trim().toLowerCase();
+    if (q) {
+      list = list.filter(p => (p.caption || "").toLowerCase().includes(q));
     }
     return sortLibrary(list, state.librarySort.key, state.librarySort.dir);
   }
@@ -1208,9 +1400,21 @@
     return "Deze performantie-indicator vergelijkt de post met de klantbenchmark.";
   }
 
-  function openPerformanceChat(level) {
+  function findLibraryPost(id) {
+    return getLibraryAllPosts().find(p => String(p.id) === String(id)) || null;
+  }
+
+  function openPerformanceChat(level, post) {
     toggleChatPanel(true);
-    pushBot({ text: `<strong>${level}</strong> — ${performanceExplanation(level)}` });
+    const why = post ? `<br><span class="muted">${escapeHtml(perfTooltip(post))}</span>` : "";
+    pushBot({ text: `<strong>${level}</strong> — ${performanceExplanation(level)}${why}` });
+  }
+
+  // Open de IG/FB-permalink van een post in een nieuw tabblad.
+  function openPostLink(id) {
+    const post = findLibraryPost(id);
+    const url = post && safeUrl(post.url);
+    if (url && url.startsWith("http")) window.open(url, "_blank", "noopener");
   }
 
   function bindLibraryInteractions() {
@@ -1227,8 +1431,22 @@
         renderLibrary();
       };
     });
+    // Klik op een card/rij → open permalink. Posts zonder url krijgen geen pointer.
+    $$("#lib-results .lib-card, #lib-results tbody tr[data-post]").forEach((el) => {
+      const post = findLibraryPost(el.dataset.post);
+      const hasUrl = post && safeUrl(post.url).startsWith("http");
+      if (!hasUrl) return;
+      el.style.cursor = "pointer";
+      el.onclick = (e) => {
+        if (e.target.closest(".perf-button")) return; // perf-knop heeft eigen actie
+        openPostLink(el.dataset.post);
+      };
+    });
     $$("#lib-results .perf-button").forEach((btn) => {
-      btn.onclick = () => openPerformanceChat(btn.dataset.performance);
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        openPerformanceChat(btn.dataset.performance, findLibraryPost(btn.dataset.post));
+      };
     });
   }
 
@@ -1269,9 +1487,21 @@
     }).join("")}</div>`;
   }
 
+  // Watch / Retention-cel (Blok F):
+  //  - Meta Ads-video met curve → de 5-blok retentiecurve
+  //  - Reel / IG-video / FB-video met kijktijd → gem. kijktijd in seconden
+  //  - overige content → "—"
+  function renderWatchRetentionCell(p) {
+    if (p.platform === "ads" && p.retention) return renderRetentionBlocks(p.retention);
+    if ((p.avgWatchTime || 0) > 0) {
+      return `<span title="Gemiddelde kijktijd">${p.avgWatchTime.toFixed(1)}s</span>`;
+    }
+    return `<span class="muted">—</span>`;
+  }
+
   function renderRetentionBlocks(retention) {
-    // Metricool API exposeert geen percentile retention per post in dashboard-endpoints.
-    // 5 inactieve blocks tonen behoudt de tabel-layout; data komt later via Meta Ads MCP.
+    // Organic IG/FB exposeert geen percentile-retentie (Instagram Graph API/Windsor
+    // leveren dit niet). Voor Meta Ads-video's komt de curve via de facebook-connector.
     if (!retention) return `<div class="retention-row">${Array(5).fill('<span class="block inactive"></span>').join('')}</div>`;
     const checkpoints = [
       { label: '3s',  value: retention.p3,  threshold: 3 },
@@ -1312,7 +1542,6 @@
 
   function renderLibraryTable(list) {
     if (!list.length) return renderLibraryEmpty();
-    const avgEng = list.reduce((s, p) => s + (p.engagement || 0), 0) / list.length;
     return `<div class="lib-table"><table>
       <thead><tr>
         <th>Post</th>
@@ -1325,7 +1554,7 @@
         <th class="right sortable" data-sort="comments">Comments${sortArrow("comments")}</th>
         <th class="right sortable" data-sort="shares">Shares${sortArrow("shares")}</th>
         <th class="right sortable" data-sort="saves">Saves${sortArrow("saves")}</th>
-        <th class="right">Retention</th>
+        <th class="right">Watch / Retention</th>
         <th class="right sortable" data-sort="engagement">Engage${sortArrow("engagement")}</th>
         <th class="right sortable" data-sort="ctr">CTR${sortArrow("ctr")}</th>
         <th class="right">Performantie</th>
@@ -1334,10 +1563,10 @@
         ${renderBenchmarkRow(list)}
         ${list.map((p, i) => {
           const t = libThumb(p, i, { imgClass: "row-thumb-img" });
-          const performance = computePerformance(p, avgEng);
+          const performance = computePerformance(p);
           const perfHtml = performance
-            ? `<button class="perf-button ${performance.toLowerCase()}" data-performance="${performance}">${performance}</button>`
-            : `<span class="muted">n/a</span>`;
+            ? `<button class="perf-button ${performance.toLowerCase()}" data-performance="${performance}" data-post="${escapeHtml(p.id)}" title="${escapeHtml(perfTooltip(p))}">${performance}</button>`
+            : `<span class="muted" title="${escapeHtml(perfTooltip(p))}">n/a</span>`;
           return `
           <tr data-post="${escapeHtml(p.id)}">
             <td><span class="row-thumb thumb-pattern" style="background:${t.bg}">${t.imgHtml}</span><span class="row-caption">${escapeHtml(p.caption)}</span></td>
@@ -1350,7 +1579,7 @@
             <td class="right">${fmt.int(p.comments)}</td>
             <td class="right">${fmt.int(p.shares)}</td>
             <td class="right">${fmt.int(p.saves)}</td>
-            <td class="right">${renderRetentionBlocks(null)}</td>
+            <td class="right">${renderWatchRetentionCell(p)}</td>
             <td class="right">${(p.engagement || 0).toFixed(1)}%</td>
             <td class="right">${(p.ctr || 0).toFixed(1)}%</td>
             <td class="right">${perfHtml}</td>
@@ -1361,8 +1590,12 @@
   }
 
   function renderLibraryEmpty() {
+    const q = (state.librarySearch || "").trim();
+    const msg = q
+      ? `Geen posts gevonden voor “${escapeHtml(q)}”.`
+      : "Geen posts in deze periode. Pas de datumfilter aan of controleer je connector-instellingen.";
     return `<div class="panel" style="text-align:center; padding:48px 24px;">
-      <p class="muted" style="margin:0;">Geen posts gevonden in deze periode.</p>
+      <p class="muted" style="margin:0;">${msg}</p>
     </div>`;
   }
 
@@ -1385,8 +1618,18 @@
     const sortEl    = $("#lib-sort");
     if (!filtersEl || !resultsEl) return;
 
+    // Sidebar-badge volgt het werkelijke aantal posts (was hardcoded "14").
+    const navBadge = $('.nav-link[data-page="library"] .badge');
+    if (navBadge) {
+      const total = getLibraryAllPosts().length;
+      if (total > 0) { navBadge.textContent = total; navBadge.style.display = ""; }
+      else navBadge.style.display = "none";
+    }
+
     // Filter chips — derived counts from live data.
     const defs = getLibraryFilterDefs();
+    // Actief filter wees naar een chip die nu verborgen is (0 data) → reset naar "Alle".
+    if (!defs.some(f => f.key === state.libraryFilter)) state.libraryFilter = "all";
     filtersEl.innerHTML = defs.map(f => `
       <button class="chip ${state.libraryFilter === f.key ? "on" : ""}" data-filter="${f.key}">
         ${f.label} <span class="count">${f.count}</span>
@@ -1405,6 +1648,15 @@
       sortEl.onchange = (e) => {
         state.librarySort.key = e.target.value;
         state.librarySort.dir = "desc";
+        renderLibrary();
+      };
+    }
+
+    // Caption-search (toolbar-node blijft bestaan tussen renders → focus blijft).
+    const searchEl = $("#lib-search");
+    if (searchEl) {
+      searchEl.oninput = (e) => {
+        state.librarySearch = e.target.value;
         renderLibrary();
       };
     }
@@ -1431,6 +1683,167 @@
       : renderLibraryTable(list);
     if (countEl) countEl.textContent = `${list.length} posts`;
     bindLibraryInteractions();
+  }
+
+  /* ---------- Connectors-paneel (Blok D, dynamisch o.b.v. session) ---------- */
+
+  function renderConnectors() {
+    const el = $("#connectors-list");
+    if (!el) return;
+    const s = state.session || {};
+    const rows = [];
+    if (s.hasWindsor) rows.push({ label: "Windsor.ai", live: true });
+    if (s.hasMetricool && !s.hasWindsor) rows.push({ label: "Metricool", live: true });
+    // Meta Ads komt mee via beide bronnen (Windsor facebook-connector of Metricool).
+    if (s.hasWindsor || s.hasMetricool) rows.push({ label: "Meta Ads", live: true });
+    rows.push({ label: "Google Drive", live: !!s.hasDrive }); // Live indien gekoppeld, anders Soon
+
+    el.innerHTML = rows.map(r => {
+      const badge = r.live
+        ? `<span class="badge" style="background:rgba(47,143,95,0.16); color:var(--good);">Live</span>`
+        : `<span class="badge">Soon</span>`;
+      return `<button class="nav-link" disabled style="opacity:0.7; cursor:default;">
+        <span class="icon">${r.live ? "◉" : "◌"}</span>
+        <span>${escapeHtml(r.label)}</span>
+        ${badge}
+      </button>`;
+    }).join("");
+  }
+
+  /* ---------- Methodology-tab (Blok E) ---------- */
+
+  // Beschrijft per actieve databron welke platforms/velden beschikbaar zijn en wat ontbreekt.
+  function dataCoverage() {
+    const s = state.session || {};
+    if (s.hasWindsor) {
+      return {
+        sources: ["Windsor.ai"],
+        platforms: ["Instagram (organic)", "Meta Ads (campagne-niveau)"],
+        present: ["Caption, type, datum", "Reach, views, likes, comments, shares, saves", "Engagement", "Gem. kijktijd (reels)", "Meta Ads: reach, clicks, spend, CTR, retentiecurve"],
+        missing: [
+          ["Facebook organic", "Connector-slug nog niet bevestigd in Windsor — tijdelijk niet opgehaald."],
+          ["Retentiecurve organic", "Instagram's API exposeert dit niet voor organic content; alleen gem. kijktijd is beschikbaar."],
+          ["KPI-delta's vs vorige periode", "Vereist een tweede fetch voor de vorige periode — volgt in een latere stap."],
+        ],
+      };
+    }
+    if (s.hasMetricool) {
+      return {
+        sources: ["Metricool"],
+        platforms: ["Instagram (organic)", "Facebook (organic)", "Meta Ads (campagne-niveau)"],
+        present: ["Caption, type, datum", "Reach, likes, comments, shares, saves", "Engagement, CTR", "Meta Ads: reach, clicks (campagne-niveau)"],
+        missing: [
+          ["Gem. kijktijd / retentie", "Niet beschikbaar via de Metricool dashboard-endpoints."],
+          ["Ad-level analyse", "Alleen campagne-niveau; ad-level inzicht komt via de chat-agent (Meta Ads MCP)."],
+        ],
+      };
+    }
+    return {
+      sources: ["Handmatige upload"],
+      platforms: ["Afhankelijk van de geüploade CSV's"],
+      present: ["Velden zoals aangeleverd in de CSV-export"],
+      missing: [["Live data", "Handmatige flow gebruikt geüploade bestanden in plaats van een live koppeling."]],
+    };
+  }
+
+  function renderMethodology() {
+    const root = $("#methodology-content");
+    if (!root) return;
+    const cfg = PERFORMANCE_CONFIG;
+    const brand = state.session?.brandName || "de klant";
+    const pct = (n) => Math.round(n * 100) + "%";
+
+    // Formule-tabel — getallen komen rechtstreeks uit de config; reden is redactioneel.
+    const typeMeta = {
+      photo:    { label: "Foto",             reason: "Foto's draaien om directe interactie en bewaren." },
+      carousel: { label: "Carrousel",        reason: "Carrousels worden vooral bewaard om later terug te kijken." },
+      reel:     { label: "Reel / IG-video",  reason: "Bij video weegt kijktijd het zwaarst — blijven mensen kijken?" },
+      fbVideo:  { label: "Facebook video",   reason: "Idem als Reels, met iets meer gewicht op directe interactie." },
+      story:    { label: "Story",            reason: "Stories worden zelden bewaard; bereik-aandeel telt mee." },
+    };
+    const formulaRows = Object.keys(cfg.formulas).map(k => {
+      const f = cfg.formulas[k];
+      const m = typeMeta[k] || { label: k, reason: "" };
+      const parts = [];
+      if (f.engagement) parts.push(`${pct(f.engagement)} engagement`);
+      if (f.save) parts.push(`${pct(f.save)} saves`);
+      if (f.watchTime) parts.push(`${pct(f.watchTime)} kijktijd`);
+      if (f.reachShare) parts.push(`${pct(f.reachShare)} bereik-aandeel`);
+      return `<tr>
+        <td><strong>${m.label}</strong></td>
+        <td>${parts.join(" · ")}</td>
+        <td class="muted">${m.reason}</td>
+      </tr>`;
+    }).join("");
+
+    const cov = dataCoverage();
+    const coverageHtml = `
+      <section class="panel" style="margin-top: var(--grid-gap);">
+        <h2 class="panel-title">Welke data wordt opgehaald</h2>
+        <p class="panel-sub" style="margin-bottom:14px;">Verbonden bron(nen): <strong>${cov.sources.map(escapeHtml).join(", ")}</strong></p>
+        <div class="method-grid">
+          <div>
+            <div class="method-subhead">Platforms</div>
+            <ul class="method-list">${cov.platforms.map(p => `<li>${escapeHtml(p)}</li>`).join("")}</ul>
+            <div class="method-subhead" style="margin-top:16px;">Beschikbare velden</div>
+            <ul class="method-list">${cov.present.map(p => `<li>${escapeHtml(p)}</li>`).join("")}</ul>
+          </div>
+          <div>
+            <div class="method-subhead">Wat (nog) ontbreekt</div>
+            <ul class="method-list muted-list">${cov.missing.map(([t, d]) => `<li><strong>${escapeHtml(t)}</strong> — ${escapeHtml(d)}</li>`).join("")}</ul>
+          </div>
+        </div>
+      </section>`;
+
+    root.innerHTML = `
+      <section class="panel">
+        <h2 class="panel-title">Hoe we posts beoordelen</h2>
+        <p class="narrative-body" style="margin-top:8px;">
+          Performance-labels worden berekend op basis van een multi-score per post-type,
+          vergeleken met het gemiddelde van hetzelfde post-type van ${escapeHtml(brand)} in de
+          geselecteerde periode. Zo vergelijken we appels met appels — een Reel alleen met andere Reels.
+        </p>
+      </section>
+
+      <section class="panel" style="margin-top: var(--grid-gap);">
+        <h2 class="panel-title">Good / Average / Bad</h2>
+        <div class="method-thresholds">
+          <div class="thr good"><div class="thr-val">≥ ${cfg.thresholds.good}×</div><div class="thr-lbl">Good</div><div class="muted">minstens ${Math.round((cfg.thresholds.good - 1) * 100)}% boven het format-gemiddelde</div></div>
+          <div class="thr avg"><div class="thr-val">${cfg.thresholds.bad}–${cfg.thresholds.good}×</div><div class="thr-lbl">Average</div><div class="muted">binnen de normale variatie</div></div>
+          <div class="thr bad"><div class="thr-val">&lt; ${cfg.thresholds.bad}×</div><div class="thr-lbl">Bad</div><div class="muted">duidelijk onder gemiddeld</div></div>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top: var(--grid-gap);">
+        <h2 class="panel-title">Score-formule per content-type</h2>
+        <div class="lib-table" style="margin-top:12px;"><table>
+          <thead><tr><th>Type</th><th>Weging</th><th>Waarom</th></tr></thead>
+          <tbody>${formulaRows}</tbody>
+        </table></div>
+      </section>
+
+      <section class="panel" style="margin-top: var(--grid-gap);">
+        <h2 class="panel-title">De variabelen</h2>
+        <ul class="method-list" style="margin-top:10px;">
+          <li><strong>Engagement</strong> — likes, comments en shares ten opzichte van het bereik. Saves tellen hier niet mee (die zitten apart).</li>
+          <li><strong>Saves</strong> — hoe vaak een post bewaard is ten opzichte van het bereik. Een sterk signaal dat content waardevol genoeg is om terug te vinden.</li>
+          <li><strong>Kijktijd</strong> — de gemiddelde kijktijd van een video vergeleken met andere video's van dezelfde soort in deze periode.</li>
+        </ul>
+      </section>
+
+      <section class="panel" style="margin-top: var(--grid-gap);">
+        <h2 class="panel-title">Eerlijke vergelijking & grenzen</h2>
+        <ul class="method-list" style="margin-top:10px;">
+          <li>We vergelijken ${escapeHtml(brand)}s IG-Reels alleen met andere IG-Reels van ${escapeHtml(brand)} — niet met je foto's en niet met andere klanten.</li>
+          <li>Minder dan ${cfg.minBucketSize} posts van een type in de periode? Dan tonen we <strong>n/a</strong> — te weinig vergelijkingsmateriaal voor een eerlijk oordeel.</li>
+          <li>Reels zonder kijktijd-data (oudere posts) vallen terug op een engagement- en saves-score.</li>
+          <li>Ads krijgen géén Good/Average/Bad — paid heeft andere KPI's (CPM, ROAS) en een eigen dynamiek.</li>
+          <li>Pure bereik-groei is op zichzelf geen kwaliteitsindicator; verschillen in algoritme-distributie kunnen scores beïnvloeden.</li>
+        </ul>
+      </section>
+
+      ${coverageHtml}
+    `;
   }
 
   /* ---------- Analysis (stap 5) ---------- */

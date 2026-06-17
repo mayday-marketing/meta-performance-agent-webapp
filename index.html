@@ -157,23 +157,13 @@
             <span class="icon">✦</span>
             <span>Analysis</span>
           </button>
+          <button class="nav-link" data-page="methodology">
+            <span class="icon">⚖</span>
+            <span>Methodology</span>
+          </button>
 
           <div class="nav-section" style="margin-top:14px;">Connectors</div>
-          <button class="nav-link" disabled style="opacity:0.7; cursor:default;">
-            <span class="icon">◉</span>
-            <span>Metricool</span>
-            <span class="badge" style="background:rgba(47,143,95,0.16); color:var(--good);">Live</span>
-          </button>
-          <button class="nav-link" disabled style="opacity:0.7; cursor:default;">
-            <span class="icon">◉</span>
-            <span>Meta Ads</span>
-            <span class="badge" style="background:rgba(47,143,95,0.16); color:var(--good);">Live</span>
-          </button>
-          <button class="nav-link" disabled style="opacity:0.7; cursor:default;">
-            <span class="icon">◌</span>
-            <span>Google Drive</span>
-            <span class="badge">Soon</span>
-          </button>
+          <div id="connectors-list"></div>
         </div>
 
         <div id="sidebar-brand-sub" style="font-size:10px; color:var(--text-soft); letter-spacing:0.06em; padding:0 6px;">—</div>
@@ -293,12 +283,13 @@
               <div style="display:flex; gap:10px; align-items:center;">
                 <span id="lib-count" style="font-size:11px; color:var(--text-soft); letter-spacing:0.06em; text-transform:uppercase; font-weight:700;">14 posts</span>
                 <div class="search-input">
-                  <input type="text" placeholder="Zoek in captions…">
+                  <input id="lib-search" type="text" placeholder="Zoek in captions…">
                 </div>
                 <select id="lib-sort" class="btn" style="padding:9px 12px;">
                   <option value="date">Sorteer: Recent</option>
                   <option value="reach">Sorteer: Reach</option>
                   <option value="engagement">Sorteer: Engagement</option>
+                  <option value="saves">Sorteer: Saves</option>
                 </select>
                 <div class="toggle-group" id="lib-view-toggle">
                   <button data-view="grid" class="on">▦ Grid</button>
@@ -312,6 +303,11 @@
           <!-- ========== ANALYSIS PAGE ========== -->
           <div id="page-analysis" class="dash-page" style="display:none;">
             <div id="analysis-content"></div>
+          </div>
+
+          <!-- ========== METHODOLOGY PAGE ========== -->
+          <div id="page-methodology" class="dash-page" style="display:none;">
+            <div id="methodology-content"></div>
           </div>
 
         </section>

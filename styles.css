@@ -1276,3 +1276,37 @@ a { color: inherit; text-decoration: none; }
 }
 
 #login-error { display: block; }
+
+/* ========== Methodology page (Blok E) ========== */
+#methodology-content .panel-title { font-family: var(--font-serif); font-weight: 400; }
+.method-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+@media (max-width: 760px) { .method-grid { grid-template-columns: 1fr; } }
+.method-subhead {
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-soft); font-weight: 700; margin-bottom: 8px;
+}
+.method-list { margin: 0; padding-left: 18px; }
+.method-list li { font-size: 13px; line-height: 1.6; color: var(--text); margin-bottom: 7px; }
+.method-list.muted-list li { color: var(--text-soft); }
+.method-list strong { color: var(--text); }
+.method-thresholds {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 14px; margin-top: 14px;
+}
+@media (max-width: 620px) { .method-thresholds { grid-template-columns: 1fr; } }
+.method-thresholds .thr {
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; background: var(--surface);
+}
+.method-thresholds .thr-val { font-family: var(--font-serif); font-size: 26px; line-height: 1; }
+.method-thresholds .thr-lbl { font-weight: 700; margin: 8px 0 4px; font-size: 13px; }
+.method-thresholds .thr .muted { font-size: 12px; line-height: 1.45; }
+.method-thresholds .thr.good { border-color: rgba(47,143,95,0.4); }
+.method-thresholds .thr.good .thr-val, .method-thresholds .thr.good .thr-lbl { color: var(--good); }
+.method-thresholds .thr.avg .thr-val, .method-thresholds .thr.avg .thr-lbl { color: var(--accent-2); }
+.method-thresholds .thr.bad { border-color: rgba(192,57,43,0.35); }
+.method-thresholds .thr.bad .thr-val, .method-thresholds .thr.bad .thr-lbl { color: #c0392b; }
