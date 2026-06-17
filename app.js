@@ -831,6 +831,7 @@
       date: raw.date ? new Date(raw.date) : null,
       adId: String(raw.ad_id || ""),
       adName: String(raw.ad_name || ""),
+      campaignId: String(raw.campaign_id || ""),
       campaignName: String(raw.campaign_name || ""),
       reach: Number(raw.reach) || 0,
       impressions: Number(raw.impressions) || 0,
@@ -854,16 +855,21 @@
     }, 0);
   }
 
-  // Aggregeer Windsor daily ads-rows tot pseudo-posts per UNIEKE ADVERTENTIE (Blok B + Q2).
+  // Aggregeer Windsor daily ads-rows tot pseudo-posts voor de Library (Blok B + Q2).
+  // Werkt zowel op ad-niveau (heeft adId → één card per advertentie) als op
+  // campagne-niveau (fallback wanneer de ad-level fetch faalt → één card per campagne).
   // Reach wordt gesommeerd over dagen (consistent met de KPI-berekening hierboven;
   // dit overschat unieke reach licht — bekende beperking van daily rows).
   function aggregateWindsorAds(adsRows) {
-    const byAd = {};
+    const groups = {};
     for (const r of adsRows) {
       if (!r) continue;
-      const id = r.adId || r.adName || "onbekend";
-      const g = byAd[id] || (byAd[id] = {
-        id, name: r.adName || id, campaign: r.campaignName || "",
+      const isAd = !!r.adId;
+      const id = isAd ? r.adId : (r.campaignId || r.campaignName || "onbekend");
+      const g = groups[id] || (groups[id] = {
+        id, isAd,
+        name: isAd ? (r.adName || id) : (r.campaignName || id),
+        campaign: r.campaignName || "",
         reach: 0, impressions: 0, clicks: 0, spend: 0, lastDate: null,
         vp25: 0, vp50: 0, vp75: 0, vp95: 0, vp100: 0, vplays: 0,
       });
@@ -876,7 +882,7 @@
       if (!g.campaign && r.campaignName) g.campaign = r.campaignName;
       if (r.date && (!g.lastDate || r.date > g.lastDate)) g.lastDate = r.date;
     }
-    return Object.values(byAd).map(g => {
+    return Object.values(groups).map(g => {
       const ctr = g.impressions ? (g.clicks / g.impressions) * 100 : 0;
       // Retentiecurve (Blok F): percentage van video-plays dat elk checkpoint haalt.
       const retention = g.vplays > 0 ? {
@@ -889,8 +895,8 @@
       return {
         id: `ads-${g.id}`,
         platform: "ads",
-        type: "Advertentie",
-        subtitle: g.campaign,           // campagne als context-subregel in de Library
+        type: g.isAd ? "Advertentie" : "Campagne",
+        subtitle: g.isAd ? g.campaign : "",   // campagne als context-subregel bij ad-cards
         date: g.lastDate,
         dateLabel: g.lastDate ? fmt.dateNL(g.lastDate) : "—",
         startMs: 0, stopMs: 0,
@@ -907,14 +913,17 @@
 
   function transformWindsorDashboard(raw) {
     const igPostsRaw = arrayOrEmpty(raw.instagram?.data);
-    const adsRowsRaw = arrayOrEmpty(raw.ads?.data);
+    const adsRowsRaw = arrayOrEmpty(raw.ads?.data);    // campagne-niveau (reach voor trend/KPI)
+    const adsAdRaw = arrayOrEmpty(raw.adsAd?.data);    // ad-niveau (per advertentie, indien gelukt)
 
     const igPosts = igPostsRaw.map(normalizeWindsorIgPost).filter(Boolean);
     const adsRows = adsRowsRaw.map(normalizeWindsorAdRow).filter(Boolean);
+    const adsAdRows = adsAdRaw.map(normalizeWindsorAdRow).filter(Boolean);
 
     const allPosts = igPosts; // FB organic via Windsor nog niet gewired
     classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
-    const adsCampaigns = aggregateWindsorAds(adsRows); // campagne-cards voor Library (Blok B)
+    // Library: per advertentie zodra de ad-level fetch rijen gaf; anders fallback per campagne.
+    const adsCampaigns = aggregateWindsorAds(adsAdRows.length ? adsAdRows : adsRows);
 
     const curAgg = aggregatePosts(allPosts);
     const adsReachCur = adsRows.reduce((s, r) => s + (r.reach || 0), 0);
@@ -1034,6 +1043,10 @@
         state.overview = null; // val terug op de standaard fout-weergave i.p.v. lege panels
         state.overviewError = `Windsor kon geen Instagram-data ophalen voor dit bereik: ${igErr}`;
       }
+      // Ads-fouten niet stil opslokken: ad-level faalt → fallback naar campagne-niveau.
+      // De echte reden helpt de juiste ad-level veldnamen te bepalen.
+      if (raw?.errors?.adsAd) console.warn("[windsor] ad-level ads fetch faalde, val terug op campagne-niveau:", raw.errors.adsAd);
+      if (raw?.errors?.ads)   console.warn("[windsor] campagne-ads fetch faalde:", raw.errors.ads);
       renderOverview();
       if (typeof renderAnalysis === "function") renderAnalysis();
     } catch (err) {

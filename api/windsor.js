@@ -114,14 +114,22 @@ module.exports = async (req, res) => {
 
         // Daily-per-campaign rows zodat we de Meta Ads-lijn per week kunnen aggregeren
         // zonder pro-rata-schattingen (zoals we voor Metricool moesten doen).
-        // Ad-niveau (per unieke advertentie) i.p.v. campagne-niveau.
+        // Campagne-niveau — bewezen werkend. Voedt de trend/KPI's én dient als fallback
+        // voor de Library wanneer de ad-level fetch hieronder faalt.
         const ADS_FIELDS = [
-          'date', 'ad_id', 'ad_name', 'campaign_name',
+          'date', 'campaign_id', 'campaign_name',
           'impressions', 'reach', 'clicks', 'spend', 'cpm', 'cpc', 'ctr',
         ].join(',');
 
-        // Video-retentievelden in een APARTE call: zijn de veldnamen (nog) niet juist,
-        // dan faalt enkel deze call en blijft de kern-ads-data (reach/clicks/spend) intact.
+        // Ad-niveau (per unieke advertentie) — GEÏSOLEERD: is een veldnaam ongeldig of
+        // levert Meta hier geen reach, dan faalt enkel deze call en blijven de
+        // campagne-ads gewoon werken (geen verdwijnende Meta Ads meer).
+        const ADS_AD_FIELDS = [
+          'date', 'ad_id', 'ad_name', 'campaign_name',
+          'impressions', 'reach', 'clicks', 'spend', 'ctr',
+        ].join(',');
+
+        // Video-retentievelden, eveneens apart en niet-fataal.
         const ADS_VIDEO_FIELDS = [
           'date', 'ad_id',
           'video_p25_watched_actions', 'video_p50_watched_actions',
@@ -132,14 +140,15 @@ module.exports = async (req, res) => {
         // Ruimere fetch-timeout (55s, binnen het 60s-functiebudget) zodat grotere
         // datumbereiken niet voortijdig afgebroken worden.
         const FETCH_MS = 55000;
-        const [igData, adsData, adsVideoData] = await Promise.all([
+        const [igData, adsData, adsAdData, adsVideoData] = await Promise.all([
           safeCall(windsor('instagram', apiKey, { fields: IG_FIELDS, ...dateParams }, FETCH_MS), 'ig'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads-ad'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_VIDEO_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads-video'),
         ]);
 
-        // Merge de video-velden in de daily ads-rows op (datum, ad_id). Best-effort.
-        if (adsData && Array.isArray(adsData.data) && adsVideoData && Array.isArray(adsVideoData.data)) {
+        // Merge de video-velden in de ad-level rows op (datum, ad_id). Best-effort.
+        if (adsAdData && Array.isArray(adsAdData.data) && adsVideoData && Array.isArray(adsVideoData.data)) {
           const vid = {};
           for (const r of adsVideoData.data) vid[`${r.date}|${r.ad_id}`] = r;
           const VKEYS = [
@@ -147,7 +156,7 @@ module.exports = async (req, res) => {
             'video_p75_watched_actions', 'video_p95_watched_actions',
             'video_p100_watched_actions', 'video_play_actions',
           ];
-          for (const r of adsData.data) {
+          for (const r of adsAdData.data) {
             const v = vid[`${r.date}|${r.ad_id}`];
             if (v) for (const k of VKEYS) if (v[k] != null) r[k] = v[k];
           }
@@ -156,11 +165,13 @@ module.exports = async (req, res) => {
         return res.status(200).json({
           period: { startDate, endDate },
           instagram: igData,
-          ads: adsData,
+          ads: adsData,        // campagne-niveau (trend/KPI + fallback)
+          adsAd: adsAdData,    // ad-niveau (Library per advertentie, indien gelukt)
           // Diagnostiek: per-connector foutmeldingen meesturen i.p.v. stil opslokken.
           errors: {
             instagram: igData && igData.__error ? igData.__error : null,
             ads: adsData && adsData.__error ? adsData.__error : null,
+            adsAd: adsAdData && adsAdData.__error ? adsAdData.__error : null,
           },
         });
       }
