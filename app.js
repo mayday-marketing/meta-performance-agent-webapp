@@ -833,18 +833,23 @@
       adName: String(raw.ad_name || ""),
       campaignId: String(raw.campaign_id || ""),
       campaignName: String(raw.campaign_name || ""),
+      thumb: typeof raw.image_url === "string" ? raw.image_url : "",
       reach: Number(raw.reach) || 0,
       impressions: Number(raw.impressions) || 0,
       clicks: Number(raw.clicks) || 0,
       spend: Number(raw.spend) || 0,
-      // Video-retentie (Blok F) — veldnamen nog te verifiëren op de live deploy;
-      // ontbreken ze, dan blijven deze 0 en wordt er geen curve getoond.
-      vp25:   Number(raw.video_p25_watched_actions)  || 0,
-      vp50:   Number(raw.video_p50_watched_actions)  || 0,
-      vp75:   Number(raw.video_p75_watched_actions)  || 0,
-      vp95:   Number(raw.video_p95_watched_actions)  || 0,
-      vp100:  Number(raw.video_p100_watched_actions) || 0,
-      vplays: Number(raw.video_play_actions) || 0,
+      // Engagement op ad-niveau — geverifieerde Windsor-veldnamen (actions_*).
+      likes:    Number(raw.actions_post_reaction) || 0,
+      comments: Number(raw.actions_comment) || 0,
+      shares:   Number(raw.actions_post) || 0,
+      saves:    Number(raw.actions_onsite_conversion_post_save) || 0,
+      // Video-retentie (Blok F) — geverifieerde veldnamen (suffix _video_view).
+      vp25:   Number(raw.video_p25_watched_actions_video_view)  || 0,
+      vp50:   Number(raw.video_p50_watched_actions_video_view)  || 0,
+      vp75:   Number(raw.video_p75_watched_actions_video_view)  || 0,
+      vp95:   Number(raw.video_p95_watched_actions_video_view)  || 0,
+      vp100:  Number(raw.video_p100_watched_actions_video_view) || 0,
+      vplays: Number(raw.video_play_actions_video_view) || 0,
     };
   }
 
@@ -869,21 +874,27 @@
       const g = groups[id] || (groups[id] = {
         id, isAd,
         name: isAd ? (r.adName || id) : (r.campaignName || id),
-        campaign: r.campaignName || "",
+        campaign: r.campaignName || "", thumb: "",
         reach: 0, impressions: 0, clicks: 0, spend: 0, lastDate: null,
+        likes: 0, comments: 0, shares: 0, saves: 0,
         vp25: 0, vp50: 0, vp75: 0, vp95: 0, vp100: 0, vplays: 0,
       });
       g.reach += r.reach || 0;
       g.impressions += r.impressions || 0;
       g.clicks += r.clicks || 0;
       g.spend += r.spend || 0;
+      g.likes += r.likes || 0; g.comments += r.comments || 0;
+      g.shares += r.shares || 0; g.saves += r.saves || 0;
       g.vp25 += r.vp25 || 0; g.vp50 += r.vp50 || 0; g.vp75 += r.vp75 || 0;
       g.vp95 += r.vp95 || 0; g.vp100 += r.vp100 || 0; g.vplays += r.vplays || 0;
       if (!g.campaign && r.campaignName) g.campaign = r.campaignName;
+      if (!g.thumb && r.thumb) g.thumb = r.thumb;
       if (r.date && (!g.lastDate || r.date > g.lastDate)) g.lastDate = r.date;
     }
     return Object.values(groups).map(g => {
       const ctr = g.impressions ? (g.clicks / g.impressions) * 100 : 0;
+      const interactions = g.likes + g.comments + g.shares + g.saves;
+      const engagement = g.reach ? (interactions / g.reach) * 100 : 0;
       // Retentiecurve (Blok F): percentage van video-plays dat elk checkpoint haalt.
       const retention = g.vplays > 0 ? {
         p3:  100, // ~start; Meta levert geen apart 3s-checkpoint op deze breakdown
@@ -901,12 +912,12 @@
         dateLabel: g.lastDate ? fmt.dateNL(g.lastDate) : "—",
         startMs: 0, stopMs: 0,
         reach: g.reach, impressions: g.impressions,
-        likes: 0, comments: 0, shares: 0, saves: 0,
+        likes: g.likes, comments: g.comments, shares: g.shares, saves: g.saves,
         clicks: g.clicks, views: g.vplays,
-        interactions: 0, engagement: 0, ctr,
+        interactions, engagement, ctr,
         avgWatchTime: 0, spend: g.spend,
         retention,
-        caption: g.name, thumb: "", url: "",
+        caption: g.name, thumb: g.thumb, url: "",
       };
     });
   }

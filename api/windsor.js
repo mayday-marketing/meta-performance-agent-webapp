@@ -124,17 +124,20 @@ module.exports = async (req, res) => {
         // Ad-niveau (per unieke advertentie) — GEÏSOLEERD: is een veldnaam ongeldig of
         // levert Meta hier geen reach, dan faalt enkel deze call en blijven de
         // campagne-ads gewoon werken (geen verdwijnende Meta Ads meer).
+        // Engagement-velden (actions_*) + creative-thumbnail (image_url) zijn geverifieerd
+        // via de /fields-endpoint van deze connector.
         const ADS_AD_FIELDS = [
-          'date', 'ad_id', 'ad_name', 'campaign_name',
+          'date', 'ad_id', 'ad_name', 'campaign_name', 'image_url',
           'impressions', 'reach', 'clicks', 'spend', 'ctr',
+          'actions_post_reaction', 'actions_comment', 'actions_post', 'actions_onsite_conversion_post_save',
         ].join(',');
 
-        // Video-retentievelden, eveneens apart en niet-fataal.
+        // Video-retentievelden — geverifieerde veldnamen (suffix _video_view). Apart/niet-fataal.
         const ADS_VIDEO_FIELDS = [
           'date', 'ad_id',
-          'video_p25_watched_actions', 'video_p50_watched_actions',
-          'video_p75_watched_actions', 'video_p95_watched_actions',
-          'video_p100_watched_actions', 'video_play_actions',
+          'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
+          'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
+          'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
         ].join(',');
 
         // Ruimere fetch-timeout (55s, binnen het 60s-functiebudget) zodat grotere
@@ -152,9 +155,9 @@ module.exports = async (req, res) => {
           const vid = {};
           for (const r of adsVideoData.data) vid[`${r.date}|${r.ad_id}`] = r;
           const VKEYS = [
-            'video_p25_watched_actions', 'video_p50_watched_actions',
-            'video_p75_watched_actions', 'video_p95_watched_actions',
-            'video_p100_watched_actions', 'video_play_actions',
+            'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
+            'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
+            'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
           ];
           for (const r of adsAdData.data) {
             const v = vid[`${r.date}|${r.ad_id}`];
