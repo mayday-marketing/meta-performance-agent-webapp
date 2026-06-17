@@ -61,7 +61,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, clientId, token, connector, fields, startDate, endDate, datePreset } = req.body || {};
+  const { action, clientId, token, connector, fields, startDate, endDate, datePreset, filter } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
