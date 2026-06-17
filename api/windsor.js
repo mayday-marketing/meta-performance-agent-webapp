@@ -175,6 +175,9 @@ module.exports = async (req, res) => {
             instagram: igData && igData.__error ? igData.__error : null,
             ads: adsData && adsData.__error ? adsData.__error : null,
             adsAd: adsAdData && adsAdData.__error ? adsAdData.__error : null,
+            // Video-fetch faalt niet-fataal; tóch meesturen zodat een ontbrekende
+            // retentiecurve te herleiden is i.p.v. stil opgeslokt te worden.
+            adsVideo: adsVideoData && adsVideoData.__error ? adsVideoData.__error : null,
           },
         });
       }

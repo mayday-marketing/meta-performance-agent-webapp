@@ -825,6 +825,19 @@
     };
   }
 
+  // Windsor levert Meta-actiestatistieken soms als platte scalar (suffix _video_view),
+  // soms als action-breakdown array: [{action_type:"video_view", value:"2459"}].
+  // Number([{…}]) → NaN → stilletjes 0 (precies de bug die de retentiecurve liet
+  // verdwijnen). Deze helper haalt het getal uit beide vormen.
+  function numFromAction(v) {
+    if (v == null) return 0;
+    if (Array.isArray(v)) {
+      const hit = v.find(a => a && (a.action_type === "video_view" || a.action_type == null)) || v[0];
+      return Number(hit && hit.value) || 0;
+    }
+    return Number(v) || 0;
+  }
+
   function normalizeWindsorAdRow(raw) {
     if (!raw || typeof raw !== "object") return null;
     return {
@@ -844,12 +857,14 @@
       shares:   Number(raw.actions_post) || 0,
       saves:    Number(raw.actions_onsite_conversion_post_save) || 0,
       // Video-retentie (Blok F) — geverifieerde veldnamen (suffix _video_view).
-      vp25:   Number(raw.video_p25_watched_actions_video_view)  || 0,
-      vp50:   Number(raw.video_p50_watched_actions_video_view)  || 0,
-      vp75:   Number(raw.video_p75_watched_actions_video_view)  || 0,
-      vp95:   Number(raw.video_p95_watched_actions_video_view)  || 0,
-      vp100:  Number(raw.video_p100_watched_actions_video_view) || 0,
-      vplays: Number(raw.video_play_actions_video_view) || 0,
+      // numFromAction vangt zowel de scalar- als de nested-array-vorm op, zodat een
+      // veldnaam- of Windsor-gedragswijziging de curve niet opnieuw stil op 0 zet.
+      vp25:   numFromAction(raw.video_p25_watched_actions_video_view ?? raw.video_p25_watched_actions),
+      vp50:   numFromAction(raw.video_p50_watched_actions_video_view ?? raw.video_p50_watched_actions),
+      vp75:   numFromAction(raw.video_p75_watched_actions_video_view ?? raw.video_p75_watched_actions),
+      vp95:   numFromAction(raw.video_p95_watched_actions_video_view ?? raw.video_p95_watched_actions),
+      vp100:  numFromAction(raw.video_p100_watched_actions_video_view ?? raw.video_p100_watched_actions),
+      vplays: numFromAction(raw.video_play_actions_video_view ?? raw.video_play_actions),
     };
   }
 
