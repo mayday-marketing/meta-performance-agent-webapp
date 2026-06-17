@@ -16,6 +16,9 @@
     },
     "api/metricool.js": {
       "maxDuration": 60
+    },
+    "api/windsor.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
