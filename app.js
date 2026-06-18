@@ -1094,9 +1094,12 @@
       // Surfacing: lege staat met een verborgen connector-fout → toon de echte reden
       // i.p.v. een misleidend "geen data". Helpt grote-bereik-problemen diagnosticeren.
       const igErr = raw?.errors?.instagram;
-      if (igErr && state.overview.allPosts.length === 0) {
-        state.overview = null; // val terug op de standaard fout-weergave i.p.v. lege panels
-        state.overviewError = `Windsor kon geen Instagram-data ophalen voor dit bereik: ${igErr}`;
+      const hasAnyData = state.overview.allPosts.length > 0 || state.overview.adsCampaigns.length > 0;
+      // Blokkeer alleen als er NIETS binnenkwam (geen organic én geen ads). Een ads-only
+      // klant (zoals woody) krijgt een IG-400 die we negeren zolang er ads-data is.
+      if (igErr && !hasAnyData) {
+        state.overview = null;
+        state.overviewError = `Windsor kon geen data ophalen voor dit bereik: ${igErr}`;
       }
       // Ads-fouten niet stil opslokken: ad-level faalt → fallback naar campagne-niveau.
       // De echte reden helpt de juiste ad-level veldnamen te bepalen.
