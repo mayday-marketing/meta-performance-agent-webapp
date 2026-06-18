@@ -68,7 +68,15 @@ module.exports = async (req, res) => {
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
   }
-  if (!ANTHROPIC_API_KEY) {
+  // Per-klant Claude-key (optioneel, server-side) met terugval op de gedeelde mayday-key.
+  let apiKey = ANTHROPIC_API_KEY;
+  try {
+    const clients = JSON.parse(process.env.CLIENTS || '{}');
+    const clientKey = clients[String(clientId).toLowerCase()]?.anthropic_api_key;
+    if (clientKey) apiKey = clientKey;
+  } catch {}
+  const usedClientKey = apiKey !== ANTHROPIC_API_KEY;
+  if (!apiKey) {
     return res.status(500).json({ error: 'Anthropic API key niet geconfigureerd.' });
   }
   if (!summary || typeof summary !== 'object') {
@@ -100,7 +108,7 @@ module.exports = async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
@@ -113,7 +121,11 @@ module.exports = async (req, res) => {
 
     if (!anthropicRes.ok) {
       const err = await anthropicRes.json().catch(() => ({}));
-      return res.status(anthropicRes.status).json({ error: err.error?.message || 'Anthropic API fout.' });
+      const base = err.error?.message || 'Anthropic API fout.';
+      const hint = usedClientKey && [400, 401, 403].includes(anthropicRes.status)
+        ? ' (controleer de Claude API-key en credits van deze klant)'
+        : '';
+      return res.status(anthropicRes.status).json({ error: base + hint });
     }
 
     const data = await anthropicRes.json();
