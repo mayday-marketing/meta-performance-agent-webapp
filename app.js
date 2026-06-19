@@ -2231,10 +2231,11 @@
     const root = $("#analysis-content");
     if (!root) return;
 
-    // Manual-flow klanten: geen dashboard-data, dus geen analyse mogelijk.
-    if (state.session && !state.session.hasMetricool) {
+    // Manual-flow klanten: geen dashboard-databron (Windsor noch Metricool), dus geen analyse.
+    // Drive levert enkel merkcontext, geen posts — analyse draait op dashboard-data.
+    if (state.session && !state.session.hasMetricool && !state.session.hasWindsor) {
       root.innerHTML = renderAnalysisEmpty(`
-        <p class="muted" style="margin:0 0 12px;">Analyse op basis van dashboard-data is alleen beschikbaar voor klanten met een Metricool-koppeling.</p>
+        <p class="muted" style="margin:0 0 12px;">Analyse op basis van dashboard-data is beschikbaar voor klanten met een Windsor.ai- of Metricool-koppeling.</p>
         <p class="muted" style="margin:0; font-size:13px;">Voor handmatig geüploade CSV's: gebruik de chat-agent voor een ad-hoc analyse.</p>
         <button class="btn primary" style="margin-top:18px;" onclick="window.toggleChat()">Open de Agent →</button>
       `);
