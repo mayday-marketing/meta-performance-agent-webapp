@@ -121,46 +121,68 @@ module.exports = async (req, res) => {
           'impressions', 'reach', 'clicks', 'spend', 'cpm', 'cpc', 'ctr',
         ].join(',');
 
-        // Ad-niveau (per unieke advertentie) — ZONDER `date`: Windsor aggregeert dan per
-        // advertentie over de periode (±N rijen i.p.v. N×dagen). Dat lost de 55s-timeout
-        // op bij grote accounts/bereiken én maakt aparte video/creative-merges overbodig
-        // (alles zit nu in dezelfde geaggregeerde rij). Alle veldnamen zijn geverifieerd via
-        // de /fields-endpoint. GEÏSOLEERD: faalt deze call, dan val we terug op campagne-niveau.
-        const ADS_AD_FIELDS = [
+        // Ad-niveau — ZONDER `date` (Windsor aggregeert per advertentie → ±N rijen i.p.v.
+        // N×dagen). CORE = de essentiële, snelle velden (engagement/spend/CPM/creative/
+        // conversie). Dit is de primaire call: lukt deze, dan toont de Library losse ads.
+        const ADS_AD_CORE = [
           'ad_id', 'ad_name', 'campaign_name', 'image_url',
           'impressions', 'reach', 'clicks', 'spend', 'ctr', 'cpm',
-          // engagement
           'actions_post_reaction', 'actions_comment', 'actions_post', 'actions_onsite_conversion_post_save',
-          // video-retentie (suffix _video_view)
-          'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
-          'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
-          'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
-          // creative-type (IG-velden = exact format; object_type = FB-fallback)
           'effective_instagram_media__media_type', 'effective_instagram_media__media_product_type', 'object_type',
-          // conversies — voor ROAS (waarde) en CAC (aantal). Leeg/0 als de klant niet trackt.
+          // conversies — voor ROAS/CAC. Leeg/0 als de klant niet trackt.
           'actions_purchase', 'actions_omni_purchase', 'action_values_purchase', 'action_values_omni_purchase',
           'actions_lead',
         ].join(',');
 
+        // Video-retentie APART — Meta's per-video breakdowns zijn traag en doen de hele
+        // ad-level call timen. Geïsoleerd + niet-fataal: faalt dit, dan blijft de ad-level
+        // view (engagement/paid-metrics) staan; enkel de retentiecurve ontbreekt dan.
+        const ADS_AD_VIDEO = [
+          'ad_id',
+          'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
+          'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
+          'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
+        ].join(',');
+
         // Ruimere fetch-timeout (55s, binnen het 60s-functiebudget) zodat grotere
-        // datumbereiken niet voortijdig afgebroken worden.
+        // datumbereiken niet voortijdig afgebroken worden. Video krijgt een krappere
+        // timeout zodat een trage video-fetch de functie niet tot 55s gijzelt.
         const FETCH_MS = 55000;
-        const [igData, adsData, adsAdData] = await Promise.all([
+        const VIDEO_MS = 40000;
+        const [igData, adsData, adsAdData, adsVideoData] = await Promise.all([
           safeCall(windsor('instagram', apiKey, { fields: IG_FIELDS, ...dateParams }, FETCH_MS), 'ig'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads-ad'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CORE, ...dateParams }, FETCH_MS), 'fb-ads-core'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_VIDEO, ...dateParams }, VIDEO_MS), 'fb-ads-video'),
         ]);
+
+        // Merge de video-retentie in de ad-core rows op ad_id (beide no-date → 1 rij per ad).
+        if (adsAdData && Array.isArray(adsAdData.data) && adsVideoData && Array.isArray(adsVideoData.data)) {
+          const vid = {};
+          for (const r of adsVideoData.data) if (r.ad_id != null) vid[r.ad_id] = r;
+          const VKEYS = [
+            'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
+            'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
+            'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
+          ];
+          for (const r of adsAdData.data) {
+            const v = vid[r.ad_id];
+            if (v) for (const k of VKEYS) if (v[k] != null) r[k] = v[k];
+          }
+        }
 
         return res.status(200).json({
           period: { startDate, endDate },
           instagram: igData,
           ads: adsData,        // campagne-niveau (trend/KPI + fallback)
-          adsAd: adsAdData,    // ad-niveau (Library per advertentie, indien gelukt)
+          adsAd: adsAdData,    // ad-niveau core (Library per advertentie, indien gelukt)
           // Diagnostiek: per-connector foutmeldingen meesturen i.p.v. stil opslokken.
           errors: {
             instagram: igData && igData.__error ? igData.__error : null,
             ads: adsData && adsData.__error ? adsData.__error : null,
             adsAd: adsAdData && adsAdData.__error ? adsAdData.__error : null,
+            // Video faalt niet-fataal; tóch meesturen zodat een ontbrekende curve te herleiden is.
+            adsVideo: adsVideoData && adsVideoData.__error ? adsVideoData.__error : null,
           },
         });
       }
