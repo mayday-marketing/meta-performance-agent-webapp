@@ -2102,6 +2102,25 @@
     };
   }
 
+  // Haalt de eigen klant-benchmarks op uit Drive (06_PERFORMANTIE/6.2_Benchmarks).
+  // Volledig best-effort: zonder Drive-koppeling of bij elke fout → "" (standaardanalyse).
+  async function fetchCustomBenchmarks() {
+    if (!state.session?.hasDrive) return "";
+    try {
+      const qs = new URLSearchParams({
+        action: "analysis-benchmarks",
+        clientId: state.session.clientId,
+        token: state.session.token,
+      });
+      const res = await fetch(`/api/drive?${qs.toString()}`);
+      if (!res.ok) return "";
+      const data = await res.json();
+      return data?.found && data.content ? data.content : "";
+    } catch {
+      return "";
+    }
+  }
+
   async function generateAnalysis() {
     if (!state.overview) return;
     const key = analysisPeriodKey();
@@ -2118,6 +2137,10 @@
       return;
     }
 
+    // Klantspecifieke benchmarks uit Drive (06_PERFORMANTIE/6.2_Benchmarks). Non-fataal:
+    // niet gevonden / geen Drive / fout → lege string → standaardanalyse.
+    const customBenchmarks = await fetchCustomBenchmarks();
+
     try {
       const result = await apiPost("/api/analysis", {
         clientId: state.session.clientId,
@@ -2130,6 +2153,7 @@
         },
         summary,
         clientContext: state.session.clientContext || "",
+        customBenchmarks,
       });
       if (myId !== state.analysisGenId) return; // outdated — gebruiker wisselde periode
       state.analysisCache[key] = result.analysis;

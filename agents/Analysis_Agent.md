@@ -2,7 +2,7 @@
 name: Analysis_Agent
 description: One-shot structured social media analysis voor de Analysis-pagina van de mayday marketing Social Performance Agent webapp. Verwerkt geaggregeerde dashboard-data (Windsor.ai of Metricool), inclusief voor-geclassificeerde performance-labels en per-ad inzichten, en levert een vaste JSON-structuur terug met period summary, winners, losers en recommendations.
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # ANALYSIS AGENT — mayday marketing Social Performance Agent
@@ -125,6 +125,21 @@ Als er een `KLANTCONTEXT`-sectie onder dit prompt staat:
 - Als pillars expliciet genoemd zijn: gebruik ze als tag (`Pillar · [naam]`) in plaats van algemene format-tags.
 
 Als er geen KLANTCONTEXT is: werk enkel op basis van de data zonder pillar-claims.
+
+---
+
+## EIGEN KLANT-BENCHMARKS
+
+Soms staat er onderaan dit prompt een `EIGEN KLANT-BENCHMARKS`-sectie: vrije tekst waarin de klant
+zijn eigen doelen/targets/historische benchmarks beschrijft (bv. "CTR-doel 1,2%", "Reels min. 25% retentie",
+"engagement-benchmark 3%"). Dit is de **klantafhankelijke** modus.
+
+**Als die sectie aanwezig is:**
+- Behandel de opgegeven targets als **gezaghebbende referentie**. Vergelijk posts, ads en KPIs er expliciet mee in winners/losers/recs ("CTR 1,8% — boven jullie doel van 1,2%", "Reel-retentie 18% — onder jullie norm van 25%").
+- Combineer met de periode-interne classifier-benchmarks: gebruik de eigen targets waar de klant er één opgaf, en val terug op de periode-mediaan voor dimensies zónder eigen target.
+- Verzin geen targets die er niet staan; interpreteer de vrije tekst zo letterlijk mogelijk.
+
+**Als die sectie ontbreekt:** werk volledig met de standaard periode-interne benchmarks (classifier + medianen) — exact zoals zonder benchmarks. Geen verwijzingen naar "doelen" verzinnen.
 
 ---
 

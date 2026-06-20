@@ -285,6 +285,36 @@ module.exports = async (req, res) => {
       return res.status(200).json(result);
     }
 
+    // ── ACTION: analysis-benchmarks ─────────────────────────────────
+    // Leest de eigen klant-benchmarks/targets uit 06_PERFORMANTIE/6.2_Benchmarks.
+    // Vrije tekst (Google Docs / .txt / .md / .csv). Voedt de Analysis-agent als
+    // klantspecifieke referentie. Niet gevonden → { found: false } → standaardanalyse.
+    if (action === 'analysis-benchmarks') {
+      const benchFolder = await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.2_Benchmarks'])
+                       || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.2_benchmarks'])
+                       || await findFolderByPath(accessToken, rootId, ['06_PERFORMANTIE', '6.2_Benchmark']);
+      if (!benchFolder) return res.status(200).json({ found: false, reason: 'Geen 6.2_Benchmarks map gevonden.' });
+
+      const files = await listFiles(accessToken, benchFolder);
+      const parts = [];
+      const used = [];
+      for (const file of files) {
+        const isDoc = file.mimeType === 'application/vnd.google-apps.document';
+        const isText = /\.(txt|md|csv)$/i.test(file.name);
+        if (!isDoc && !isText) continue; // sla niet-tekst (xlsx/pdf/afbeeldingen) over
+        const text = await downloadText(accessToken, file.id, file.mimeType);
+        if (text && text.trim()) {
+          parts.push(`### ${file.name}\n${text.trim()}`);
+          used.push(file.name);
+        }
+      }
+      if (!parts.length) return res.status(200).json({ found: false, reason: 'Map leeg of geen leesbare tekstbestanden.' });
+
+      // Cap op ~8000 tekens zodat de prompt beheersbaar blijft.
+      const content = parts.join('\n\n').slice(0, 8000);
+      return res.status(200).json({ found: true, files: used, content });
+    }
+
     // ── ACTION: scan ─────────────────────────────────────────────────
     // Scan folder structure and return available periods + file list
     const scanResult = { available: true, periods: {}, contextFiles: {} };

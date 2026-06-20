@@ -63,7 +63,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { clientId, token, brandName, period, summary, clientContext } = req.body || {};
+  const { clientId, token, brandName, period, summary, clientContext, customBenchmarks } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -89,6 +89,15 @@ module.exports = async (req, res) => {
   }
   if (clientContext?.trim()) {
     systemPrompt += '\n\n---\n\n## KLANTCONTEXT\n\n' + clientContext;
+  }
+  // Klantspecifieke benchmarks/targets uit Drive (6.2_Benchmarks). Aanwezig → de agent
+  // vergelijkt tegen deze doelen i.p.v. enkel de periode-interne mediaan. Afwezig → standaard.
+  if (customBenchmarks?.trim()) {
+    systemPrompt += '\n\n---\n\n## EIGEN KLANT-BENCHMARKS\n\n'
+      + 'De klant heeft eigen doelen/benchmarks aangeleverd. Behandel deze als gezaghebbende '
+      + 'referentie: vergelijk posts, ads en KPIs expliciet met deze targets in winners/losers/recs '
+      + '("boven/onder jullie doel van X"). Vul aan met de periode-interne benchmarks waar de klant '
+      + 'geen eigen target voor opgaf.\n\n' + customBenchmarks;
   }
 
   const userMsg = [
