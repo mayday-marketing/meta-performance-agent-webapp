@@ -869,6 +869,10 @@
       vp95:   numFromAction(raw.video_p95_watched_actions_video_view ?? raw.video_p95_watched_actions),
       vp100:  numFromAction(raw.video_p100_watched_actions_video_view ?? raw.video_p100_watched_actions),
       vplays: numFromAction(raw.video_play_actions_video_view ?? raw.video_play_actions),
+      // Conversies — voor ROAS (waarde) en CAC (aantal). 0 als de klant niet trackt.
+      purchases:     numFromAction(raw.actions_purchase) + numFromAction(raw.actions_omni_purchase),
+      purchaseValue: numFromAction(raw.action_values_purchase) + numFromAction(raw.action_values_omni_purchase),
+      leads:         numFromAction(raw.actions_lead),
     };
   }
 
@@ -917,6 +921,7 @@
         reach: 0, impressions: 0, clicks: 0, spend: 0, lastDate: null,
         likes: 0, comments: 0, shares: 0, saves: 0,
         vp25: 0, vp50: 0, vp75: 0, vp95: 0, vp100: 0, vplays: 0,
+        purchases: 0, purchaseValue: 0, leads: 0,
       });
       g.reach += r.reach || 0;
       g.impressions += r.impressions || 0;
@@ -926,6 +931,7 @@
       g.shares += r.shares || 0; g.saves += r.saves || 0;
       g.vp25 += r.vp25 || 0; g.vp50 += r.vp50 || 0; g.vp75 += r.vp75 || 0;
       g.vp95 += r.vp95 || 0; g.vp100 += r.vp100 || 0; g.vplays += r.vplays || 0;
+      g.purchases += r.purchases || 0; g.purchaseValue += r.purchaseValue || 0; g.leads += r.leads || 0;
       if (!g.campaign && r.campaignName) g.campaign = r.campaignName;
       if (!g.thumb && r.thumb) g.thumb = r.thumb;
       // Creative-type is constant per advertentie — eerste niet-lege waarde volstaat.
@@ -936,8 +942,14 @@
     }
     return Object.values(groups).map(g => {
       const ctr = g.impressions ? (g.clicks / g.impressions) * 100 : 0;
+      const cpm = g.impressions ? (g.spend / g.impressions) * 1000 : 0;
       const interactions = g.likes + g.comments + g.shares + g.saves;
       const engagement = g.reach ? (interactions / g.reach) * 100 : 0;
+      // Paid-conversiemetrics. CAC = spend / #acquisities (purchases indien aanwezig, anders
+      // leads — "automatisch"). ROAS = aankoopwaarde / spend. null als er geen conversiedata is.
+      const conversions = g.purchases > 0 ? g.purchases : g.leads;
+      const cac = (g.spend > 0 && conversions > 0) ? g.spend / conversions : null;
+      const roas = (g.spend > 0 && g.purchaseValue > 0) ? g.purchaseValue / g.spend : null;
       // Retentiecurve (Blok F): percentage van video-plays dat elk checkpoint haalt.
       const retention = g.vplays > 0 ? {
         p3:  100, // ~start; Meta levert geen apart 3s-checkpoint op deze breakdown
@@ -958,8 +970,11 @@
         reach: g.reach, impressions: g.impressions,
         likes: g.likes, comments: g.comments, shares: g.shares, saves: g.saves,
         clicks: g.clicks, views: g.vplays,
-        interactions, engagement, ctr,
+        interactions, engagement, ctr, cpm,
         avgWatchTime: 0, spend: g.spend,
+        // Paid-conversiemetrics (null = geen data → UI toont "—").
+        purchases: g.purchases, purchaseValue: g.purchaseValue, leads: g.leads,
+        cac, roas, conversions: conversions || 0,
         retention,
         caption: g.name, thumb: g.thumb, url: "",
       };
@@ -1596,12 +1611,30 @@
     ).join('')}</div>`;
   }
 
-  function renderBenchmarkRow(list) {
+  function renderBenchmarkRow(list, showPaid) {
     if (!list.length) return '';
     const avg = (field) => Math.round(list.reduce((sum, item) => sum + (item[field] || 0), 0) / list.length);
+    const sum = (field) => list.reduce((s, item) => s + (item[field] || 0), 0);
     const avgPerf = list.reduce((sum, item) => sum + (item.engagement || 0), 0) / list.length;
     const filterLabel = getLibraryFilterDefs().find(f => f.key === state.libraryFilter)?.label || "Alle";
     const platformName = state.libraryFilter === 'all' ? 'Globaal gemiddelde' : `${filterLabel} gemiddelde`;
+
+    // Paid-totalen → afgeleide ratio's (account-niveau, correcter dan gemiddelde-van-ratio's).
+    let paidCells = "", ctrCell = "<td></td>";
+    if (showPaid) {
+      const totSpend = sum('spend'), totImpr = sum('impressions'), totVal = sum('purchaseValue'), totConv = sum('conversions');
+      const bCpm  = totImpr ? (totSpend / totImpr) * 1000 : 0;
+      const bRoas = (totSpend > 0 && totVal > 0) ? totVal / totSpend : null;
+      const bCac  = (totSpend > 0 && totConv > 0) ? totSpend / totConv : null;
+      const bCtr  = totImpr ? (sum('clicks') / totImpr) * 100 : 0;
+      ctrCell = `<td class="right">${bCtr.toFixed(1)}%</td>`;
+      paidCells = `
+      <td class="right" title="Totale ad spend deze periode">€${fmt.int(totSpend)}</td>
+      <td class="right">€${bCpm.toFixed(2)}</td>
+      <td class="right">${bCac != null ? `€${bCac.toFixed(2)}` : "—"}</td>
+      <td class="right">${bRoas != null ? `${bRoas.toFixed(2)}×` : "—"}</td>`;
+    }
+
     return `<tr class="benchmark-row">
       <td>CLIENT BENCHMARK — ${escapeHtml(platformName)}</td><td></td><td></td><td></td>
       <td class="right">${fmt.int(avg('views'))}</td>
@@ -1612,7 +1645,9 @@
       <td class="right">${fmt.int(avg('saves'))}</td>
       <td></td>
       <td class="right">${avgPerf.toFixed(1)}%</td>
-      <td></td><td></td>
+      ${ctrCell}
+      ${paidCells}
+      <td></td>
     </tr>`;
   }
 
@@ -1623,6 +1658,19 @@
 
   function renderLibraryTable(list) {
     if (!list.length) return renderLibraryEmpty();
+    // Paid-kolommen (Spend/CPM/CAC/ROAS) enkel onder het Meta Ads-filter — anders zou de
+    // tabel voor organic vol "—" staan en onnodig breed worden.
+    const showPaid = state.libraryFilter === "ads";
+    const paidHead = showPaid ? `
+        <th class="right">Spend</th>
+        <th class="right">CPM</th>
+        <th class="right">CAC</th>
+        <th class="right">ROAS</th>` : "";
+    const paidCells = (p) => showPaid ? `
+            <td class="right">€${fmt.int(p.spend)}</td>
+            <td class="right">€${(p.cpm || 0).toFixed(2)}</td>
+            <td class="right">${p.cac != null ? `€${p.cac.toFixed(2)}` : "—"}</td>
+            <td class="right">${p.roas != null ? `${p.roas.toFixed(2)}×` : "—"}</td>` : "";
     return `<div class="lib-table"><table>
       <thead><tr>
         <th>Post</th>
@@ -1637,11 +1685,11 @@
         <th class="right sortable" data-sort="saves">Saves${sortArrow("saves")}</th>
         <th class="right">Watch / Retention</th>
         <th class="right sortable" data-sort="engagement">Engage${sortArrow("engagement")}</th>
-        <th class="right sortable" data-sort="ctr">CTR${sortArrow("ctr")}</th>
+        <th class="right sortable" data-sort="ctr">CTR${sortArrow("ctr")}</th>${paidHead}
         <th class="right">Performantie</th>
       </tr></thead>
       <tbody>
-        ${renderBenchmarkRow(list)}
+        ${renderBenchmarkRow(list, showPaid)}
         ${list.map((p, i) => {
           const t = libThumb(p, i, { imgClass: "row-thumb-img" });
           const performance = computePerformance(p);
@@ -1662,7 +1710,7 @@
             <td class="right">${fmt.int(p.saves)}</td>
             <td class="right">${renderWatchRetentionCell(p)}</td>
             <td class="right">${(p.engagement || 0).toFixed(1)}%</td>
-            <td class="right">${(p.ctr || 0).toFixed(1)}%</td>
+            <td class="right">${(p.ctr || 0).toFixed(1)}%</td>${paidCells(p)}
             <td class="right">${perfHtml}</td>
           </tr>`;
         }).join("")}
@@ -2073,8 +2121,14 @@
         impressions: a.impressions || 0,
         clicks: a.clicks || 0,
         ctr: +(a.ctr || 0).toFixed(2),
+        cpm: +(a.cpm || 0).toFixed(2),
         engagement: +(a.engagement || 0).toFixed(2),
         spend: a.spend != null ? +(a.spend).toFixed(2) : null,
+        // Conversiemetrics — null als de klant niet trackt (agent: dan niet over ROAS/CAC claimen).
+        roas: a.roas != null ? +a.roas.toFixed(2) : null,
+        cac: a.cac != null ? +a.cac.toFixed(2) : null,
+        purchases: a.purchases || 0,
+        leads: a.leads || 0,
       };
       // Retentie alleen meesturen als de curve daadwerkelijk gevuld is (zie task_3c228fd4).
       if (a.retention && a.retention.p50 != null) {
@@ -2090,11 +2144,26 @@
     const byEng = (arr) => [...arr].filter(a => (a.reach || 0) >= 100).sort((x, y) => (y.engagement || 0) - (x.engagement || 0));
     const engAds = byEng(adLevel);
 
+    // Account-niveau paid-totalen → afgeleide ratio's (correcter dan gemiddelde-van-ratio's).
+    const tSpend = ads.reduce((s, a) => s + (a.spend || 0), 0);
+    const tImpr  = ads.reduce((s, a) => s + (a.impressions || 0), 0);
+    const tVal   = ads.reduce((s, a) => s + (a.purchaseValue || 0), 0);
+    const tConv  = ads.reduce((s, a) => s + (a.conversions || 0), 0);
+    const tClicks = ads.reduce((s, a) => s + (a.clicks || 0), 0);
+
     return {
       level: adLevel.length ? "ad" : "campaign",  // welk granulariteitsniveau de data heeft
       campaignCount: ads.length,
       totalReach: ads.reduce((s, a) => s + (a.reach || 0), 0),
-      totalSpend: +(ads.reduce((s, a) => s + (a.spend || 0), 0)).toFixed(2),
+      totalSpend: +tSpend.toFixed(2),
+      paidTotals: {
+        spend: +tSpend.toFixed(2),
+        cpm: tImpr ? +((tSpend / tImpr) * 1000).toFixed(2) : null,
+        ctr: tImpr ? +((tClicks / tImpr) * 100).toFixed(2) : null,
+        roas: (tSpend > 0 && tVal > 0) ? +(tVal / tSpend).toFixed(2) : null,
+        cac: (tSpend > 0 && tConv > 0) ? +(tSpend / tConv).toFixed(2) : null,
+        conversions: tConv,
+      },
       topByReach: [...ads].sort((a, b) => (b.reach || 0) - (a.reach || 0)).slice(0, 3).map(slimAd),
       bestAdsByEngagement: engAds.slice(0, 3).map(slimAd),
       // Alleen los meesturen als er genoeg ads zijn om best/worst te onderscheiden.

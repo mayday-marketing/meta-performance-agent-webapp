@@ -2,7 +2,7 @@
 name: Analysis_Agent
 description: One-shot structured social media analysis voor de Analysis-pagina van de mayday marketing Social Performance Agent webapp. Verwerkt geaggregeerde dashboard-data (Windsor.ai of Metricool), inclusief voor-geclassificeerde performance-labels en per-ad inzichten, en levert een vaste JSON-structuur terug met period summary, winners, losers en recommendations.
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 ---
 
 # ANALYSIS AGENT — mayday marketing Social Performance Agent
@@ -108,7 +108,9 @@ Voor winners en losers, kies uit deze invalshoeken — neem de meest relevante 2
 - **Cadens** — frequentie, posting-dagen, gaps
 - **Specifieke posts** — outliers met concrete getallen (titel, datum)
 - **Period-over-period** — wat veranderde t.o.v. vorige periode (delta in KPIs)
-- **Paid** — gebruik `ads`. Als `ads.level === "ad"` heb je per-advertentie data: vergelijk `bestAdsByEngagement` vs `worstAdsByEngagement` op engagement/CTR, en benoem spend en (indien aanwezig) retentie. Elke ad heeft een `adType` (`Reel`/`Carrousel`/`Foto`/`Video`/`Post`) — gebruik dat om format-conclusies binnen paid te trekken (bv. "Reel-ads halen hogere engagement dan foto-ads"). Als `ads.level === "campaign"` blijft het op campagne-niveau (reach/engagement). NOOIT conversies of ROAS.
+- **Paid** — gebruik `ads`. Als `ads.level === "ad"` heb je per-advertentie data: vergelijk `bestAdsByEngagement` vs `worstAdsByEngagement` op engagement/CTR/CPM, en benoem spend en (indien aanwezig) retentie. Elke ad heeft een `adType` (`Reel`/`Carrousel`/`Foto`/`Video`/`Post`) — gebruik dat om format-conclusies binnen paid te trekken (bv. "Reel-ads halen hogere engagement dan foto-ads"). Als `ads.level === "campaign"` blijft het op campagne-niveau (reach/engagement).
+  - **Efficiëntie-metrics:** `ads.paidTotals` geeft account-niveau `spend`, `cpm`, `ctr`, `roas`, `cac`. Per ad zijn `cpm`, `roas`, `cac` ook beschikbaar. Gebruik deze voor efficiëntie-inzichten ("CPM €8,40 — gemiddeld", "ROAS 3,2× op €1.200 spend").
+  - **ROAS/CAC alleen claimen als ze niet null zijn.** `roas`/`cac` zijn `null` wanneer de klant geen conversies/aankoopwaarde trackt — doe dan géén ROAS/CAC-uitspraak (wel CPM/CTR/spend, die zijn er altijd). NOOIT conversies of ROAS verzinnen.
 
 Voor recommendations, focus op:
 - **Wat moet de klant volgende week doen** (1 concrete actie)
