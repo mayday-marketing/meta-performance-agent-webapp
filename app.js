@@ -344,6 +344,25 @@
     ).join("");
   }
 
+  // Spring vanuit de Analyse naar een specifieke advertentie in de Library: filter op
+  // Meta Ads, render, scroll naar de rij/kaart en licht 'm even op.
+  function goToAd(adId) {
+    state.libraryFilter = "ads";
+    switchPage("library");
+    if (typeof renderLibrary === "function") renderLibrary();
+    setTimeout(() => {
+      const sel = (window.CSS && CSS.escape) ? CSS.escape(adId) : adId;
+      const el = document.querySelector(`#page-library [data-post="${sel}"]`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.style.transition = "background-color .4s";
+      const orig = el.style.backgroundColor;
+      el.style.backgroundColor = "rgba(255,104,59,0.18)"; // accent-1 tint, werkt op tr én card
+      setTimeout(() => { el.style.backgroundColor = orig; }, 2200);
+    }, 120);
+  }
+  window.__goToAd = goToAd;
+
   function bindDateFilter() {
     const inputs = $$(".date-filter input[type=date]");
     let timer;
@@ -2292,6 +2311,58 @@
     return `<div class="panel" style="text-align:center; padding:48px 24px;">${html}</div>`;
   }
 
+  // Deterministische ads-ranking (uit classifyAdsPerformance) — los van de LLM-analyse.
+  // Best 5 + slechtst 5 advertenties, met klikbare titel die naar de Library-ad springt.
+  function renderAnalysisAdsRanking() {
+    const ads = arrayOrEmpty(state.overview?.adsCampaigns).filter(a => a && a.platform === "ads" && a.perfScore != null);
+    if (ads.length < 3) return ""; // te weinig advertenties om zinvol te ranken
+    const sorted = [...ads].sort((x, y) => (y.perfScore || 0) - (x.perfScore || 0));
+    const basis = sorted[0].perfBasis || "Efficiëntie (CTR/CPM)";
+    const best = sorted.slice(0, 5);
+    const worst = ads.length > 5 ? sorted.slice(-5).reverse() : [];
+
+    const metricLine = (a) => a.roas != null
+      ? `ROAS ${a.roas.toFixed(2)}× · spend €${fmt.int(a.spend)}`
+      : `CTR ${(a.ctr || 0).toFixed(1)}% · CPM €${(a.cpm || 0).toFixed(2)}`;
+
+    const adItem = (a) => {
+      const perf = a.performance
+        ? `<span class="perf-button ${a.performance.toLowerCase()}" style="cursor:default;">${a.performance}</span>`
+        : `<span class="muted">n/a</span>`;
+      const t = libThumb(a, 0, { imgClass: "row-thumb-img" });
+      return `
+        <div style="display:flex; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border, #f0e6ee);">
+          <span class="row-thumb thumb-pattern" style="background:${t.bg}; flex:0 0 auto;">${t.imgHtml}</span>
+          <div style="flex:1; min-width:0;">
+            <button onclick="window.__goToAd('${escapeHtml(a.id)}')" title="Ga naar deze advertentie in de Library"
+              style="background:none; border:none; padding:0; margin:0; color:var(--accent-2,#351f69); font-weight:600; cursor:pointer; text-align:left; text-decoration:underline;">
+              ${escapeHtml((a.caption || "").slice(0, 70) || "Advertentie")}
+            </button>
+            <div class="muted" style="font-size:12px; margin-top:2px;">${metricLine(a)}</div>
+          </div>
+          <div style="flex:0 0 auto;">${perf}</div>
+        </div>`;
+    };
+
+    const worstCol = worst.length ? `
+        <div class="insight-card lose">
+          <div class="head"><span class="pill">Slechtst presterend</span><h3>Bottom ${worst.length} ads</h3></div>
+          <div class="insight-list">${worst.map(adItem).join("")}</div>
+        </div>` : "";
+
+    return `
+      <section style="margin-top: var(--grid-gap);">
+        <div class="panel-sub" style="margin-bottom:8px;">Advertentie-ranking · basis: ${escapeHtml(basis)} · klik een titel om naar de advertentie te springen</div>
+        <div class="insight-grid">
+          <div class="insight-card win">
+            <div class="head"><span class="pill">Best presterend</span><h3>Top ${best.length} ads</h3></div>
+            <div class="insight-list">${best.map(adItem).join("")}</div>
+          </div>
+          ${worstCol}
+        </div>
+      </section>`;
+  }
+
   function renderAnalysisInsights(a) {
     const summaryBlock = a.summary ? `
       <section class="panel analysis-narrative" style="margin-bottom: var(--grid-gap);">
@@ -2341,7 +2412,8 @@
             ${recs.map(w => insightItem(w, null)).join("")}
           </div>
         </div>
-      </div>`;
+      </div>
+      ${renderAnalysisAdsRanking()}`;
   }
 
   function renderAnalysisLoadingSkeleton() {
