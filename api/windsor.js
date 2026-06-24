@@ -122,21 +122,23 @@ module.exports = async (req, res) => {
         ].join(',');
 
         // Ad-niveau — ZONDER `date` (Windsor aggregeert per advertentie → ±N rijen i.p.v.
-        // N×dagen). CORE = de essentiële, snelle velden (engagement/spend/CPM/creative/
-        // conversie). Dit is de primaire call: lukt deze, dan toont de Library losse ads.
+        // N×dagen). CORE = STRIKT het essentiële, snelle minimum (engagement + paid-basics).
+        // Dit is de primaire call die de losse advertenties + engagement levert. Alle zwaardere
+        // extra's (creative-type, video-retentie, conversies) zitten in APARTE, niet-fatale
+        // calls — zo kan een trage Meta-breakdown de core niet de 55s-timeout in trekken.
         const ADS_AD_CORE = [
           'ad_id', 'ad_name', 'campaign_name', 'image_url',
           'impressions', 'reach', 'clicks', 'spend', 'ctr', 'cpm',
           'actions_post_reaction', 'actions_comment', 'actions_post', 'actions_onsite_conversion_post_save',
-          'effective_instagram_media__media_type', 'effective_instagram_media__media_product_type', 'object_type',
-          // conversies — voor ROAS/CAC. Leeg/0 als de klant niet trackt.
-          'actions_purchase', 'actions_omni_purchase', 'action_values_purchase', 'action_values_omni_purchase',
-          'actions_lead',
         ].join(',');
 
-        // Video-retentie APART — Meta's per-video breakdowns zijn traag en doen de hele
-        // ad-level call timen. Geïsoleerd + niet-fataal: faalt dit, dan blijft de ad-level
-        // view (engagement/paid-metrics) staan; enkel de retentiecurve ontbreekt dan.
+        // Creative-type — aparte/niet-fatale call (IG-velden = exact format; object_type fallback).
+        const ADS_AD_CREATIVE = [
+          'ad_id',
+          'effective_instagram_media__media_type', 'effective_instagram_media__media_product_type', 'object_type',
+        ].join(',');
+
+        // Video-retentie — Meta's per-video breakdowns zijn traag; apart/niet-fataal.
         const ADS_AD_VIDEO = [
           'ad_id',
           'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
@@ -144,31 +146,49 @@ module.exports = async (req, res) => {
           'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
         ].join(',');
 
-        // Ruimere fetch-timeout (55s, binnen het 60s-functiebudget) zodat grotere
-        // datumbereiken niet voortijdig afgebroken worden. Video krijgt een krappere
-        // timeout zodat een trage video-fetch de functie niet tot 55s gijzelt.
+        // Conversies (ROAS-waarde + CAC-aantal) — value-breakdowns zijn zwaar; apart/niet-fataal.
+        const ADS_AD_CONV = [
+          'ad_id',
+          'actions_purchase', 'actions_omni_purchase', 'action_values_purchase', 'action_values_omni_purchase',
+          'actions_lead',
+        ].join(',');
+
+        // Core krijgt het volle budget (55s); de extra's een krappere timeout zodat een trage
+        // breakdown de functie niet tot 55s gijzelt en de core-data altijd op tijd terugkomt.
         const FETCH_MS = 55000;
-        const VIDEO_MS = 40000;
-        const [igData, adsData, adsAdData, adsVideoData] = await Promise.all([
+        const ADDON_MS = 35000;
+        const [igData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData] = await Promise.all([
           safeCall(windsor('instagram', apiKey, { fields: IG_FIELDS, ...dateParams }, FETCH_MS), 'ig'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CORE, ...dateParams }, FETCH_MS), 'fb-ads-core'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_VIDEO, ...dateParams }, VIDEO_MS), 'fb-ads-video'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CREATIVE, ...dateParams }, ADDON_MS), 'fb-ads-creative'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_VIDEO, ...dateParams }, ADDON_MS), 'fb-ads-video'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CONV, ...dateParams }, ADDON_MS), 'fb-ads-conv'),
         ]);
 
-        // Merge de video-retentie in de ad-core rows op ad_id (beide no-date → 1 rij per ad).
-        if (adsAdData && Array.isArray(adsAdData.data) && adsVideoData && Array.isArray(adsVideoData.data)) {
-          const vid = {};
-          for (const r of adsVideoData.data) if (r.ad_id != null) vid[r.ad_id] = r;
-          const VKEYS = [
+        // Merge alle add-on-velden in de ad-core rows op ad_id (allen no-date → 1 rij per ad).
+        if (adsAdData && Array.isArray(adsAdData.data)) {
+          const mergeById = (src, keys) => {
+            if (!src || !Array.isArray(src.data)) return;
+            const idx = {};
+            for (const r of src.data) if (r.ad_id != null) idx[r.ad_id] = r;
+            for (const r of adsAdData.data) {
+              const m = idx[r.ad_id];
+              if (m) for (const k of keys) if (m[k] != null) r[k] = m[k];
+            }
+          };
+          mergeById(adsCreativeData, [
+            'effective_instagram_media__media_type', 'effective_instagram_media__media_product_type', 'object_type',
+          ]);
+          mergeById(adsVideoData, [
             'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
             'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
             'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
-          ];
-          for (const r of adsAdData.data) {
-            const v = vid[r.ad_id];
-            if (v) for (const k of VKEYS) if (v[k] != null) r[k] = v[k];
-          }
+          ]);
+          mergeById(adsConvData, [
+            'actions_purchase', 'actions_omni_purchase', 'action_values_purchase', 'action_values_omni_purchase',
+            'actions_lead',
+          ]);
         }
 
         return res.status(200).json({
@@ -181,8 +201,10 @@ module.exports = async (req, res) => {
             instagram: igData && igData.__error ? igData.__error : null,
             ads: adsData && adsData.__error ? adsData.__error : null,
             adsAd: adsAdData && adsAdData.__error ? adsAdData.__error : null,
-            // Video faalt niet-fataal; tóch meesturen zodat een ontbrekende curve te herleiden is.
+            // Add-ons falen niet-fataal; tóch meesturen zodat ontbrekende velden te herleiden zijn.
+            adsCreative: adsCreativeData && adsCreativeData.__error ? adsCreativeData.__error : null,
             adsVideo: adsVideoData && adsVideoData.__error ? adsVideoData.__error : null,
+            adsConv: adsConvData && adsConvData.__error ? adsConvData.__error : null,
           },
         });
       }
