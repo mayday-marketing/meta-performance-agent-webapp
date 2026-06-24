@@ -228,6 +228,63 @@ module.exports = async (req, res) => {
         });
       }
 
+      // E-mail data — ConvertKit (subscribers + broadcasts) of Klaviyo (campagne-performance).
+      // Connector wordt automatisch bepaald: expliciet via CLIENTS.email_connector, anders een
+      // goedkope probe (klaviyo → convertkit; een 400 "No ... account" betekent niet-gekoppeld).
+      // Klaviyo is traag over lange periodes → venster gecapt op de laatste 30 dagen.
+      case 'getEmail': {
+        if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
+        const DAY_MS = 86400000;
+        const FETCH_MS = 55000;
+
+        const candidates = client.email_connector ? [client.email_connector] : ['klaviyo', 'convertkit'];
+        let conn = null;
+        for (let i = 0; i < candidates.length; i++) {
+          const c = candidates[i];
+          if (i === candidates.length - 1) { conn = c; break; } // laatste kandidaat: aannemen (bespaart een probe)
+          const probeField = c === 'klaviyo' ? 'campaign' : 'broadcasts__id';
+          const probe = await safeCall(windsor(c, apiKey, { fields: probeField, date_from: endDate, date_to: endDate }, 20000), `email-probe-${c}`);
+          if (!probe.__error || !/No .* account/i.test(probe.__error)) { conn = c; break; }
+        }
+        if (!conn) return res.status(200).json({ connector: null, reason: 'Geen e-mailconnector gekoppeld.' });
+
+        if (conn === 'klaviyo') {
+          const EMAIL_MAX_DAYS = 30;
+          const rangeDays = Math.round((new Date(endDate) - new Date(startDate)) / DAY_MS) + 1;
+          let from = startDate;
+          if (rangeDays > EMAIL_MAX_DAYS) {
+            const d = new Date(endDate); d.setDate(d.getDate() - (EMAIL_MAX_DAYS - 1));
+            from = d.toISOString().slice(0, 10);
+          }
+          const KLAVIYO_FIELDS = [
+            'campaign', 'campaign_id', 'sent_at', 'campaign_report_recipients',
+            'campaign_report_open_rate', 'campaign_report_click_rate', 'campaign_report_click_to_open_rate',
+            'campaign_report_conversions', 'campaign_report_conversion_value', 'campaign_report_revenue_per_recipient',
+            'campaign_report_unsubscribe_rate', 'campaign_report_bounce_rate',
+          ].join(',');
+          const data = await safeCall(windsor('klaviyo', apiKey, { fields: KLAVIYO_FIELDS, date_from: from, date_to: endDate }, FETCH_MS), 'klaviyo');
+          return res.status(200).json({
+            connector: 'klaviyo',
+            window: { startDate: from, endDate, capped: from !== startDate, maxDays: EMAIL_MAX_DAYS },
+            campaigns: data,
+            errors: { campaigns: data && data.__error ? data.__error : null },
+          });
+        }
+
+        // convertkit — lichtgewicht: broadcasts + subscribers over de volledige periode.
+        const [bc, subs] = await Promise.all([
+          safeCall(windsor('convertkit', apiKey, { fields: 'broadcasts__id,broadcasts__subject,broadcasts__created_at', date_from: startDate, date_to: endDate }, FETCH_MS), 'ck-broadcasts'),
+          safeCall(windsor('convertkit', apiKey, { fields: 'subscribers__id,subscribers__created_at,subscribers__state', date_from: startDate, date_to: endDate }, FETCH_MS), 'ck-subscribers'),
+        ]);
+        return res.status(200).json({
+          connector: 'convertkit',
+          window: { startDate, endDate },
+          broadcasts: bc,
+          subscribers: subs,
+          errors: { broadcasts: bc && bc.__error ? bc.__error : null, subscribers: subs && subs.__error ? subs.__error : null },
+        });
+      }
+
       // Veld-ontdekking: vraagt de autoritatieve veldenlijst van een connector op
       // (account-specifiek). Geeft de velden terug die matchen op video/engagement-termen,
       // zodat we de juiste veldnamen kunnen instellen zonder te gokken.
@@ -258,7 +315,7 @@ module.exports = async (req, res) => {
       }
 
       default:
-        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData', 'getDashboard', 'getFields' beschikbaar).` });
+        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData', 'getDashboard', 'getEmail', 'getFields' beschikbaar).` });
     }
   } catch (err) {
     return res.status(502).json({ error: err.message });

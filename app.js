@@ -54,6 +54,10 @@
     analysisLoading: false,
     analysisError: null,
     analysisGenId: 0,                 // guard tegen out-of-order responses bij periode-wissel
+    email: null,                      // ruwe getEmail-respons voor de huidige periode
+    emailLoading: false,
+    emailError: null,
+    emailKey: null,                   // periodeKey waarvoor email geladen is (lazy refresh)
   };
 
   /* ---------- Session persistence ---------- */
@@ -312,6 +316,8 @@
       $$(".date-filter input[type=date]")[1].value = state.period.end;
       buttons.forEach(b => b.classList.toggle("on", b.dataset.days === String(days)));
       refreshOverview();
+      state.emailKey = null; // e-mail-cache verloopt bij periode-wissel
+      if (state.page === "email") refreshEmail();
     };
     const presets = [
       { label: "90 dagen", days: 90 },
@@ -335,6 +341,7 @@
       overview:    { title: "Overview",    crumbs: ["Dashboard", "Overview"] },
       library:     { title: "Library",     crumbs: ["Dashboard", "Library"] },
       analysis:    { title: "Analysis",    crumbs: ["Dashboard", "Analysis"] },
+      email:       { title: "E-mail",      crumbs: ["Dashboard", "E-mail"] },
       methodology: { title: "Methodology", crumbs: ["Dashboard", "Methodology"] },
     };
     const t = titles[page] || titles.overview;
@@ -342,6 +349,8 @@
     $(".crumbs").innerHTML = t.crumbs.map((c, i) =>
       i === 0 ? `<span>${c}</span>` : `<span class="sep">/</span><span>${c}</span>`
     ).join("");
+    // E-mail wordt lui geladen bij het eerste bezoek (en opnieuw na periode-wissel).
+    if (page === "email" && typeof refreshEmail === "function") refreshEmail();
   }
 
   // Spring vanuit de Analyse naar een specifieke advertentie in de Library: filter op
@@ -376,6 +385,8 @@
         state.period.end = e;
         $$(".period-toggle button").forEach(b => b.classList.remove("on"));
         refreshOverview();
+        state.emailKey = null; // e-mail-cache verloopt bij periode-wissel
+        if (state.page === "email") refreshEmail();
       }, 400);
     };
     inputs.forEach((inp) => { inp.onchange = onChange; });
@@ -2510,6 +2521,158 @@
           Genereer analyse voor ${escapeHtml(periodLabelShort())} →
         </button>
       </div>` + adsRank;
+  }
+
+  /* ---------- E-mail (live: ConvertKit / Klaviyo via Windsor) ---------- */
+
+  function refreshEmail() {
+    if (!state.session) return;
+    const key = analysisPeriodKey();
+    if (state.emailLoading) return;
+    if (state.email && state.emailKey === key) { renderEmail(); return; }
+    if (!state.session.hasWindsor) { renderEmail(); return; } // geen Windsor → geen e-mail-bron
+
+    state.emailLoading = true;
+    state.emailError = null;
+    state.email = null;
+    state.emailKey = key;
+    renderEmail();
+
+    windsorCall("getEmail", { startDate: state.period.start, endDate: state.period.end })
+      .then(res => {
+        if (state.emailKey !== key) return; // periode gewisseld tijdens fetch
+        state.email = res;
+        state.emailLoading = false;
+        renderEmail();
+      })
+      .catch(err => {
+        if (state.emailKey !== key) return;
+        state.emailLoading = false;
+        state.emailError = err.message || "Onbekende fout bij laden e-maildata.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderEmail();
+      });
+  }
+  window.__refreshEmail = refreshEmail;
+
+  // Windsor geeft rates soms als fractie (0–1), soms als percentage — defensief: ≤1 → ×100.
+  function emailPct(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return "—";
+    return (n <= 1 ? n * 100 : n).toFixed(1) + "%";
+  }
+  function emailDate(s) { try { return fmt.dateNL(new Date(s)); } catch { return s || "—"; } }
+  function emailKpiCard(label, value) {
+    return `<div class="panel" style="padding:16px 18px;"><div class="muted" style="font-size:12px;">${escapeHtml(label)}</div>
+      <div style="font-family:var(--font-serif); font-size:26px; color:var(--text); margin-top:4px;">${value}</div></div>`;
+  }
+
+  function renderEmail() {
+    const root = $("#email-content");
+    if (!root) return;
+    if (!state.session?.hasWindsor) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">E-mail-data is beschikbaar voor klanten met een Windsor-koppeling (ConvertKit of Klaviyo).</p>`);
+      return;
+    }
+    if (state.emailLoading) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">E-maildata laden…</p>`);
+      return;
+    }
+    if (state.emailError) {
+      root.innerHTML = renderAnalysisEmpty(`<p style="color:#c0392b; margin:0;">${escapeHtml(state.emailError)}</p>
+        <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshEmail()">Opnieuw proberen</button>`);
+      return;
+    }
+    const e = state.email;
+    if (!e || !e.connector) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen e-mailconnector (ConvertKit of Klaviyo) gekoppeld voor deze klant.</p>`);
+      return;
+    }
+    root.innerHTML = e.connector === "klaviyo" ? renderEmailKlaviyo(e) : renderEmailConvertKit(e);
+  }
+
+  function renderEmailKlaviyo(e) {
+    const rows = arrayOrEmpty(e.campaigns?.data);
+    const err = e.errors?.campaigns;
+    if (err) return renderAnalysisEmpty(`<p style="color:#c0392b;margin:0;">Klaviyo: ${escapeHtml(err)}</p>
+      <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshEmail()">Opnieuw proberen</button>`);
+    if (!rows.length) return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen e-mailcampagnes in deze periode.</p>`);
+
+    const num = (x, k) => Number(x[k]) || 0;
+    const totRcpt = rows.reduce((s, x) => s + num(x, "campaign_report_recipients"), 0);
+    const totRev = rows.reduce((s, x) => s + num(x, "campaign_report_conversion_value"), 0);
+    const wAvg = (k) => totRcpt ? rows.reduce((s, x) => s + num(x, k) * num(x, "campaign_report_recipients"), 0) / totRcpt : 0;
+
+    const win = e.window;
+    const note = win?.capped
+      ? `<div class="panel-sub" style="margin-bottom:10px;">Toont de laatste ${win.maxDays} dagen (${win.startDate} → ${win.endDate}) — Klaviyo is traag over langere periodes. Definitieve oplossing: de data-pipeline.</div>`
+      : "";
+
+    const sorted = [...rows].sort((a, b) => num(b, "campaign_report_conversion_value") - num(a, "campaign_report_conversion_value"));
+
+    return `
+      ${note}
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:var(--grid-gap); margin-bottom:var(--grid-gap);">
+        ${emailKpiCard("Campagnes", fmt.int(rows.length))}
+        ${emailKpiCard("Ontvangers (totaal)", fmt.int(totRcpt))}
+        ${emailKpiCard("Gem. open rate", emailPct(wAvg("campaign_report_open_rate")))}
+        ${emailKpiCard("E-mail-omzet", "€" + fmt.int(totRev))}
+      </div>
+      <section class="panel">
+        <div class="panel-header">
+          <div><h2 class="panel-title">E-mailcampagnes</h2><div class="panel-sub">Klaviyo · gesorteerd op omzet</div></div>
+          <button class="btn tiny" onclick="window.__refreshEmail()">↻ Verversen</button>
+        </div>
+        <div class="lib-table"><table>
+          <thead><tr><th>Campagne</th><th>Verzonden</th><th class="right">Ontvangers</th><th class="right">Open rate</th><th class="right">Click rate</th><th class="right">Omzet</th><th class="right">€/ontvanger</th></tr></thead>
+          <tbody>${sorted.map(x => `
+            <tr>
+              <td>${escapeHtml((x.campaign || "").slice(0, 60) || "—")}</td>
+              <td>${emailDate(x.sent_at)}</td>
+              <td class="right">${fmt.int(num(x, "campaign_report_recipients"))}</td>
+              <td class="right">${emailPct(x.campaign_report_open_rate)}</td>
+              <td class="right">${emailPct(x.campaign_report_click_rate)}</td>
+              <td class="right">€${fmt.int(num(x, "campaign_report_conversion_value"))}</td>
+              <td class="right">€${num(x, "campaign_report_revenue_per_recipient").toFixed(2)}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table></div>
+      </section>`;
+  }
+
+  function renderEmailConvertKit(e) {
+    const broadcasts = arrayOrEmpty(e.broadcasts?.data);
+    const subs = arrayOrEmpty(e.subscribers?.data);
+    const bErr = e.errors?.broadcasts, sErr = e.errors?.subscribers;
+    if (bErr && sErr) return renderAnalysisEmpty(`<p style="color:#c0392b;margin:0;">ConvertKit: ${escapeHtml(bErr)}</p>
+      <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshEmail()">Opnieuw proberen</button>`);
+
+    const byState = subs.reduce((m, x) => { const k = x.subscribers__state || "onbekend"; m[k] = (m[k] || 0) + 1; return m; }, {});
+    const active = byState.active || 0;
+    const stateChips = Object.entries(byState).map(([k, v]) => `<span class="pill">${escapeHtml(k)}: ${v}</span>`).join(" ");
+    const sortedBc = [...broadcasts].sort((a, b) => new Date(b.broadcasts__created_at || 0) - new Date(a.broadcasts__created_at || 0));
+
+    return `
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:var(--grid-gap); margin-bottom:var(--grid-gap);">
+        ${emailKpiCard("Nieuwe subscribers (periode)", fmt.int(subs.length))}
+        ${emailKpiCard("Waarvan actief", fmt.int(active))}
+        ${emailKpiCard("Broadcasts verzonden", fmt.int(broadcasts.length))}
+      </div>
+      <section class="panel" style="margin-bottom:var(--grid-gap);">
+        <div class="panel-header">
+          <div><h2 class="panel-title">Subscribers per status</h2><div class="panel-sub">ConvertKit</div></div>
+          <button class="btn tiny" onclick="window.__refreshEmail()">↻ Verversen</button>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">${stateChips || '<span class="muted">Geen subscriber-data.</span>'}</div>
+        <p class="muted" style="font-size:12px; margin-top:12px;">ConvertKit levert via Windsor geen open-/click-metrics — daarom tonen we lijstgroei en verzonden broadcasts. Engagement-cijfers vereisen een andere bron of de data-pipeline.</p>
+      </section>
+      <section class="panel">
+        <div class="panel-header"><div><h2 class="panel-title">Verzonden broadcasts</h2><div class="panel-sub">${broadcasts.length} in deze periode</div></div></div>
+        <div class="lib-table"><table>
+          <thead><tr><th>Onderwerp</th><th>Verzonden</th></tr></thead>
+          <tbody>${sortedBc.map(x => `<tr><td>${escapeHtml((x.broadcasts__subject || "").slice(0, 90) || "—")}</td><td>${emailDate(x.broadcasts__created_at)}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">Geen broadcasts in deze periode.</td></tr>`}</tbody>
+        </table></div>
+      </section>`;
   }
 
   /* ---------- Chat panel (mock, stap 6) ---------- */
