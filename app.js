@@ -2626,14 +2626,34 @@
 
     const fp = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yL(p.fixed).toFixed(1)}`).join(" ");
     const fArea = `${fp} L${xAt(pts.length - 1)},${yL(0)} L${xAt(0)},${yL(0)} Z`;
-    let svg = `
+    const fixedSvg = `
       <defs><linearGradient id="emfix-${opts.id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${opts.fixedColor}" stop-opacity="0.20"/><stop offset="100%" stop-color="${opts.fixedColor}" stop-opacity="0"/></linearGradient></defs>
       <path d="${fArea}" fill="url(#emfix-${opts.id})"/>
       <path d="${fp}" fill="none" stroke="${opts.fixedColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-    activeOv.forEach(o => {
-      const op = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yR(p.ov[o.key] || 0).toFixed(1)}`).join(" ");
-      svg += `<path d="${op}" fill="none" stroke="${o.color}" stroke-width="2" ${o.dashed ? 'stroke-dasharray="5 3"' : ""} stroke-linecap="round" stroke-linejoin="round"/>`;
-    });
+
+    const baseY = padT + innerH;
+    let ovSvg = "";
+    if (opts.overlayStyle === "bar") {
+      const n = activeOv.length || 1;
+      const groupW = Math.min(stepX * 0.7, 42);
+      const barW = groupW / n;
+      activeOv.forEach((o, j) => {
+        pts.forEach((p, i) => {
+          const v = p.ov[o.key] || 0;
+          const x = xAt(i) - groupW / 2 + j * barW;
+          const y = yR(v);
+          const bh = Math.max(0, baseY - y);
+          ovSvg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(barW * 0.82).toFixed(1)}" height="${bh.toFixed(1)}" fill="${o.color}" opacity="0.85" rx="1.5"><title>${escapeHtml(p.label)} · ${escapeHtml(o.label)}: ${o.fmt(v)}</title></rect>`;
+        });
+      });
+    } else {
+      activeOv.forEach(o => {
+        const op = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yR(p.ov[o.key] || 0).toFixed(1)}`).join(" ");
+        ovSvg += `<path d="${op}" fill="none" stroke="${o.color}" stroke-width="2" ${o.dashed ? 'stroke-dasharray="5 3"' : ""} stroke-linecap="round" stroke-linejoin="round"/>`;
+      });
+    }
+    // Staven áchter de vaste lijn (zodat de lijn leesbaar blijft); lijn-overlays eróverheen.
+    const svg = opts.overlayStyle === "bar" ? (ovSvg + fixedSvg) : (fixedSvg + ovSvg);
 
     const toggle = opts.overlays.map(o => `<button class="btn tiny ${state.emailOverlays[o.key] ? "primary" : ""}" onclick="window.__emailToggleOverlay('${o.key}')">${escapeHtml(o.label)}</button>`).join(" ");
     const legend = `<span class="item"><span class="swatch" style="background:${opts.fixedColor}"></span>${escapeHtml(opts.fixedLabel)}</span>`
@@ -2686,6 +2706,7 @@
     const chart2 = renderEmailDualChart({
       id: "rev", title: "Verzonden e-mails & omzet per dag", sub: "Per dag · klik omzet / omzet per ontvanger aan of uit",
       points: dayPts, fixedLabel: "Verzonden e-mails", fixedColor: "#351f69", fixedFmt: (v) => fmt.k(v),
+      overlayStyle: "bar",
       overlays: [
         { key: "revenue", label: "Omzet", color: "#ff683b", fmt: (v) => "€" + fmt.k(v) },
         { key: "rev_rcpt", label: "Omzet / ontvanger", color: "#1f9b8a", fmt: (v) => "€" + v.toFixed(2), dashed: true },
