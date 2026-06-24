@@ -34,15 +34,45 @@ function loadAnalysisPrompt() {
   return null;
 }
 
+// Repareer een afgekapte JSON-string: sluit een open string af en balanceer de nog
+// openstaande { en [ haakjes. Vangt de meest voorkomende afkap-situatie (max_tokens-limiet)
+// zodat een grotendeels-complete analyse alsnog bruikbaar is i.p.v. een harde fout.
+function repairTruncatedJson(s) {
+  let inStr = false, esc = false;
+  const stack = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{' || c === '[') stack.push(c);
+    else if (c === '}' || c === ']') stack.pop();
+  }
+  let out = s;
+  if (inStr) out += '"';
+  // verwijder een eventuele dangling komma vóór het sluiten
+  out = out.replace(/,\s*$/, '');
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === '{' ? '}' : ']';
+  return out;
+}
+
 // Pull the first balanced JSON object out of the model response.
 // Tolerates leading/trailing prose or markdown fences even though the prompt forbids them.
 function extractJson(text) {
   if (!text) return null;
   try { return JSON.parse(text); } catch {}
   const first = text.indexOf('{');
+  if (first < 0) return null;
   const last = text.lastIndexOf('}');
-  if (first < 0 || last <= first) return null;
-  try { return JSON.parse(text.slice(first, last + 1)); } catch {}
+  if (last > first) {
+    try { return JSON.parse(text.slice(first, last + 1)); } catch {}
+  }
+  // Laatste redmiddel: probeer een afgekapte JSON te repareren (balanceer haakjes/strings).
+  try { return JSON.parse(repairTruncatedJson(text.slice(first))); } catch {}
   return null;
 }
 
@@ -125,7 +155,7 @@ module.exports = async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-opus-4-8',
-        max_tokens: 4096,
+        max_tokens: 8192, // ruim genoeg voor 5 winners + 5 losers + recs (was 4096 → JSON kapte af)
         system: systemPrompt,
         messages: [{ role: 'user', content: userMsg }],
       }),
