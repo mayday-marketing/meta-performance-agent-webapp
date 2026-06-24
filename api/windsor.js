@@ -103,6 +103,23 @@ module.exports = async (req, res) => {
         if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
         const dateParams = { date_from: startDate, date_to: endDate };
 
+        // Hobby-interim: Meta's ad-level breakdown is te traag over lange periodes (>55s timeout).
+        // Cap daarom het ad-level venster tot de laatste AD_LEVEL_MAX_DAYS; campagne-niveau,
+        // KPI's en organic blijven het volledige bereik gebruiken. Bij een definitieve cache/
+        // warehouse-pipeline (zie UITVOERINGSLIJST) vervalt deze cap. `adLevelWindow` wordt
+        // meegestuurd zodat de UI kan tonen welk venster de advertentie-detail dekt.
+        const AD_LEVEL_MAX_DAYS = 35;
+        const DAY_MS = 86400000;
+        const rangeDays = Math.round((new Date(endDate) - new Date(startDate)) / DAY_MS) + 1;
+        let adFrom = startDate;
+        if (rangeDays > AD_LEVEL_MAX_DAYS) {
+          const d = new Date(endDate);
+          d.setDate(d.getDate() - (AD_LEVEL_MAX_DAYS - 1));
+          adFrom = d.toISOString().slice(0, 10);
+        }
+        const adDateParams = { date_from: adFrom, date_to: endDate };
+        const adLevelCapped = adFrom !== startDate;
+
         const IG_FIELDS = [
           'media_id', 'media_caption', 'media_type', 'media_product_type',
           'timestamp', 'media_thumbnail_url', 'media_url', 'media_permalink',
@@ -160,10 +177,10 @@ module.exports = async (req, res) => {
         const [igData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData] = await Promise.all([
           safeCall(windsor('instagram', apiKey, { fields: IG_FIELDS, ...dateParams }, FETCH_MS), 'ig'),
           safeCall(windsor('facebook',  apiKey, { fields: ADS_FIELDS, ...dateParams }, FETCH_MS), 'fb-ads'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CORE, ...dateParams }, FETCH_MS), 'fb-ads-core'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CREATIVE, ...dateParams }, ADDON_MS), 'fb-ads-creative'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_VIDEO, ...dateParams }, ADDON_MS), 'fb-ads-video'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CONV, ...dateParams }, ADDON_MS), 'fb-ads-conv'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CORE, ...adDateParams }, FETCH_MS), 'fb-ads-core'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CREATIVE, ...adDateParams }, ADDON_MS), 'fb-ads-creative'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_VIDEO, ...adDateParams }, ADDON_MS), 'fb-ads-video'),
+          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CONV, ...adDateParams }, ADDON_MS), 'fb-ads-conv'),
         ]);
 
         // Merge alle add-on-velden in de ad-core rows op ad_id (allen no-date → 1 rij per ad).
@@ -193,6 +210,8 @@ module.exports = async (req, res) => {
 
         return res.status(200).json({
           period: { startDate, endDate },
+          // Venster dat de ad-level data écht dekt (kan korter zijn dan de selectie, zie cap).
+          adLevelWindow: adLevelCapped ? { startDate: adFrom, endDate, maxDays: AD_LEVEL_MAX_DAYS } : null,
           instagram: igData,
           ads: adsData,        // campagne-niveau (trend/KPI + fallback)
           adsAd: adsAdData,    // ad-niveau core (Library per advertentie, indien gelukt)

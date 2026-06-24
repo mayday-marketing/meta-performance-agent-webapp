@@ -1088,6 +1088,7 @@
       allPosts,
       adsCampaigns, // geaggregeerde campagne-cards uit daily rows (Blok B)
       adsLoading: false, // Windsor levert ads in dezelfde call → geen aparte wachttijd
+      adLevelWindow: raw.adLevelWindow || null, // venster dat de ad-detail dekt (Hobby-cap)
       _raw: raw,
       _source: "windsor",
     };
@@ -1806,10 +1807,20 @@
       return;
     }
 
+    // Hobby-interim: advertentie-detail dekt een korter venster dan de selectie → meld het
+    // wanneer het Meta Ads-filter actief is, zodat de cijfers niet misleiden.
+    const win = state.overview.adLevelWindow;
+    const adNote = (win && state.libraryFilter === "ads")
+      ? `<div class="panel" style="padding:10px 14px; margin-bottom:12px; font-size:13px;" class="muted">
+           <strong>Let op:</strong> advertentie-detail toont de laatste ${win.maxDays} dagen (${win.startDate} → ${win.endDate}).
+           Voor exacte aansluiting op een langere periode: kies een kortere datumrange. (Tijdelijke beperking — zie data-pipeline op de roadmap.)
+         </div>`
+      : "";
+
     const list = getFilteredLibrary();
-    resultsEl.innerHTML = state.libraryView === "grid"
+    resultsEl.innerHTML = adNote + (state.libraryView === "grid"
       ? renderLibraryGrid(list)
-      : renderLibraryTable(list);
+      : renderLibraryTable(list));
     if (countEl) countEl.textContent = `${list.length} posts`;
     bindLibraryInteractions();
   }
