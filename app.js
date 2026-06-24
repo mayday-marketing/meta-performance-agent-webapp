@@ -2412,8 +2412,7 @@
             ${recs.map(w => insightItem(w, null)).join("")}
           </div>
         </div>
-      </div>
-      ${renderAnalysisAdsRanking()}`;
+      </div>`;
   }
 
   function renderAnalysisLoadingSkeleton() {
@@ -2468,22 +2467,26 @@
       return;
     }
 
+    // Deterministische ads-ranking — onafhankelijk van de LLM-analyse, dus altijd tonen
+    // zodra er ads zijn (ook bij fout/laden/vóór generatie).
+    const adsRank = renderAnalysisAdsRanking();
+
     const postsCount = arrayOrEmpty(state.overview.allPosts).length;
-    if (postsCount === 0) {
+    if (postsCount === 0 && !adsRank) {
       root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen posts in deze periode om te analyseren.</p>`);
       return;
     }
 
     // LLM-generatie bezig.
     if (state.analysisLoading) {
-      root.innerHTML = renderAnalysisLoadingSkeleton();
+      root.innerHTML = renderAnalysisLoadingSkeleton() + adsRank;
       return;
     }
 
     // Cache-hit voor huidige periode → toon resultaat.
     const cached = state.analysisCache[analysisPeriodKey()];
     if (cached) {
-      root.innerHTML = renderAnalysisInsights(cached);
+      root.innerHTML = renderAnalysisInsights(cached) + adsRank;
       return;
     }
 
@@ -2492,7 +2495,7 @@
       root.innerHTML = renderAnalysisEmpty(`
         <p style="color:#c0392b; margin:0;">${escapeHtml(state.analysisError)}</p>
         <button class="btn primary" style="margin-top:14px;" onclick="window.__generateAnalysis()">Opnieuw proberen</button>
-      `);
+      `) + adsRank;
       return;
     }
 
@@ -2506,7 +2509,7 @@
         <button class="btn primary" onclick="window.__generateAnalysis()">
           Genereer analyse voor ${escapeHtml(periodLabelShort())} →
         </button>
-      </div>`;
+      </div>` + adsRank;
   }
 
   /* ---------- Chat panel (mock, stap 6) ---------- */
