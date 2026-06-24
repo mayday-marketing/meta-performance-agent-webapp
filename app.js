@@ -195,6 +195,11 @@
     state.analysisCache = {};
     state.analysisLoading = false;
     state.analysisError = null;
+    // E-mailstate wissen bij logout — anders lekt de vorige klant z'n e-maildata door.
+    state.email = null;
+    state.emailKey = null;
+    state.emailError = null;
+    state.emailLoading = false;
     state.chatMessages = [];
     dashboardInited = false;
     $("#brand-input").value = "";
@@ -2528,7 +2533,9 @@
 
   function refreshEmail() {
     if (!state.session) return;
-    const key = analysisPeriodKey();
+    // Sleutel per klant ÉN periode — anders deelt een andere klant met dezelfde periode
+    // dezelfde cache-hit en zie je de verkeerde e-maildata.
+    const key = `${state.session.clientId}|${analysisPeriodKey()}`;
     if (state.emailLoading) return;
     if (state.email && state.emailKey === key) { renderEmail(); return; }
     if (!state.session.hasWindsor) { renderEmail(); return; } // geen Windsor → geen e-mail-bron
