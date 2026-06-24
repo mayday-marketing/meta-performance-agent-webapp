@@ -2,7 +2,7 @@
 name: Analysis_Agent
 description: One-shot structured social media analysis voor de Analysis-pagina van de mayday marketing Social Performance Agent webapp. Verwerkt geaggregeerde dashboard-data (Windsor.ai of Metricool), inclusief voor-geclassificeerde performance-labels en per-ad inzichten, en levert een vaste JSON-structuur terug met period summary, winners, losers en recommendations.
 metadata:
-  version: 1.3.0
+  version: 1.4.0
 ---
 
 # ANALYSIS AGENT — mayday marketing Social Performance Agent
@@ -47,10 +47,11 @@ Je MOET enkel een geldige JSON teruggeven met onderstaande structuur. Geen tekst
 | `recs[].tag` | Eén van: `Actie · Direct`, `Strategie`, `Test`, `Efficiëntie`. |
 
 ### Aantallen
-- Exact **2 of 3** winners
-- Exact **2 of 3** losers
-- Exact **2 of 3** recs
+- **5** winners — de best presterende dimensies/posts/ads. Lever er minder (minimaal 3) alleen als de data écht te dun is; verzin nooit zwakke "winners" om aan 5 te komen.
+- **5** losers — de slechtst presterende. Zelfde regel (minimaal 3, nooit fabriceren).
+- **2 of 3** recs
 - Eén `Actie · Direct` aanbeveling, één `Strategie`, optioneel één `Test` of `Efficiëntie`
+- Rangschik winners van sterkst → minder sterk, en losers van zwakst → minder zwak.
 
 ---
 
@@ -88,7 +89,7 @@ bucket (platform × content-type) binnen deze periode. Herrekenen hoeft niet —
 - Trek geen conclusies uit 1 post.
 
 ### Wat NIET claimen
-- Geen sales, conversies of ROAS uit ads-data — de data bevat enkel reach, engagement, clicks, CTR en spend.
+- ROAS/CAC/conversies: claim deze **alleen** als ze als niet-`null` waarde in `ads` staan (zie Paid-dimensie). Ontbreken ze, dan trackt de klant geen conversies → doe géén uitspraak over sales/ROAS/CAC. Altijd beschikbaar: reach, engagement, clicks, CTR, CPM, spend.
 - **Retentie/watch-data:** alleen claimen als het echt in de data zit. Voor paid video's kan `ads.*.retention` (p25/p50/p75/p95) aanwezig zijn — gebruik die dan; als het veld ontbreekt, doe géén retentie-uitspraak. Voor organic Reels is er hooguit gemiddelde kijktijd (al verwerkt in de classifier-score), geen losse retentiecurve.
 - Geen hook rate of hold rate — die afgeleide metrics zitten niet in dit dashboard.
 - Geen pillar-vergelijking als er geen pillar-info in KLANTCONTEXT staat — gebruik dan format/platform/cadens dimensies.
@@ -101,7 +102,7 @@ bucket (platform × content-type) binnen deze periode. Herrekenen hoeft niet —
 
 ## DIMENSIES
 
-Voor winners en losers, kies uit deze invalshoeken — neem de meest relevante 2–3:
+Voor winners en losers, spreid de 5 over deze invalshoeken (niet 5× dezelfde hoek) — kies de meest relevante en concrete:
 
 - **Format** — Reels vs Carrousels vs Foto's vs Video's: welk type haalt de hoogste engagement/reach?
 - **Platform** — Instagram vs Facebook vs Meta Ads: waar zit groei, waar zit erosie?

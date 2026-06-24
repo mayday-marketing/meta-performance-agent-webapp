@@ -49,10 +49,13 @@ function extractJson(text) {
 function validateAnalysis(a) {
   if (!a || typeof a !== 'object') return 'Geen JSON-object ontvangen.';
   if (typeof a.summary !== 'string' || !a.summary.trim()) return 'summary ontbreekt.';
-  for (const key of ['winners', 'losers', 'recs']) {
+  // winners/losers: streef naar 5 (tolerant 3–6 voor dunne datasets); recs blijft 2–3.
+  for (const key of ['winners', 'losers']) {
     if (!Array.isArray(a[key])) return `${key} is geen array.`;
-    if (a[key].length < 2 || a[key].length > 3) return `${key} moet 2 of 3 items hebben.`;
+    if (a[key].length < 3 || a[key].length > 6) return `${key} moet 3 tot 6 items hebben.`;
   }
+  if (!Array.isArray(a.recs)) return 'recs is geen array.';
+  if (a.recs.length < 2 || a.recs.length > 3) return 'recs moet 2 of 3 items hebben.';
   return null;
 }
 
