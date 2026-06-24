@@ -664,6 +664,39 @@
     return allPosts;
   }
 
+  // Aparte classifier voor Meta Ads — paid heeft andere dynamiek dan organic, dus niet de
+  // engagement/save/watch-formule. AUTOMATISCH: heeft de ads-set conversies (purchases > 0)
+  // → scoor op ROAS (return on ad spend); anders op efficiëntie (CTR/CPM). Eén bucket (ads
+  // vs ads), ratio t.o.v. de mediaan, met dezelfde thresholds/minBucketSize als de organic-
+  // classifier (PERFORMANCE_CONFIG → één source of truth). Zet performance/perfRatio/
+  // perfBucket/perfBasis in-place; degradeert veilig naar n/a als er te weinig of geen data is.
+  function classifyAdsPerformance(ads) {
+    const list = (ads || []).filter(a => a && a.platform === "ads");
+    if (!list.length) return ads;
+    const { thresholds, minBucketSize } = PERFORMANCE_CONFIG;
+
+    const hasConversions = list.some(a => (a.purchases || 0) > 0);
+    const basis = hasConversions ? "ROAS" : "Efficiëntie (CTR/CPM)";
+    const rawScore = (a) => {
+      if (hasConversions) return a.roas != null ? a.roas : 0; // spend zonder return → 0 = zwak
+      return (a.cpm > 0) ? (a.ctr || 0) / a.cpm : 0;          // hoge CTR + lage CPM = efficiënt
+    };
+
+    const scored = list.map(a => ({ a, score: rawScore(a) }));
+    const med = median(scored.map(s => s.score).filter(v => v > 0));
+    const tooSmall = list.length < minBucketSize;
+    for (const s of scored) {
+      s.a.perfScore = +s.score.toFixed(3);
+      s.a.perfBucket = `Meta Ads · ${basis}`;
+      s.a.perfBasis = basis;
+      if (tooSmall || !med) { s.a.performance = null; s.a.perfRatio = null; continue; }
+      const ratio = s.score / med;
+      s.a.perfRatio = +ratio.toFixed(2);
+      s.a.performance = ratio >= thresholds.good ? "Good" : (ratio < thresholds.bad ? "Bad" : "Average");
+    }
+    return ads;
+  }
+
   function transformDashboard(raw, adsCampaignsRaw) {
     const igPosts = arrayOrEmpty(raw.posts?.igPosts).map(p => normalizePost(p, "ig", "Post"));
     const igReels = arrayOrEmpty(raw.posts?.igReels).map(p => normalizePost(p, "ig", "Reel"));
@@ -673,6 +706,7 @@
     const allPosts = [...igPosts, ...igReels, ...fbPosts].filter(Boolean);
     classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
     const adsCampaigns = ads.filter(Boolean);
+    classifyAdsPerformance(adsCampaigns); // paid-classifier (ROAS of CTR/CPM, automatisch)
 
     // Previous period posts — used for true period-over-period deltas.
     const igPostsPrev = arrayOrEmpty(raw.postsPrev?.igPosts).map(p => normalizePost(p, "ig", "Post"));
@@ -994,6 +1028,7 @@
     classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
     // Library: per advertentie zodra de ad-level fetch rijen gaf; anders fallback per campagne.
     const adsCampaigns = aggregateWindsorAds(adsAdRows.length ? adsAdRows : adsRows);
+    classifyAdsPerformance(adsCampaigns); // paid-classifier (ROAS of CTR/CPM, automatisch)
 
     const curAgg = aggregatePosts(allPosts);
     const adsReachCur = adsRows.reduce((s, r) => s + (r.reach || 0), 0);
@@ -1465,8 +1500,8 @@
 
   // Label komt nu uit de bucketed classifier (classifyPerformance), gezet op de post.
   function computePerformance(post) {
-    if (!post || post.platform === "ads") return null; // ads: geen organic-classifier
-    return post.performance || null;                    // null → "n/a" in de UI
+    if (!post) return null;
+    return post.performance || null; // null → "n/a"; ads krijgen label via classifyAdsPerformance
   }
 
   // Tooltip die het "waarom" achter het label toont (per spec).
@@ -1977,7 +2012,7 @@
           <li>We vergelijken ${escapeHtml(brand)}s IG-Reels alleen met andere IG-Reels van ${escapeHtml(brand)} — niet met je foto's en niet met andere klanten.</li>
           <li>Minder dan ${cfg.minBucketSize} posts van een type in de periode? Dan tonen we <strong>n/a</strong> — te weinig vergelijkingsmateriaal voor een eerlijk oordeel.</li>
           <li>Reels zonder kijktijd-data (oudere posts) vallen terug op een engagement- en saves-score.</li>
-          <li>Ads krijgen géén Good/Average/Bad — paid heeft andere KPI's (CPM, ROAS) en een eigen dynamiek.</li>
+          <li>Meta Ads krijgen een <strong>eigen</strong> Good/Average/Bad — niet de organic-formule. We schakelen automatisch: draaien je ads op conversies, dan scoren we op <strong>ROAS</strong> (return on ad spend); zonder conversie-tracking op <strong>efficiëntie (CTR/CPM)</strong>. Advertenties worden onderling vergeleken (ads vs ads), met dezelfde ${cfg.thresholds.good}× / ${cfg.thresholds.bad}×-grenzen.</li>
           <li>Pure bereik-groei is op zichzelf geen kwaliteitsindicator; verschillen in algoritme-distributie kunnen scores beïnvloeden.</li>
         </ul>
       </section>
