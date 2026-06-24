@@ -59,6 +59,7 @@
     emailError: null,
     emailKey: null,                   // periodeKey waarvoor email geladen is (lazy refresh)
     emailOverlays: { open: true, click: false, revenue: true, rev_rcpt: false }, // aan/uit overlay-lijnen
+    emailSort: { key: null, dir: "desc" }, // sorteer-state e-mailtabellen (null = default per tabel)
   };
 
   /* ---------- Session persistence ---------- */
@@ -2570,6 +2571,30 @@
     return (n <= 1 ? n * 100 : n).toFixed(1) + "%";
   }
   function emailDate(s) { try { return fmt.dateNL(new Date(s)); } catch { return s || "—"; } }
+
+  window.__emailSort = (key) => {
+    if (state.emailSort.key === key) state.emailSort.dir = state.emailSort.dir === "desc" ? "asc" : "desc";
+    else { state.emailSort.key = key; state.emailSort.dir = "desc"; }
+    renderEmail();
+  };
+
+  // Generieke sorteerbare e-mailtabel. cols: [{key,label,align,val(x),cell(x)}].
+  // val() levert de sorteerwaarde (string → alfabetisch, anders numeriek).
+  function renderEmailTable(rows, cols, defaultKey) {
+    const activeKey = (state.emailSort.key && cols.some(c => c.key === state.emailSort.key)) ? state.emailSort.key : defaultKey;
+    const dir = (state.emailSort.key === activeKey) ? state.emailSort.dir : "desc";
+    const col = cols.find(c => c.key === activeKey) || cols[0];
+    const sign = dir === "asc" ? 1 : -1;
+    const sorted = [...rows].sort((a, b) => {
+      const av = col.val(a), bv = col.val(b);
+      if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * sign;
+      return ((av || 0) - (bv || 0)) * sign;
+    });
+    const arrow = (k) => activeKey === k ? `<span class="sort-arrow">${dir === "asc" ? "↑" : "↓"}</span>` : "";
+    const thead = cols.map(c => `<th class="${c.align === "right" ? "right " : ""}sortable" onclick="window.__emailSort('${c.key}')">${escapeHtml(c.label)}${arrow(c.key)}</th>`).join("");
+    const body = sorted.map(x => `<tr>${cols.map(c => `<td class="${c.align === "right" ? "right" : ""}">${c.cell(x)}</td>`).join("")}</tr>`).join("");
+    return `<div class="lib-table"><table><thead><tr>${thead}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
   function emailKpiCard(label, value) {
     return `<div class="panel" style="padding:16px 18px;"><div class="muted" style="font-size:12px;">${escapeHtml(label)}</div>
       <div style="font-family:var(--font-serif); font-size:26px; color:var(--text); margin-top:4px;">${value}</div></div>`;
@@ -2739,7 +2764,15 @@
       ? `<div class="panel-sub" style="margin-bottom:10px;">Toont de laatste ${win.maxDays} dagen (${win.startDate} → ${win.endDate}) — Klaviyo is traag over langere periodes. Definitieve oplossing: de data-pipeline.</div>`
       : "";
 
-    const sorted = [...rows].sort((a, b) => num(b, "campaign_report_conversion_value") - num(a, "campaign_report_conversion_value"));
+    const cols = [
+      { key: "campaign", label: "Campagne", align: "left", val: x => (x.campaign || "").toLowerCase(), cell: x => escapeHtml((x.campaign || "").slice(0, 60) || "—") },
+      { key: "sent", label: "Verzonden", align: "left", val: x => new Date(x.sent_at || 0).getTime(), cell: x => emailDate(x.sent_at) },
+      { key: "recipients", label: "Ontvangers", align: "right", val: x => num(x, "campaign_report_recipients"), cell: x => fmt.int(num(x, "campaign_report_recipients")) },
+      { key: "open", label: "Open rate", align: "right", val: x => Number(x.campaign_report_open_rate) || 0, cell: x => emailPct(x.campaign_report_open_rate) },
+      { key: "click", label: "Click rate", align: "right", val: x => Number(x.campaign_report_click_rate) || 0, cell: x => emailPct(x.campaign_report_click_rate) },
+      { key: "revenue", label: "Omzet", align: "right", val: x => num(x, "campaign_report_conversion_value"), cell: x => "€" + fmt.int(num(x, "campaign_report_conversion_value")) },
+      { key: "rev_rcpt", label: "€/ontvanger", align: "right", val: x => num(x, "campaign_report_revenue_per_recipient"), cell: x => "€" + num(x, "campaign_report_revenue_per_recipient").toFixed(2) },
+    ];
 
     return `
       ${note}
@@ -2752,23 +2785,10 @@
       ${renderEmailCharts(rows)}
       <section class="panel">
         <div class="panel-header">
-          <div><h2 class="panel-title">E-mailcampagnes</h2><div class="panel-sub">Klaviyo · gesorteerd op omzet</div></div>
+          <div><h2 class="panel-title">E-mailcampagnes</h2><div class="panel-sub">Klaviyo · klik een kolom om te sorteren</div></div>
           <button class="btn tiny" onclick="window.__refreshEmail()">↻ Verversen</button>
         </div>
-        <div class="lib-table"><table>
-          <thead><tr><th>Campagne</th><th>Verzonden</th><th class="right">Ontvangers</th><th class="right">Open rate</th><th class="right">Click rate</th><th class="right">Omzet</th><th class="right">€/ontvanger</th></tr></thead>
-          <tbody>${sorted.map(x => `
-            <tr>
-              <td>${escapeHtml((x.campaign || "").slice(0, 60) || "—")}</td>
-              <td>${emailDate(x.sent_at)}</td>
-              <td class="right">${fmt.int(num(x, "campaign_report_recipients"))}</td>
-              <td class="right">${emailPct(x.campaign_report_open_rate)}</td>
-              <td class="right">${emailPct(x.campaign_report_click_rate)}</td>
-              <td class="right">€${fmt.int(num(x, "campaign_report_conversion_value"))}</td>
-              <td class="right">€${num(x, "campaign_report_revenue_per_recipient").toFixed(2)}</td>
-            </tr>`).join("")}
-          </tbody>
-        </table></div>
+        ${renderEmailTable(rows, cols, "revenue")}
       </section>`;
   }
 
@@ -2782,7 +2802,10 @@
     const byState = subs.reduce((m, x) => { const k = x.subscribers__state || "onbekend"; m[k] = (m[k] || 0) + 1; return m; }, {});
     const active = byState.active || 0;
     const stateChips = Object.entries(byState).map(([k, v]) => `<span class="pill">${escapeHtml(k)}: ${v}</span>`).join(" ");
-    const sortedBc = [...broadcasts].sort((a, b) => new Date(b.broadcasts__created_at || 0) - new Date(a.broadcasts__created_at || 0));
+    const bcCols = [
+      { key: "subject", label: "Onderwerp", align: "left", val: x => (x.broadcasts__subject || "").toLowerCase(), cell: x => escapeHtml((x.broadcasts__subject || "").slice(0, 90) || "—") },
+      { key: "date", label: "Verzonden", align: "left", val: x => new Date(x.broadcasts__created_at || 0).getTime(), cell: x => emailDate(x.broadcasts__created_at) },
+    ];
 
     return `
       <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:var(--grid-gap); margin-bottom:var(--grid-gap);">
@@ -2799,11 +2822,8 @@
         <p class="muted" style="font-size:12px; margin-top:12px;">ConvertKit levert via Windsor geen open-/click-metrics — daarom tonen we lijstgroei en verzonden broadcasts. Engagement-cijfers vereisen een andere bron of de data-pipeline.</p>
       </section>
       <section class="panel">
-        <div class="panel-header"><div><h2 class="panel-title">Verzonden broadcasts</h2><div class="panel-sub">${broadcasts.length} in deze periode</div></div></div>
-        <div class="lib-table"><table>
-          <thead><tr><th>Onderwerp</th><th>Verzonden</th></tr></thead>
-          <tbody>${sortedBc.map(x => `<tr><td>${escapeHtml((x.broadcasts__subject || "").slice(0, 90) || "—")}</td><td>${emailDate(x.broadcasts__created_at)}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">Geen broadcasts in deze periode.</td></tr>`}</tbody>
-        </table></div>
+        <div class="panel-header"><div><h2 class="panel-title">Verzonden broadcasts</h2><div class="panel-sub">${broadcasts.length} in deze periode · klik een kolom om te sorteren</div></div></div>
+        ${broadcasts.length ? renderEmailTable(broadcasts, bcCols, "date") : `<p class="muted" style="margin:0;">Geen broadcasts in deze periode.</p>`}
       </section>`;
   }
 
