@@ -58,6 +58,7 @@
     emailLoading: false,
     emailError: null,
     emailKey: null,                   // periodeKey waarvoor email geladen is (lazy refresh)
+    emailChartMetric: "revenue",      // gekozen metric voor de Klaviyo-lijngrafiek
   };
 
   /* ---------- Session persistence ---------- */
@@ -2591,6 +2592,66 @@
     root.innerHTML = e.connector === "klaviyo" ? renderEmailKlaviyo(e) : renderEmailConvertKit(e);
   }
 
+  // Lijngrafiek met metric-toggle (één metric tegelijk → eigen as-schaal, want de 5 metrics
+  // verschillen ordes van grootte). X-as = campagnes in verzendvolgorde (oud → nieuw).
+  const EMAIL_CHART_METRICS = [
+    { key: "recipients", label: "Ontvangers",        field: "campaign_report_recipients",          kind: "count" },
+    { key: "open",       label: "Open rate",         field: "campaign_report_open_rate",           kind: "rate" },
+    { key: "click",      label: "Click rate",        field: "campaign_report_click_rate",          kind: "rate" },
+    { key: "revenue",    label: "Omzet",             field: "campaign_report_conversion_value",    kind: "money" },
+    { key: "rev_rcpt",   label: "Omzet / ontvanger", field: "campaign_report_revenue_per_recipient", kind: "money2" },
+  ];
+  window.__emailChartMetric = (k) => { state.emailChartMetric = k; renderEmail(); };
+
+  function renderEmailChart(rows) {
+    const metric = EMAIL_CHART_METRICS.find(m => m.key === state.emailChartMetric) || EMAIL_CHART_METRICS[3];
+    const series = [...rows].filter(x => x.sent_at)
+      .sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at))
+      .map(x => { let v = Number(x[metric.field]) || 0; if (metric.kind === "rate" && v <= 1) v *= 100; return { label: emailDate(x.sent_at), v }; });
+    if (!series.length) return "";
+
+    const yFmt = (v) => metric.kind === "rate" ? v.toFixed(1) + "%"
+      : metric.kind === "money" ? "€" + fmt.k(v)
+      : metric.kind === "money2" ? "€" + v.toFixed(2)
+      : fmt.k(v);
+
+    const w = 760, h = 240, padL = 46, padR = 12, padT = 12, padB = 28;
+    const innerW = w - padL - padR, innerH = h - padT - padB;
+    const rawMax = Math.max(...series.map(s => s.v), 0);
+    const max = rawMax > 0 ? rawMax * 1.1 : 1;
+    const stepX = innerW / Math.max(1, series.length - 1);
+    const xAt = (i) => padL + i * stepX, yAt = (v) => padT + innerH * (1 - v / max);
+    const color = "#351f69";
+
+    let grid = "", ylabels = "";
+    for (let i = 0; i <= 4; i++) { const v = max * (i / 4), y = yAt(v);
+      grid += `<line x1="${padL}" x2="${w - padR}" y1="${y}" y2="${y}" stroke="currentColor" stroke-opacity="0.08"/>`;
+      ylabels += `<text x="${padL - 8}" y="${y + 3}" text-anchor="end" font-size="10" fill="currentColor" opacity="0.5">${yFmt(v)}</text>`; }
+    let xlabels = "";
+    series.forEach((s, i) => { if (i % Math.max(1, Math.ceil(series.length / 6)) === 0 || i === series.length - 1)
+      xlabels += `<text x="${xAt(i)}" y="${h - 8}" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55">${s.label}</text>`; });
+
+    const pts = series.map((s, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(s.v).toFixed(1)}`).join(" ");
+    const area = `${pts} L${xAt(series.length - 1)},${yAt(0)} L${xAt(0)},${yAt(0)} Z`;
+    const dots = series.map((s, i) => `<circle cx="${xAt(i)}" cy="${yAt(s.v)}" r="3" fill="${color}" stroke="var(--surface)" stroke-width="1.5"><title>${escapeHtml(s.label)}: ${yFmt(s.v)}</title></circle>`).join("");
+    const toggle = EMAIL_CHART_METRICS.map(m => `<button class="btn tiny ${m.key === metric.key ? "primary" : ""}" onclick="window.__emailChartMetric('${m.key}')">${m.label}</button>`).join(" ");
+
+    return `
+      <section class="panel" style="margin-bottom:var(--grid-gap);">
+        <div class="panel-header">
+          <div><h2 class="panel-title">Verloop over campagnes</h2><div class="panel-sub">Klaviyo · ${escapeHtml(metric.label)} per campagne (oud → nieuw)</div></div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">${toggle}</div>
+        </div>
+        <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet" style="display:block; margin-top:10px;">
+          <defs><linearGradient id="emlg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.22"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+          ${grid}${ylabels}${xlabels}
+          <path d="${area}" fill="url(#emlg)"/>
+          <path d="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          ${dots}
+        </svg>
+      </section>`;
+  }
+
   function renderEmailKlaviyo(e) {
     const rows = arrayOrEmpty(e.campaigns?.data);
     const err = e.errors?.campaigns;
@@ -2618,6 +2679,7 @@
         ${emailKpiCard("Gem. open rate", emailPct(wAvg("campaign_report_open_rate")))}
         ${emailKpiCard("E-mail-omzet", "€" + fmt.int(totRev))}
       </div>
+      ${renderEmailChart(rows)}
       <section class="panel">
         <div class="panel-header">
           <div><h2 class="panel-title">E-mailcampagnes</h2><div class="panel-sub">Klaviyo · gesorteerd op omzet</div></div>
