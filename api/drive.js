@@ -315,6 +315,34 @@ module.exports = async (req, res) => {
       return res.status(200).json({ found: true, files: used, content });
     }
 
+    // ── ACTION: context ─────────────────────────────────────────────
+    // Lichtgewicht: enkel de merk-/strategie-contextbestanden (géén ruwe data-CSV's).
+    // Voedt de chat-agent met merk-brief, tone/do's & don'ts, pijlers en concurrentie,
+    // zodat antwoorden op de merkstem en pijlers zijn afgestemd.
+    if (action === 'context') {
+      const contextFiles = [];
+      const ctxFolder = await findFolderByPath(accessToken, rootId, ['00_AI-CONTEXT']);
+      const sFolder   = await findFolderByPath(accessToken, rootId, ['03_MARKETING-STRATEGIE']);
+      const mFolder   = await findFolderByPath(accessToken, rootId, ['01_MERK-STRATEGIE']);
+      const contextMap = {
+        '0.1': 'Merk-Brief', '0.2': "Do's & Don'ts", '0.3': 'Woordenlijst',
+        '3.3': 'Content Pijlers', '1.3': 'Concurrentieanalyse',
+      };
+      for (const folderId of [ctxFolder, sFolder, mFolder]) {
+        if (!folderId) continue;
+        const files = await listFiles(accessToken, folderId);
+        for (const file of files) {
+          for (const [key, label] of Object.entries(contextMap)) {
+            if (file.name.includes(key) && !contextFiles.find(c => c.label === label)) {
+              const text = await downloadText(accessToken, file.id, file.mimeType);
+              if (text) contextFiles.push({ label, content: text.slice(0, 4000) });
+            }
+          }
+        }
+      }
+      return res.status(200).json({ contextFiles });
+    }
+
     // ── ACTION: scan ─────────────────────────────────────────────────
     // Scan folder structure and return available periods + file list
     const scanResult = { available: true, periods: {}, contextFiles: {} };

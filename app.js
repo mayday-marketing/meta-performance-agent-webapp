@@ -40,6 +40,7 @@
 
   const state = {
     session: null,                    // { token, clientId, brandName, hasMetricool, hasDrive }
+    driveContext: null,               // { clientId, files: [{label, content}] } — merkcontext voor de chat (cache per klant)
     page: "overview",
     libraryView: "grid",
     libraryFilter: "all",
@@ -2273,6 +2274,29 @@
     }
   }
 
+  // Haalt de merk-/strategie-contextbestanden uit Drive op voor de chat-agent.
+  // Gecachet per klant (clientId) zodat we het niet elke chat-turn opnieuw ophalen én
+  // zodat context van klant A nooit naar klant B lekt bij een sessiewissel.
+  async function fetchDriveContext() {
+    const cid = state.session?.clientId;
+    if (!cid || !state.session?.hasDrive) return [];
+    if (state.driveContext?.clientId === cid) return state.driveContext.files;
+    try {
+      const qs = new URLSearchParams({
+        action: "context",
+        clientId: cid,
+        token: state.session.token,
+      });
+      const res = await fetch(`/api/drive?${qs.toString()}`);
+      const files = res.ok ? ((await res.json())?.contextFiles || []) : [];
+      state.driveContext = { clientId: cid, files };
+      return files;
+    } catch {
+      state.driveContext = { clientId: cid, files: [] };
+      return [];
+    }
+  }
+
   async function generateAnalysis() {
     if (!state.overview) return;
     const key = analysisPeriodKey();
@@ -2900,6 +2924,11 @@
     let dashboardData = null;
     try { dashboardData = buildAnalysisSummary(); } catch (_) {}
 
+    // Merk-/strategiecontext uit Drive (merk-brief, do's & don'ts, pijlers, concurrentie)
+    // zodat antwoorden op de merkstem en pijlers zijn afgestemd. Best-effort; per klant gecachet.
+    const contextFiles = await fetchDriveContext();
+    const driveFiles = contextFiles.length ? { contextFiles } : undefined;
+
     try {
       const data = await apiPost("/api/chat", {
         messages: apiMessages,
@@ -2907,6 +2936,7 @@
         token: state.session.token,
         clientContext: state.session.clientContext || "",
         dashboardData,
+        driveFiles,
       });
       typing.remove();
       pushBot({ text: data.text || "Geen antwoord ontvangen." });

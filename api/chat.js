@@ -78,7 +78,12 @@ module.exports = async (req, res) => {
   // bestanden. Beide zijn optioneel; is er niets, dan blijft het bericht ongewijzigd.
   let apiMessages = [...messages];
 
-  const hasDriveFiles = driveFiles && driveFiles.length > 0 && drivePeriod;
+  // driveFiles is een object { contextFiles?: [...], files?: [...] } — niet een array.
+  // (De oude check `driveFiles.length` was daardoor altijd falsy en dus dood.)
+  const hasDriveFiles = !!driveFiles && (
+    (Array.isArray(driveFiles.contextFiles) && driveFiles.contextFiles.length > 0) ||
+    (Array.isArray(driveFiles.files) && driveFiles.files.length > 0)
+  );
   const hasDashboard = dashboardData && typeof dashboardData === 'object';
 
   if (hasDriveFiles || hasDashboard) {
