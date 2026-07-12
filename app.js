@@ -374,7 +374,7 @@
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.style.transition = "background-color .4s";
       const orig = el.style.backgroundColor;
-      el.style.backgroundColor = "rgba(255,104,59,0.18)"; // accent-1 tint, werkt op tr én card
+      el.style.backgroundColor = "var(--accent-soft)"; // accent-tint, werkt op tr én card
       setTimeout(() => { el.style.backgroundColor = orig; }, 2200);
     }, 120);
   }
@@ -808,9 +808,9 @@
     const adsReach = adsReachCur; // reuse from KPI calc above
     const totalChannelReach = igReach + fbReach + adsReach || 1;
     const channels = [
-      { label: "Instagram", color: "#ff683b", value: Math.round((igReach / totalChannelReach) * 100) },
-      { label: "Facebook",  color: "#351f69", value: Math.round((fbReach / totalChannelReach) * 100) },
-      { label: "Meta Ads",  color: "#1f9b8a", value: Math.round((adsReach / totalChannelReach) * 100) },
+      { label: "Instagram", color: "var(--series-1)", value: Math.round((igReach / totalChannelReach) * 100) },
+      { label: "Facebook",  color: "var(--series-2)", value: Math.round((fbReach / totalChannelReach) * 100) },
+      { label: "Meta Ads",  color: "var(--series-3)", value: Math.round((adsReach / totalChannelReach) * 100) },
     ];
 
     // Top posts (top 5 by engagement, organic only — ads excluded per architectuur)
@@ -1116,9 +1116,9 @@
     const adsReach = adsReachCur;
     const totalChannelReach = igReach + fbReach + adsReach || 1;
     const channels = [
-      { label: "Instagram", color: "#ff683b", value: Math.round((igReach / totalChannelReach) * 100) },
-      { label: "Facebook",  color: "#351f69", value: 0 },
-      { label: "Meta Ads",  color: "#1f9b8a", value: Math.round((adsReach / totalChannelReach) * 100) },
+      { label: "Instagram", color: "var(--series-1)", value: Math.round((igReach / totalChannelReach) * 100) },
+      { label: "Facebook",  color: "var(--series-2)", value: 0 },
+      { label: "Meta Ads",  color: "var(--series-3)", value: Math.round((adsReach / totalChannelReach) * 100) },
     ];
 
     // Top posts (organic IG, top 5 op engagement-rate)
@@ -1255,12 +1255,13 @@
   }
 
   function gradientFor(i) {
+    // Neutrale, palette-gestuurde thumbnail-fallbacks (var() werkt in style-attribuut).
     const palette = [
-      "linear-gradient(135deg, #ff683b, #351f69)",
-      "linear-gradient(135deg, #351f69, #1f9b8a)",
-      "linear-gradient(135deg, #1f9b8a, #ff683b)",
-      "linear-gradient(135deg, #6a3bff, #ff683b)",
-      "linear-gradient(135deg, #ff683b, #6a3bff)",
+      "linear-gradient(135deg, var(--series-1), var(--series-2))",
+      "linear-gradient(135deg, var(--series-2), var(--series-3))",
+      "linear-gradient(135deg, var(--series-3), var(--series-1))",
+      "linear-gradient(135deg, var(--series-1), var(--series-3))",
+      "linear-gradient(135deg, var(--series-2), var(--series-1))",
     ];
     return palette[i % palette.length];
   }
@@ -1282,20 +1283,8 @@
   }
   function renderSpark(values, color) {
     if (!values || values.length < 2) return "";
-    const w = 160, h = 38;
-    const id = "spk" + Math.random().toString(36).slice(2, 8);
-    return `
-      <svg class="spark" viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="${color}" stop-opacity="0.32"/>
-            <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
-        <path d="${sparkArea(values, w, h)}" fill="url(#${id})"/>
-        <path d="${sparkPath(values, w, h)}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    `;
+    // Uniforme renderer (charts.js) i.p.v. hand-gerolde SVG.
+    return window.Charts ? Charts.sparkline(values, color) : "";
   }
 
   function renderOverview() {
@@ -1330,12 +1319,12 @@
     const ov = state.overview;
     if (!ov) { root.innerHTML = ""; return; }
 
-    const colors = ["var(--accent)", "#6a3bff", "var(--accent-2)", "#1f9b8a"];
+    // KPI-accenten uit de palette-tokens (--kpi-1..4). Dot gebruikt var() in het
+    // style-attribuut; de sparkline (SVG-attribuut) krijgt de opgeloste hex.
+    const kpiVars = ["--kpi-1", "--kpi-2", "--kpi-3", "--kpi-4"];
     root.innerHTML = ov.kpis.map((k, i) => {
-      const color = colors[i % colors.length];
-      const accentHex = color.startsWith("var")
-        ? (getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ff683b")
-        : color;
+      const cvar = kpiVars[i % kpiVars.length];
+      const sparkHex = window.Charts ? Charts.cssVar(cvar, "#400745") : "#400745";
       let deltaHtml = `<div class="delta"><span class="vs">—</span></div>`;
       if (k.direction) {
         const arrow = k.direction === "up" ? "↑" : "↓";
@@ -1344,10 +1333,10 @@
       }
       return `
         <div class="kpi-card">
-          <div class="label"><span class="dot" style="background:${color}"></span>${k.label}</div>
+          <div class="label"><span class="dot" style="background:var(${cvar})"></span>${k.label}</div>
           <div class="value">${k.value}</div>
           ${deltaHtml}
-          ${renderSpark(k.spark, accentHex)}
+          ${renderSpark(k.spark, sparkHex)}
         </div>
       `;
     }).join("");
@@ -1362,61 +1351,21 @@
       return;
     }
     const ts = state.overview.timeseries;
-    const w = 760, h = 260;
-    const padL = 36, padR = 12, padT = 10, padB = 26;
-    const innerW = w - padL - padR;
-    const innerH = h - padT - padB;
-    const all = ts.series.flatMap(s => s.values).concat([0]);
-    const rawMax = Math.max(...all);
-    const max = rawMax > 0 ? Math.ceil(rawMax / 1000) * 1000 : 100;
-    const stepX = innerW / Math.max(1, ts.weeks.length - 1);
-    const xAt = (i) => padL + i * stepX;
-    const yAt = (v) => padT + innerH * (1 - v / max);
-
-    let grid = "", ylabels = "";
-    const ySteps = 4;
-    for (let i = 0; i <= ySteps; i++) {
-      const v = max * (i / ySteps);
-      const y = yAt(v);
-      grid += `<line x1="${padL}" x2="${w - padR}" y1="${y}" y2="${y}" stroke="currentColor" stroke-opacity="0.08"/>`;
-      ylabels += `<text x="${padL - 8}" y="${y + 3}" text-anchor="end" font-size="10" fill="currentColor" opacity="0.5">${fmt.k(v)}</text>`;
-    }
-    let xlabels = "";
-    ts.weeks.forEach((wk, i) => {
-      if (i % Math.max(1, Math.ceil(ts.weeks.length / 5)) === 0 || i === ts.weeks.length - 1) {
-        xlabels += `<text x="${xAt(i)}" y="${h - 8}" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55">${wk}</text>`;
-      }
+    // Uniforme renderer (charts.js). Kleur per séérie-index vastzetten (--series-1/2/3)
+    // zodat IG/FB/Ads hun tint houden ook als een lege reeks wordt weggefilterd.
+    const specSeries = ts.series
+      .map((s, idx) => ({ label: s.label, values: s.values, kind: "area", color: Charts.seriesColor(idx) }))
+      .filter(s => s.values.some(v => v > 0));
+    Charts.render(node, {
+      width: 760, height: 260, x: ts.weeks,
+      series: specSeries,
+      leftFormat: (v) => Charts.fmt.k(v),
+      maxXLabels: 5,
     });
-
-    let paths = "";
-    ts.series.forEach((s, idx) => {
-      if (!s.values.some(v => v > 0)) return;
-      const pts = s.values.map((v, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(2)},${yAt(v).toFixed(2)}`).join(" ");
-      const areaPath = `${pts} L${xAt(s.values.length - 1)},${yAt(0)} L${xAt(0)},${yAt(0)} Z`;
-      const gid = `g${idx}_${Math.random().toString(36).slice(2,6)}`;
-      paths += `
-        <defs>
-          <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="${s.color}" stop-opacity="0.22"/>
-            <stop offset="100%" stop-color="${s.color}" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
-        <path d="${areaPath}" fill="url(#${gid})"/>
-        <path d="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      `;
-      const li = s.values.length - 1;
-      paths += `<circle cx="${xAt(li)}" cy="${yAt(s.values[li])}" r="3.5" fill="${s.color}" stroke="var(--surface)" stroke-width="1.5"/>`;
-    });
-
-    node.innerHTML = `
-      <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet" style="display:block;">
-        ${grid}${ylabels}${xlabels}${paths}
-      </svg>
-    `;
     const adsLoading = state.overview.adsLoading;
-    legend.innerHTML = ts.series.map(s => {
+    legend.innerHTML = ts.series.map((s, idx) => {
       const suffix = (s.label === "Meta Ads" && adsLoading) ? ` <em style="opacity:0.55; font-style:normal;">· laden…</em>` : "";
-      return `<span class="item"><span class="swatch" style="background:${s.color}"></span>${s.label}${suffix}</span>`;
+      return `<span class="item"><span class="swatch" style="background:${Charts.seriesColor(idx)}"></span>${s.label}${suffix}</span>`;
     }).join("");
   }
 
@@ -2753,19 +2702,19 @@
 
     const chart1 = renderEmailDualChart({
       id: "eng", title: "Ontvangers & engagement", sub: "Per campagne (oud → nieuw) · klik open/click rate aan of uit",
-      points: campPts, fixedLabel: "Ontvangers", fixedColor: "#351f69", fixedFmt: (v) => fmt.k(v),
+      points: campPts, fixedLabel: "Ontvangers", fixedColor: Charts.cssVar("--series-2"), fixedFmt: (v) => fmt.k(v),
       overlays: [
-        { key: "open", label: "Open rate", color: "#ff683b", fmt: (v) => v.toFixed(0) + "%" },
-        { key: "click", label: "Click rate", color: "#1f9b8a", fmt: (v) => v.toFixed(1) + "%", dashed: true },
+        { key: "open", label: "Open rate", color: Charts.cssVar("--series-3"), fmt: (v) => v.toFixed(0) + "%" },
+        { key: "click", label: "Click rate", color: Charts.cssVar("--series-1"), fmt: (v) => v.toFixed(1) + "%", dashed: true },
       ],
     });
     const chart2 = renderEmailDualChart({
       id: "rev", title: "Verzonden e-mails & omzet per dag", sub: "Per dag · klik omzet / omzet per ontvanger aan of uit",
-      points: dayPts, fixedLabel: "Verzonden e-mails", fixedColor: "#351f69", fixedFmt: (v) => fmt.k(v),
+      points: dayPts, fixedLabel: "Verzonden e-mails", fixedColor: Charts.cssVar("--series-2"), fixedFmt: (v) => fmt.k(v),
       overlayStyle: "bar",
       overlays: [
-        { key: "revenue", label: "Omzet", color: "#ff683b", fmt: (v) => "€" + fmt.k(v) },
-        { key: "rev_rcpt", label: "Omzet / ontvanger", color: "#1f9b8a", fmt: (v) => "€" + v.toFixed(2), dashed: true },
+        { key: "revenue", label: "Omzet", color: Charts.cssVar("--series-3"), fmt: (v) => "€" + fmt.k(v) },
+        { key: "rev_rcpt", label: "Omzet / ontvanger", color: Charts.cssVar("--series-1"), fmt: (v) => "€" + v.toFixed(2), dashed: true },
       ],
     });
     return chart1 + chart2;
