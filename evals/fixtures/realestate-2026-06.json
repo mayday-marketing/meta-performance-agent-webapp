@@ -1,0 +1,83 @@
+{
+  "brandName": "Vastgoed Demo",
+  "period": { "startDate": "2026-06-01", "endDate": "2026-06-30", "days": 30 },
+  "summary": {
+    "kpis": [
+      { "label": "Bereik", "value": "12.480", "delta": 0.08, "direction": "up", "unit": "" },
+      { "label": "Engagement", "value": "2,4%", "delta": -0.03, "direction": "down", "unit": "%" },
+      { "label": "Posts", "value": "8", "delta": 0.0, "direction": "flat", "unit": "" },
+      { "label": "Spend", "value": "€ 640", "delta": 0.12, "direction": "up", "unit": "" }
+    ],
+    "channels": [
+      { "label": "Instagram", "sharePct": 78 },
+      { "label": "Facebook", "sharePct": 22 }
+    ],
+    "byPlatform": {
+      "Instagram": { "count": 7, "totalReach": 11020, "avgReach": 1574, "avgEngagement": 2.51 },
+      "Facebook": { "count": 1, "totalReach": 1460, "avgReach": 1460, "avgEngagement": 1.2 }
+    },
+    "byType": {
+      "Reel": { "count": 5, "totalReach": 8890, "avgReach": 1778, "avgEngagement": 2.26 },
+      "Foto": { "count": 2, "totalReach": 2130, "avgReach": 1065, "avgEngagement": 3.04 },
+      "Carrousel": { "count": 1, "totalReach": 1460, "avgReach": 1460, "avgEngagement": 1.2 }
+    },
+    "cadence": {
+      "totalPosts": 8,
+      "postsPerWeek": 1.9,
+      "postsPerDay": [
+        { "day": "Zo", "count": 0 }, { "day": "Ma", "count": 1 }, { "day": "Di", "count": 2 },
+        { "day": "Wo", "count": 1 }, { "day": "Do", "count": 2 }, { "day": "Vr", "count": 2 },
+        { "day": "Za", "count": 0 }
+      ],
+      "busiestDay": "Di",
+      "quietestDay": "Zo"
+    },
+    "topPostsByEngagement": [
+      { "caption": "Te koop in Oostende? Penthouse op de zeedijk", "platform": "ig", "type": "Reel", "date": "22 jun", "reach": 1655, "engagement": 4.47, "likes": 60, "comments": 4, "shares": 11, "saves": 5, "performance": "Good", "perfRatio": 1.49, "perfBucket": "Instagram · Reel" },
+      { "caption": "Renovatieplicht en EPB-aangifte uitgelegd", "platform": "ig", "type": "Foto", "date": "24 jun", "reach": 980, "engagement": 3.06, "likes": 21, "comments": 3, "shares": 2, "saves": 11, "performance": null, "perfRatio": null, "perfBucket": "Instagram · Foto" },
+      { "caption": "Lijfrente: hoe werkt het bij verkoop?", "platform": "ig", "type": "Foto", "date": "10 jun", "reach": 1150, "engagement": 3.02, "likes": 26, "comments": 5, "shares": 3, "saves": 8, "performance": null, "perfRatio": null, "perfBucket": "Instagram · Foto" },
+      { "caption": "Nieuw op de markt: rijwoning Gent-centrum", "platform": "ig", "type": "Reel", "date": "5 jun", "reach": 1420, "engagement": 2.31, "likes": 28, "comments": 2, "shares": 3, "saves": 4, "performance": "Average", "perfRatio": 1.02, "perfBucket": "Instagram · Reel" },
+      { "caption": "Kijkdag zaterdag — appartement Brugge", "platform": "fb", "type": "Carrousel", "date": "18 jun", "reach": 1460, "engagement": 1.2, "likes": 14, "comments": 1, "shares": 1, "saves": 2, "performance": "Average", "perfRatio": 0.94, "perfBucket": "Facebook · Carrousel" }
+    ],
+    "bottomPostsByEngagement": [
+      { "caption": "Linkeroever? Alles over wonen in Antwerpen-Noord", "platform": "ig", "type": "Reel", "date": "27 jun", "reach": 2363, "engagement": 0.89, "likes": 15, "comments": 1, "shares": 2, "saves": 3, "performance": "Bad", "perfRatio": 0.59, "perfBucket": "Instagram · Reel" },
+      { "caption": "Team-update: welkom Sofie", "platform": "ig", "type": "Reel", "date": "12 jun", "reach": 1052, "engagement": 1.14, "likes": 9, "comments": 0, "shares": 0, "saves": 1, "performance": "Bad", "perfRatio": 0.63, "perfBucket": "Instagram · Reel" }
+    ],
+    "topPostsByReach": [
+      { "caption": "Linkeroever? Alles over wonen in Antwerpen-Noord", "platform": "ig", "type": "Reel", "date": "27 jun", "reach": 2363, "engagement": 0.89, "likes": 15, "comments": 1, "shares": 2, "saves": 3, "performance": "Bad", "perfRatio": 0.59, "perfBucket": "Instagram · Reel" },
+      { "caption": "Te koop in Oostende? Penthouse op de zeedijk", "platform": "ig", "type": "Reel", "date": "22 jun", "reach": 1655, "engagement": 4.47, "likes": 60, "comments": 4, "shares": 11, "saves": 5, "performance": "Good", "perfRatio": 1.49, "perfBucket": "Instagram · Reel" }
+    ],
+    "performanceBreakdown": [
+      { "bucket": "Instagram · Reel", "count": 5, "good": 1, "average": 1, "bad": 2, "na": 1 },
+      { "bucket": "Instagram · Foto", "count": 2, "good": 0, "average": 0, "bad": 0, "na": 2 },
+      { "bucket": "Facebook · Carrousel", "count": 1, "good": 0, "average": 1, "bad": 0, "na": 0 }
+    ],
+    "overperformers": [
+      { "caption": "Te koop in Oostende? Penthouse op de zeedijk", "platform": "ig", "type": "Reel", "date": "22 jun", "reach": 1655, "engagement": 4.47, "likes": 60, "comments": 4, "shares": 11, "saves": 5, "performance": "Good", "perfRatio": 1.49, "perfBucket": "Instagram · Reel" }
+    ],
+    "underperformers": [
+      { "caption": "Linkeroever? Alles over wonen in Antwerpen-Noord", "platform": "ig", "type": "Reel", "date": "27 jun", "reach": 2363, "engagement": 0.89, "likes": 15, "comments": 1, "shares": 2, "saves": 3, "performance": "Bad", "perfRatio": 0.59, "perfBucket": "Instagram · Reel" },
+      { "caption": "Team-update: welkom Sofie", "platform": "ig", "type": "Reel", "date": "12 jun", "reach": 1052, "engagement": 1.14, "likes": 9, "comments": 0, "shares": 0, "saves": 1, "performance": "Bad", "perfRatio": 0.63, "perfBucket": "Instagram · Reel" }
+    ],
+    "ads": {
+      "level": "campaign",
+      "campaignCount": 2,
+      "totalReach": 8200,
+      "totalSpend": 640.0,
+      "paidTotals": {
+        "spend": 640.0,
+        "cpm": 6.8,
+        "ctr": 1.35,
+        "roas": null,
+        "cac": null,
+        "conversions": 0
+      },
+      "topByReach": [
+        { "name": "Leadcampagne juni — zeedijk", "level": "campaign", "adType": null, "campaign": null, "reach": 5200, "impressions": 61000, "clicks": 840, "ctr": 1.38, "cpm": 6.9, "engagement": 1.9, "spend": 420.0, "roas": null, "cac": null, "purchases": 0, "leads": 0 },
+        { "name": "Retargeting — kijkdagen", "level": "campaign", "adType": null, "campaign": null, "reach": 3000, "impressions": 33000, "clicks": 410, "ctr": 1.24, "cpm": 6.6, "engagement": 2.1, "spend": 220.0, "roas": null, "cac": null, "purchases": 0, "leads": 0 }
+      ],
+      "bestAdsByEngagement": [],
+      "worstAdsByEngagement": []
+    }
+  }
+}
