@@ -23,7 +23,11 @@ function verifyToken(token, clientId) {
 }
 
 function loadAgentPrompt() {
+  // Lean single-shot chat-prompt heeft voorrang; val terug op het oude, uitgebreide
+  // agent-handboek (tool-using variant) als het lean bestand er nog niet is.
   const paths = [
+    path.join(process.cwd(), 'agents', 'Chat_Agent.md'),
+    path.join(process.cwd(), 'Chat_Agent.md'),
     path.join(process.cwd(), 'agents', 'Meta-Performance_Agent.md'),
     path.join(process.cwd(), 'Meta-Performance_Agent.md'),
   ];
@@ -41,7 +45,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { messages, clientId, token, clientContext, driveFiles, drivePeriod } = req.body || {};
+  const { messages, clientId, token, clientContext, driveFiles, drivePeriod, dashboardData } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -69,48 +73,62 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Geen berichten ontvangen.' });
   }
 
-  // If driveFiles are provided (server-side loaded from Drive),
-  // build the first user message content with full file data
+  // Verrijk het laatste user-bericht met de context die de agent nodig heeft: de
+  // geaggregeerde dashboard-data (single-shot chat) en/of vooraf uit Drive geladen
+  // bestanden. Beide zijn optioneel; is er niets, dan blijft het bericht ongewijzigd.
   let apiMessages = [...messages];
 
-  if (driveFiles && driveFiles.length > 0 && drivePeriod) {
-    // Build rich content array for the last user message
-    const fileContent = [];
+  const hasDriveFiles = driveFiles && driveFiles.length > 0 && drivePeriod;
+  const hasDashboard = dashboardData && typeof dashboardData === 'object';
 
-    // Add context files as text
-    if (driveFiles.contextFiles?.length) {
-      const ctxText = driveFiles.contextFiles
-        .map(f => `## ${f.label}\n${f.content}`)
-        .join('\n\n---\n\n');
-      fileContent.push({ type: 'text', text: '## KLANTCONTEXT UIT GOOGLE DRIVE\n\n' + ctxText });
+  if (hasDriveFiles || hasDashboard) {
+    const leadingBlocks = [];
+
+    // Geaggregeerde dashboard-data eerst — dit is de primaire cijferbron voor de chat.
+    if (hasDashboard) {
+      leadingBlocks.push({
+        type: 'text',
+        text: '## DASHBOARD-DATA (huidige periode)\n\n```json\n'
+          + JSON.stringify(dashboardData, null, 2) + '\n```',
+      });
     }
 
-    // Add data files
-    for (const file of (driveFiles.files || [])) {
-      if (file.contentType === 'pdf_base64') {
-        fileContent.push({
-          type: 'document',
-          source: { type: 'base64', media_type: 'application/pdf', data: file.data }
-        });
-        fileContent.push({ type: 'text', text: `[Analytics PDF geladen: ${file.name}]` });
-      } else if (file.contentType === 'csv_text') {
-        fileContent.push({
-          type: 'text',
-          text: `[${file.type.replace('_', ' ').toUpperCase()}: ${file.name}]\n\`\`\`\n${file.data}\n\`\`\``
-        });
+    if (hasDriveFiles) {
+      // Add context files as text
+      if (driveFiles.contextFiles?.length) {
+        const ctxText = driveFiles.contextFiles
+          .map(f => `## ${f.label}\n${f.content}`)
+          .join('\n\n---\n\n');
+        leadingBlocks.push({ type: 'text', text: '## KLANTCONTEXT UIT GOOGLE DRIVE\n\n' + ctxText });
+      }
+
+      // Add data files
+      for (const file of (driveFiles.files || [])) {
+        if (file.contentType === 'pdf_base64') {
+          leadingBlocks.push({
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: file.data }
+          });
+          leadingBlocks.push({ type: 'text', text: `[Analytics PDF geladen: ${file.name}]` });
+        } else if (file.contentType === 'csv_text') {
+          leadingBlocks.push({
+            type: 'text',
+            text: `[${file.type.replace('_', ' ').toUpperCase()}: ${file.name}]\n\`\`\`\n${file.data}\n\`\`\``
+          });
+        }
       }
     }
 
-    // Add the user's text message
+    // Add the user's text message last, so the data reads as context to the question.
     const lastMsg = messages[messages.length - 1];
     const userText = lastMsg?.content?.find?.(c => c.type === 'text')?.text
       || (typeof lastMsg?.content === 'string' ? lastMsg.content : '');
-    if (userText) fileContent.push({ type: 'text', text: userText });
+    if (userText) leadingBlocks.push({ type: 'text', text: userText });
 
     // Replace last message with enriched version
     apiMessages = [
       ...messages.slice(0, -1),
-      { role: 'user', content: fileContent }
+      { role: 'user', content: leadingBlocks }
     ];
   }
 

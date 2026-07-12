@@ -2894,12 +2894,19 @@
       apiMessages.push({ role: m.role === "bot" ? "assistant" : "user", content: m.text });
     }
 
+    // Geef de chat-agent de geaggregeerde dashboard-data van de huidige periode mee,
+    // zodat vragen over performance op echte cijfers steunen i.p.v. enkel merkcontext.
+    // Stateless/single-shot: elke turn krijgt de data opnieuw mee.
+    let dashboardData = null;
+    try { dashboardData = buildAnalysisSummary(); } catch (_) {}
+
     try {
       const data = await apiPost("/api/chat", {
         messages: apiMessages,
         clientId: state.session.clientId,
         token: state.session.token,
         clientContext: state.session.clientContext || "",
+        dashboardData,
       });
       typing.remove();
       pushBot({ text: data.text || "Geen antwoord ontvangen." });
