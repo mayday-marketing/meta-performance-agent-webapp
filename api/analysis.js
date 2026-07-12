@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const SECRET = process.env.AUTH_SECRET || 'change-this-secret';
+const SECRET = process.env.AUTH_SECRET;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
 

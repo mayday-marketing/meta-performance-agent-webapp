@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const SECRET = process.env.AUTH_SECRET || 'change-this-secret';
+const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
 
 function verifyToken(token, clientId) {
@@ -156,7 +156,7 @@ module.exports = async (req, res) => {
   try { clients = JSON.parse(process.env.CLIENTS || '{}'); }
   catch { return res.status(500).json({ error: 'Serverconfiguratie fout.' }); }
 
-  const client = clients[clientId];
+  const client = clients[clientId.toLowerCase()];
   if (!client?.driveFolderId) {
     return res.status(200).json({ available: false, reason: 'Geen Drive map geconfigureerd voor deze klant.' });
   }

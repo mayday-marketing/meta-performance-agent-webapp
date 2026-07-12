@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const SECRET = process.env.AUTH_SECRET || 'change-this-secret';
+const SECRET = process.env.AUTH_SECRET;
 
 function signToken(clientId) {
   const ts = Date.now();

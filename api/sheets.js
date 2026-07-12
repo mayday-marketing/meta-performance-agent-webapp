@@ -1,7 +1,20 @@
 const crypto = require('crypto');
 
-const SECRET = process.env.AUTH_SECRET || 'change-this-secret';
+const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
+
+// Resolve the sheet this client is allowed to touch, server-side from CLIENTS.
+// NOOIT de sheetId uit het request vertrouwen: de gedeelde service-account heeft
+// toegang tot élke klant-sheet, dus een client-opgegeven sheetId = cross-tenant
+// lezen/schrijven. De sheetId hoort bij de geauthenticeerde klant, punt.
+function resolveSheetId(clientId) {
+  try {
+    const clients = JSON.parse(process.env.CLIENTS || '{}');
+    return clients[String(clientId).toLowerCase()]?.sheetId || null;
+  } catch {
+    return null;
+  }
+}
 
 function verifyToken(token, clientId) {
   try {
@@ -135,11 +148,12 @@ module.exports = async (req, res) => {
 
   // GET — load client context
   if (method === 'GET') {
-    const { clientId, sheetId, token } = req.query || {};
+    const { clientId, token } = req.query || {};
 
     if (!verifyToken(token, clientId)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
+    const sheetId = resolveSheetId(clientId);
     if (!sheetId) {
       return res.status(200).json({ context: '' });
     }
@@ -156,13 +170,17 @@ module.exports = async (req, res) => {
 
   // POST — save analysis result
   if (method === 'POST') {
-    const { clientId, sheetId, token, summary } = req.body || {};
+    const { clientId, token, summary } = req.body || {};
 
     if (!verifyToken(token, clientId)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    if (!sheetId || !summary) {
-      return res.status(400).json({ error: 'sheetId en summary zijn verplicht.' });
+    const sheetId = resolveSheetId(clientId);
+    if (!sheetId) {
+      return res.status(400).json({ error: 'Geen sheet geconfigureerd voor deze klant.' });
+    }
+    if (!summary) {
+      return res.status(400).json({ error: 'summary is verplicht.' });
     }
 
     try {

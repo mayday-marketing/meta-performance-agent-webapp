@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const SECRET = process.env.AUTH_SECRET || 'change-this-secret';
+const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
 const BASE = 'https://connectors.windsor.ai';
 
