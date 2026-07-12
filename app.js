@@ -1321,7 +1321,7 @@
     }
     if (state.overviewError) {
       root.innerHTML = `<div class="panel" style="grid-column:1/-1;">
-        <p style="color:#c0392b; margin:0;">${state.overviewError}</p>
+        <p style="color:#c0392b; margin:0;">${escapeHtml(state.overviewError)}</p>
         <button class="btn" style="margin-top:10px;" onclick="window.__refreshOverview()">Opnieuw proberen</button>
       </div>`;
       return;
@@ -2841,15 +2841,18 @@
       sendUserMsg(v);
     };
     if (state.chatMessages.length === 0) {
-      pushBot({ text: `Hoi! Ik ben je <strong>Performance Agent</strong>. Ik kan vragen beantwoorden over je content en groei. Probeer een prompt hieronder, of stel je eigen vraag.` });
+      pushBot({ text: `Hoi! Ik ben je <strong>Performance Agent</strong>. Ik kan vragen beantwoorden over je content en groei. Probeer een prompt hieronder, of stel je eigen vraag.`, html: true });
     } else {
       // Re-render bestaande geschiedenis in de DOM
-      for (const m of state.chatMessages) appendMsg(m.role === "bot" ? "bot" : "user", m.text, m.stats);
+      for (const m of state.chatMessages) appendMsg(m.role === "bot" ? "bot" : "user", m.text, m.stats, m.html);
     }
   }
   function pushUser(text) { state.chatMessages.push({ role: "user", text }); appendMsg("user", text); }
-  function pushBot(payload) { state.chatMessages.push({ role: "bot", ...payload }); appendMsg("bot", payload.text, payload.stats); }
-  function appendMsg(role, text, stats) {
+  function pushBot(payload) { state.chatMessages.push({ role: "bot", ...payload }); appendMsg("bot", payload.text, payload.stats, payload.html); }
+  // isTrustedHtml: alleen true voor door ONS opgestelde markup (welkomstbericht, foutmelding
+  // met vooraf-ge-escapete inhoud). LLM-antwoorden en gebruikersinvoer NOOIT: die kunnen door
+  // een aanvaller beïnvloede tekst bevatten (advertentienamen, captions) → anders stored XSS.
+  function appendMsg(role, text, stats, isTrustedHtml) {
     const body = $("#chat-body");
     const wrap = document.createElement("div");
     wrap.className = `msg ${role}`;
@@ -2857,7 +2860,8 @@
     if (stats) {
       stubs = `<div class="meta-stats">${stats.map(s => `<span class="stat-chip"><span class="n">${s.n}</span><span class="l">${s.l}</span></span>`).join("")}</div>`;
     }
-    wrap.innerHTML = `<div class="author">${role === "user" ? "Jij" : "Agent"}</div><div class="bubble">${text}${stubs}</div>`;
+    const safeText = isTrustedHtml ? text : escapeHtml(text).replace(/\n/g, "<br>");
+    wrap.innerHTML = `<div class="author">${role === "user" ? "Jij" : "Agent"}</div><div class="bubble">${safeText}${stubs}</div>`;
     body.appendChild(wrap);
     body.scrollTop = body.scrollHeight;
     return wrap;
@@ -2901,7 +2905,7 @@
       pushBot({ text: data.text || "Geen antwoord ontvangen." });
     } catch (err) {
       typing.remove();
-      pushBot({ text: `<em>Er ging iets mis: ${escapeHtml(err.message || "onbekende fout")}</em>` });
+      pushBot({ text: `<em>Er ging iets mis: ${escapeHtml(err.message || "onbekende fout")}</em>`, html: true });
       if (err.status === 401) {
         clearSession();
         setTimeout(() => showScreen("login-screen"), 600);
