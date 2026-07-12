@@ -2604,61 +2604,47 @@
   // dus de rechteras is consistent; hij schaalt naar de actieve overlays.
   // opts: { id, title, sub, points:[{label, fixed, ov:{key:val}}], fixedLabel, fixedColor, fixedFmt,
   //         overlays:[{key,label,color,fmt,dashed}] }
+  // Rendert een charts.js-spec naar een SVG-string (charts.js is imperatief: het
+  // schrijft in element.innerHTML). Zo kunnen we de uniforme renderer gebruiken in
+  // functies die HTML als string teruggeven.
+  function chartSvg(spec) {
+    if (!window.Charts) return "";
+    const d = document.createElement("div");
+    Charts.render(d, spec);
+    return d.innerHTML;
+  }
+
   function renderEmailDualChart(opts) {
     const pts = opts.points;
     if (!pts.length) return "";
-    const w = 760, h = 260, padL = 52, padR = 54, padT = 14, padB = 30;
-    const innerW = w - padL - padR, innerH = h - padT - padB;
-    const stepX = innerW / Math.max(1, pts.length - 1);
-    const xAt = (i) => padL + i * stepX;
-
-    const fMax = (Math.max(...pts.map(p => p.fixed), 0) || 1) * 1.1;
-    const yL = (v) => padT + innerH * (1 - v / fMax);
     const activeOv = opts.overlays.filter(o => state.emailOverlays[o.key]);
-    const rMax = (Math.max(...activeOv.flatMap(o => pts.map(p => p.ov[o.key] || 0)), 0) || 1) * 1.1;
-    const yR = (v) => padT + innerH * (1 - v / rMax);
 
-    let grid = "", ly = "", ry = "";
-    for (let i = 0; i <= 4; i++) {
-      const t = i / 4, y = padT + innerH * (1 - t);
-      grid += `<line x1="${padL}" x2="${w - padR}" y1="${y}" y2="${y}" stroke="currentColor" stroke-opacity="0.08"/>`;
-      ly += `<text x="${padL - 8}" y="${y + 3}" text-anchor="end" font-size="10" fill="${opts.fixedColor}" opacity="0.75">${opts.fixedFmt(fMax * t)}</text>`;
-      if (activeOv.length) ry += `<text x="${w - padR + 8}" y="${y + 3}" text-anchor="start" font-size="10" fill="${activeOv[0].color}" opacity="0.85">${activeOv[0].fmt(rMax * t)}</text>`;
-    }
-    let xl = "";
-    pts.forEach((p, i) => { if (i % Math.max(1, Math.ceil(pts.length / 6)) === 0 || i === pts.length - 1)
-      xl += `<text x="${xAt(i)}" y="${h - 8}" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55">${escapeHtml(p.label)}</text>`; });
-
-    const fp = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yL(p.fixed).toFixed(1)}`).join(" ");
-    const fArea = `${fp} L${xAt(pts.length - 1)},${yL(0)} L${xAt(0)},${yL(0)} Z`;
-    const fixedSvg = `
-      <defs><linearGradient id="emfix-${opts.id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${opts.fixedColor}" stop-opacity="0.20"/><stop offset="100%" stop-color="${opts.fixedColor}" stop-opacity="0"/></linearGradient></defs>
-      <path d="${fArea}" fill="url(#emfix-${opts.id})"/>
-      <path d="${fp}" fill="none" stroke="${opts.fixedColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-
-    const baseY = padT + innerH;
-    let ovSvg = "";
-    if (opts.overlayStyle === "bar") {
-      const n = activeOv.length || 1;
-      const groupW = Math.min(stepX * 0.7, 42);
-      const barW = groupW / n;
-      activeOv.forEach((o, j) => {
-        pts.forEach((p, i) => {
-          const v = p.ov[o.key] || 0;
-          const x = xAt(i) - groupW / 2 + j * barW;
-          const y = yR(v);
-          const bh = Math.max(0, baseY - y);
-          ovSvg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(barW * 0.82).toFixed(1)}" height="${bh.toFixed(1)}" fill="${o.color}" opacity="0.85" rx="1.5"><title>${escapeHtml(p.label)} · ${escapeHtml(o.label)}: ${o.fmt(v)}</title></rect>`;
-        });
-      });
-    } else {
-      activeOv.forEach(o => {
-        const op = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yR(p.ov[o.key] || 0).toFixed(1)}`).join(" ");
-        ovSvg += `<path d="${op}" fill="none" stroke="${o.color}" stroke-width="2" ${o.dashed ? 'stroke-dasharray="5 3"' : ""} stroke-linecap="round" stroke-linejoin="round"/>`;
+    // Bouw de charts.js-spec: vaste reeks (links, area) + actieve overlays (rechts,
+    // bar of line). Uniforme renderer → nette assen (niceMax) + palette-kleuren.
+    const series = [{
+      label: opts.fixedLabel,
+      values: pts.map(p => p.fixed),
+      kind: "area",
+      axis: "left",
+      color: opts.fixedColor,
+    }];
+    for (const o of activeOv) {
+      series.push({
+        label: o.label,
+        values: pts.map(p => p.ov[o.key] || 0),
+        kind: opts.overlayStyle === "bar" ? "bar" : "line",
+        axis: "right",
+        color: o.color,
       });
     }
-    // Staven áchter de vaste lijn (zodat de lijn leesbaar blijft); lijn-overlays eróverheen.
-    const svg = opts.overlayStyle === "bar" ? (ovSvg + fixedSvg) : (fixedSvg + ovSvg);
+    const svg = chartSvg({
+      width: 760, height: 260,
+      x: pts.map(p => p.label),
+      series,
+      leftFormat: opts.fixedFmt,
+      rightFormat: activeOv[0] ? activeOv[0].fmt : undefined,
+      maxXLabels: 6,
+    });
 
     const toggle = opts.overlays.map(o => `<button class="btn tiny ${state.emailOverlays[o.key] ? "primary" : ""}" onclick="window.__emailToggleOverlay('${o.key}')">${escapeHtml(o.label)}</button>`).join(" ");
     const legend = `<span class="item"><span class="swatch" style="background:${opts.fixedColor}"></span>${escapeHtml(opts.fixedLabel)}</span>`
@@ -2670,7 +2656,7 @@
           <div><h2 class="panel-title">${escapeHtml(opts.title)}</h2><div class="panel-sub">${escapeHtml(opts.sub)}</div></div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">${toggle}</div>
         </div>
-        <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="xMidYMid meet" style="display:block; margin-top:10px;">${grid}${ly}${ry}${xl}${svg}</svg>
+        <div style="margin-top:10px;">${svg}</div>
         <div class="legend" style="margin-top:8px;">${legend}</div>
       </section>`;
   }
