@@ -90,16 +90,23 @@ module.exports = async (req, res) => {
   // alleen via de MCP. Daarom vragen we `account_id` op en filteren we server-side. Alleen voor
   // connectors die een account_id-veld hebben (convertkit heeft er geen → single-account, geen filter).
   const ACCOUNT_ID_CONNECTORS = new Set(['instagram', 'facebook', 'klaviyo']);
-  const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '');
+  // Normaliseer voor vergelijking: string, act_-prefix weg, lowercase.
+  const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').toLowerCase();
   async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
-    const wantId = client.windsor_accounts && client.windsor_accounts[connector];
-    const scope = !!wantId && ACCOUNT_ID_CONNECTORS.has(connector);
+    const wantRaw = client.windsor_accounts && client.windsor_accounts[connector];
+    const scope = !!wantRaw && ACCOUNT_ID_CONNECTORS.has(connector);
     let fields = fieldsCsv;
-    if (scope && !/(^|,)\s*account_id\s*(,|$)/.test(fields)) fields = 'account_id,' + fields;
+    if (scope) {
+      // Vraag zowel account_id als account_name op — de configwaarde mag op één van beide matchen.
+      // (Meta Ads: account_id = connector-id; Instagram: account_id ≠ connector-id, maar
+      //  account_name = de username, dus dáár filteren we op.)
+      if (!/(^|,)\s*account_id\s*(,|$)/.test(fields)) fields = 'account_id,' + fields;
+      if (!/(^|,)\s*account_name\s*(,|$)/.test(fields)) fields = 'account_name,' + fields;
+    }
     const data = await safeCall(windsor(connector, apiKey, { fields, ...params }, timeout), label);
-    if (scope && data && Array.isArray(data.data) && data.data.some(r => r && r.account_id != null)) {
-      const want = normId(wantId);
-      data.data = data.data.filter(r => normId(r.account_id) === want);
+    if (scope && data && Array.isArray(data.data) && data.data.some(r => r && (r.account_id != null || r.account_name != null))) {
+      const want = normId(wantRaw);
+      data.data = data.data.filter(r => normId(r.account_id) === want || normId(r.account_name) === want);
     }
     return data;
   }
