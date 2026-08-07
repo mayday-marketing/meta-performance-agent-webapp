@@ -89,7 +89,7 @@ module.exports = async (req, res) => {
   // LET OP: de Windsor REST-endpoint negeert de `accounts`-queryparam (geverifieerd) — die werkt
   // alleen via de MCP. Daarom vragen we `account_id` op en filteren we server-side. Alleen voor
   // connectors die een account_id-veld hebben (convertkit heeft er geen → single-account, geen filter).
-  const ACCOUNT_ID_CONNECTORS = new Set(['instagram', 'facebook', 'klaviyo']);
+  const ACCOUNT_ID_CONNECTORS = new Set(['instagram', 'facebook', 'facebook_organic', 'klaviyo']);
   // Normaliseer voor vergelijking: string, act_-prefix weg, lowercase.
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').toLowerCase();
   async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
@@ -169,6 +169,15 @@ module.exports = async (req, res) => {
           'impressions', 'reach', 'clicks', 'spend', 'cpm', 'cpc', 'ctr',
         ].join(',');
 
+        // Facebook Organic (pagina-posts) — geverifieerde veldnamen. reach = post_impressions_unique,
+        // shares via post_activity_by_action_type_share, reacties via post_reactions_total.
+        const FB_ORG_FIELDS = [
+          'post_id', 'post_created_time', 'type', 'post_message', 'permalink_url', 'full_picture',
+          'post_impressions', 'post_impressions_unique',
+          'post_reactions_total', 'post_comments_total', 'post_activity_by_action_type_share',
+          'post_video_views',
+        ].join(',');
+
         // Ad-niveau — ZONDER `date` (Windsor aggregeert per advertentie → ±N rijen i.p.v.
         // N×dagen). CORE = STRIKT het essentiële, snelle minimum (engagement + paid-basics).
         // Dit is de primaire call die de losse advertenties + engagement levert. Alle zwaardere
@@ -205,8 +214,9 @@ module.exports = async (req, res) => {
         // breakdown de functie niet tot 55s gijzelt en de core-data altijd op tijd terugkomt.
         const FETCH_MS = 55000;
         const ADDON_MS = 35000;
-        const [igData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData] = await Promise.all([
+        const [igData, fbOrgData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData] = await Promise.all([
           windsorScoped('instagram', IG_FIELDS, dateParams, FETCH_MS, 'ig'),
+          windsorScoped('facebook_organic', FB_ORG_FIELDS, dateParams, FETCH_MS, 'fb-organic'),
           windsorScoped('facebook', ADS_FIELDS, dateParams, FETCH_MS, 'fb-ads'),
           windsorScoped('facebook', ADS_AD_CORE, adDateParams, FETCH_MS, 'fb-ads-core'),
           windsorScoped('facebook', ADS_AD_CREATIVE, adDateParams, ADDON_MS, 'fb-ads-creative'),
@@ -244,11 +254,13 @@ module.exports = async (req, res) => {
           // Venster dat de ad-level data écht dekt (kan korter zijn dan de selectie, zie cap).
           adLevelWindow: adLevelCapped ? { startDate: adFrom, endDate, maxDays: AD_LEVEL_MAX_DAYS } : null,
           instagram: igData,
+          fbOrganic: fbOrgData, // Facebook organic pagina-posts
           ads: adsData,        // campagne-niveau (trend/KPI + fallback)
           adsAd: adsAdData,    // ad-niveau core (Library per advertentie, indien gelukt)
           // Diagnostiek: per-connector foutmeldingen meesturen i.p.v. stil opslokken.
           errors: {
             instagram: igData && igData.__error ? igData.__error : null,
+            fbOrganic: fbOrgData && fbOrgData.__error ? fbOrgData.__error : null,
             ads: adsData && adsData.__error ? adsData.__error : null,
             adsAd: adsAdData && adsAdData.__error ? adsAdData.__error : null,
             // Add-ons falen niet-fataal; tóch meesturen zodat ontbrekende velden te herleiden zijn.

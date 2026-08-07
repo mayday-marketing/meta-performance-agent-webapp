@@ -897,6 +897,39 @@
     };
   }
 
+  // Facebook Organic pagina-post → post-shape. reach = post_impressions_unique, reacties/comments/
+  // shares uit de geverifieerde FB-organic velden. FB heeft geen "saves".
+  function normalizeWindsorFbPost(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const date = raw.post_created_time ? new Date(raw.post_created_time) : null;
+    const reach = Number(raw.post_impressions_unique) || 0;
+    const impressions = Number(raw.post_impressions) || 0;
+    const likes = Number(raw.post_reactions_total) || 0;   // alle reacties (like/love/…)
+    const comments = Number(raw.post_comments_total) || 0;
+    const shares = Number(raw.post_activity_by_action_type_share) || 0;
+    const views = Number(raw.post_video_views) || 0;
+    const interactions = likes + comments + shares;
+    const engagement = reach ? (interactions / reach) * 100 : 0;
+    const captionRaw = typeof raw.post_message === "string" ? raw.post_message : "";
+    const caption = captionRaw ? captionRaw.replace(/\s+/g, " ").trim() : "—";
+    const type = friendlyType(raw.type || raw.media_type, "Post");
+    return {
+      id: String(raw.post_id || `fb-${raw.post_created_time || Math.random()}`),
+      platform: "fb",
+      type,
+      date,
+      dateLabel: date ? fmt.dateNL(date) : "—",
+      startMs: 0, stopMs: 0,
+      reach, impressions, likes, comments, shares, saves: 0,
+      clicks: 0, views,
+      interactions, engagement, ctr: 0,
+      avgWatchTime: 0,
+      caption,
+      thumb: typeof raw.full_picture === "string" ? raw.full_picture : "",
+      url: typeof raw.permalink_url === "string" ? raw.permalink_url : "",
+    };
+  }
+
   // Windsor levert Meta-actiestatistieken soms als platte scalar (suffix _video_view),
   // soms als action-breakdown array: [{action_type:"video_view", value:"2459"}].
   // Number([{…}]) → NaN → stilletjes 0 (precies de bug die de retentiecurve liet
@@ -1055,14 +1088,16 @@
 
   function transformWindsorDashboard(raw) {
     const igPostsRaw = arrayOrEmpty(raw.instagram?.data);
+    const fbOrgRaw = arrayOrEmpty(raw.fbOrganic?.data); // Facebook organic pagina-posts
     const adsRowsRaw = arrayOrEmpty(raw.ads?.data);    // campagne-niveau (reach voor trend/KPI)
     const adsAdRaw = arrayOrEmpty(raw.adsAd?.data);    // ad-niveau (per advertentie, indien gelukt)
 
     const igPosts = igPostsRaw.map(normalizeWindsorIgPost).filter(Boolean);
+    const fbPosts = fbOrgRaw.map(normalizeWindsorFbPost).filter(Boolean);
     const adsRows = adsRowsRaw.map(normalizeWindsorAdRow).filter(Boolean);
     const adsAdRows = adsAdRaw.map(normalizeWindsorAdRow).filter(Boolean);
 
-    const allPosts = igPosts; // FB organic via Windsor nog niet gewired
+    const allPosts = [...igPosts, ...fbPosts]; // IG + FB organic
     classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
     // Library: per advertentie zodra de ad-level fetch rijen gaf; anders fallback per campagne.
     const adsCampaigns = aggregateWindsorAds(adsAdRows.length ? adsAdRows : adsRows);
@@ -1099,7 +1134,7 @@
     // Trend chart
     const trendWeeks = enumerateWeeks(startDate, endDate);
     const trendIG = trendWeeks.map(w => sumPostsField(igPosts, w, "reach"));
-    const trendFB = trendWeeks.map(_ => 0); // geen FB organic via Windsor in deze iteratie
+    const trendFB = trendWeeks.map(w => sumPostsField(fbPosts, w, "reach"));
     const trendAds = trendWeeks.map(w => sumAdsRowsInWeek(adsRows, w));
     const timeseries = {
       weeks: trendWeeks.map((w, i) => `wk ${i + 1}`),
@@ -1112,12 +1147,12 @@
 
     // Channel mix
     const igReach = trendIG.reduce((s, v) => s + v, 0);
-    const fbReach = 0;
+    const fbReach = fbPosts.reduce((s, p) => s + (p.reach || 0), 0);
     const adsReach = adsReachCur;
     const totalChannelReach = igReach + fbReach + adsReach || 1;
     const channels = [
       { label: "Instagram", color: "var(--series-1)", value: Math.round((igReach / totalChannelReach) * 100) },
-      { label: "Facebook",  color: "var(--series-2)", value: 0 },
+      { label: "Facebook",  color: "var(--series-2)", value: Math.round((fbReach / totalChannelReach) * 100) },
       { label: "Meta Ads",  color: "var(--series-3)", value: Math.round((adsReach / totalChannelReach) * 100) },
     ];
 
