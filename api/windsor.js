@@ -85,10 +85,24 @@ module.exports = async (req, res) => {
   // beperkt `windsor_accounts` per connector tot één account-id, zodat er enkel data van déze
   // klant doorkomt. Niet ingesteld → alle accounts (backward-compatible met per-klant-sleutels).
   //   CLIENTS: "spotto": { "windsor_api_key": "<mayday>", "windsor_accounts": { "instagram": "17841457272403407", "facebook": "1060778095034495" } }
-  const accountsFor = (connector) => {
-    const id = client.windsor_accounts && client.windsor_accounts[connector];
-    return id ? { accounts: id } : {};
-  };
+  //
+  // LET OP: de Windsor REST-endpoint negeert de `accounts`-queryparam (geverifieerd) — die werkt
+  // alleen via de MCP. Daarom vragen we `account_id` op en filteren we server-side. Alleen voor
+  // connectors die een account_id-veld hebben (convertkit heeft er geen → single-account, geen filter).
+  const ACCOUNT_ID_CONNECTORS = new Set(['instagram', 'facebook', 'klaviyo']);
+  const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '');
+  async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
+    const wantId = client.windsor_accounts && client.windsor_accounts[connector];
+    const scope = !!wantId && ACCOUNT_ID_CONNECTORS.has(connector);
+    let fields = fieldsCsv;
+    if (scope && !/(^|,)\s*account_id\s*(,|$)/.test(fields)) fields = 'account_id,' + fields;
+    const data = await safeCall(windsor(connector, apiKey, { fields, ...params }, timeout), label);
+    if (scope && data && Array.isArray(data.data) && data.data.some(r => r && r.account_id != null)) {
+      const want = normId(wantId);
+      data.data = data.data.filter(r => normId(r.account_id) === want);
+    }
+    return data;
+  }
 
   try {
     switch (action) {
@@ -184,15 +198,13 @@ module.exports = async (req, res) => {
         // breakdown de functie niet tot 55s gijzelt en de core-data altijd op tijd terugkomt.
         const FETCH_MS = 55000;
         const ADDON_MS = 35000;
-        const igAcct = accountsFor('instagram');
-        const fbAcct = accountsFor('facebook');
         const [igData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData] = await Promise.all([
-          safeCall(windsor('instagram', apiKey, { fields: IG_FIELDS, ...dateParams, ...igAcct }, FETCH_MS), 'ig'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_FIELDS, ...dateParams, ...fbAcct }, FETCH_MS), 'fb-ads'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CORE, ...adDateParams, ...fbAcct }, FETCH_MS), 'fb-ads-core'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CREATIVE, ...adDateParams, ...fbAcct }, ADDON_MS), 'fb-ads-creative'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_VIDEO, ...adDateParams, ...fbAcct }, ADDON_MS), 'fb-ads-video'),
-          safeCall(windsor('facebook',  apiKey, { fields: ADS_AD_CONV, ...adDateParams, ...fbAcct }, ADDON_MS), 'fb-ads-conv'),
+          windsorScoped('instagram', IG_FIELDS, dateParams, FETCH_MS, 'ig'),
+          windsorScoped('facebook', ADS_FIELDS, dateParams, FETCH_MS, 'fb-ads'),
+          windsorScoped('facebook', ADS_AD_CORE, adDateParams, FETCH_MS, 'fb-ads-core'),
+          windsorScoped('facebook', ADS_AD_CREATIVE, adDateParams, ADDON_MS, 'fb-ads-creative'),
+          windsorScoped('facebook', ADS_AD_VIDEO, adDateParams, ADDON_MS, 'fb-ads-video'),
+          windsorScoped('facebook', ADS_AD_CONV, adDateParams, ADDON_MS, 'fb-ads-conv'),
         ]);
 
         // Merge alle add-on-velden in de ad-core rows op ad_id (allen no-date → 1 rij per ad).
@@ -255,7 +267,7 @@ module.exports = async (req, res) => {
           const c = candidates[i];
           if (i === candidates.length - 1) { conn = c; break; } // laatste kandidaat: aannemen (bespaart een probe)
           const probeField = c === 'klaviyo' ? 'campaign' : 'broadcasts__id';
-          const probe = await safeCall(windsor(c, apiKey, { fields: probeField, date_from: endDate, date_to: endDate, ...accountsFor(c) }, 20000), `email-probe-${c}`);
+          const probe = await safeCall(windsor(c, apiKey, { fields: probeField, date_from: endDate, date_to: endDate }, 20000), `email-probe-${c}`);
           if (!probe.__error || !/No .* account/i.test(probe.__error)) { conn = c; break; }
         }
         if (!conn) return res.status(200).json({ connector: null, reason: 'Geen e-mailconnector gekoppeld.' });
@@ -274,7 +286,7 @@ module.exports = async (req, res) => {
             'campaign_report_conversions', 'campaign_report_conversion_value', 'campaign_report_revenue_per_recipient',
             'campaign_report_unsubscribe_rate', 'campaign_report_bounce_rate',
           ].join(',');
-          const data = await safeCall(windsor('klaviyo', apiKey, { fields: KLAVIYO_FIELDS, date_from: from, date_to: endDate, ...accountsFor('klaviyo') }, FETCH_MS), 'klaviyo');
+          const data = await windsorScoped('klaviyo', KLAVIYO_FIELDS, { date_from: from, date_to: endDate }, FETCH_MS, 'klaviyo');
           return res.status(200).json({
             connector: 'klaviyo',
             window: { startDate: from, endDate, capped: from !== startDate, maxDays: EMAIL_MAX_DAYS },
@@ -284,10 +296,9 @@ module.exports = async (req, res) => {
         }
 
         // convertkit — lichtgewicht: broadcasts + subscribers over de volledige periode.
-        const ckAcct = accountsFor('convertkit');
         const [bc, subs] = await Promise.all([
-          safeCall(windsor('convertkit', apiKey, { fields: 'broadcasts__id,broadcasts__subject,broadcasts__created_at', date_from: startDate, date_to: endDate, ...ckAcct }, FETCH_MS), 'ck-broadcasts'),
-          safeCall(windsor('convertkit', apiKey, { fields: 'subscribers__id,subscribers__created_at,subscribers__state', date_from: startDate, date_to: endDate, ...ckAcct }, FETCH_MS), 'ck-subscribers'),
+          windsorScoped('convertkit', 'broadcasts__id,broadcasts__subject,broadcasts__created_at', { date_from: startDate, date_to: endDate }, FETCH_MS, 'ck-broadcasts'),
+          windsorScoped('convertkit', 'subscribers__id,subscribers__created_at,subscribers__state', { date_from: startDate, date_to: endDate }, FETCH_MS, 'ck-subscribers'),
         ]);
         return res.status(200).json({
           connector: 'convertkit',
