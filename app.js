@@ -2629,7 +2629,9 @@
       root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen e-mailconnector (ConvertKit of Klaviyo) gekoppeld voor deze klant.</p>`);
       return;
     }
-    root.innerHTML = e.connector === "klaviyo" ? renderEmailKlaviyo(e) : renderEmailConvertKit(e);
+    root.innerHTML = e.connector === "klaviyo" ? renderEmailKlaviyo(e)
+      : e.connector === "mailerlite" ? renderEmailMailerLite(e)
+      : renderEmailConvertKit(e);
   }
 
   window.__emailToggleOverlay = (k) => { state.emailOverlays[k] = !state.emailOverlays[k]; renderEmail(); };
@@ -2783,6 +2785,73 @@
           <button class="btn tiny" onclick="window.__refreshEmail()">↻ Verversen</button>
         </div>
         ${renderEmailTable(rows, cols, "revenue")}
+      </section>`;
+  }
+
+  // MailerLite — campagne-performance zit genest in campaigns__stats (object). We pakken sent/
+  // opens/clicks/rates uit; geen omzet (die geeft MailerLite niet). Weergave à la Klaviyo.
+  function renderEmailMailerLite(e) {
+    const raw = arrayOrEmpty(e.campaigns?.data);
+    const err = e.errors?.campaigns;
+    if (err) return renderAnalysisEmpty(`<p style="color:#c0392b;margin:0;">MailerLite: ${escapeHtml(err)}</p>
+      <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshEmail()">Opnieuw proberen</button>`);
+
+    // stats-object uitpakken (kan object of JSON-string zijn); rate-velden zijn {float,string}.
+    const readStats = (x) => { let s = x.campaigns__stats; if (typeof s === "string") { try { s = JSON.parse(s); } catch { s = null; } } return s || null; };
+    const rateOf = (v) => v == null ? 0 : (typeof v === "object" ? Number(v.float) || 0 : Number(v) || 0);
+    const rows = raw.map(x => {
+      const st = readStats(x);
+      if (!st) return null; // draft/ready zonder stats overslaan
+      return {
+        name: x.campaigns__name || "—",
+        sent_at: x.campaigns__finished_at || x.campaigns__created_at || null,
+        recipients: Number(st.sent) || 0,
+        openRate: rateOf(st.open_rate),         // 0–1
+        clickRate: rateOf(st.click_rate),       // 0–1
+        unsubRate: rateOf(st.unsubscribe_rate), // 0–1
+      };
+    }).filter(Boolean);
+    if (!rows.length) return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen verzonden e-mailcampagnes in deze periode.</p>`);
+
+    const totRcpt = rows.reduce((s, x) => s + x.recipients, 0);
+    const wAvg = (k) => totRcpt ? rows.reduce((s, x) => s + x[k] * x.recipients, 0) / totRcpt : 0;
+
+    // Grafiek (ontvangers vast + open/click toggle) — hergebruikt de dual-axis renderer.
+    const chartPts = [...rows].filter(x => x.sent_at)
+      .sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at))
+      .map(x => ({ label: emailDate(x.sent_at), fixed: x.recipients, ov: { open: x.openRate * 100, click: x.clickRate * 100 } }));
+    const chart = renderEmailDualChart({
+      id: "ml", title: "Ontvangers & engagement", sub: "Per campagne (oud → nieuw) · klik open/click rate aan of uit",
+      points: chartPts, fixedLabel: "Ontvangers", fixedColor: "#351f69", fixedFmt: (v) => fmt.k(v),
+      overlays: [
+        { key: "open", label: "Open rate", color: "#ff683b", fmt: (v) => v.toFixed(0) + "%" },
+        { key: "click", label: "Click rate", color: "#1f9b8a", fmt: (v) => v.toFixed(1) + "%", dashed: true },
+      ],
+    });
+
+    const cols = [
+      { key: "name", label: "Campagne", align: "left", val: x => (x.name || "").toLowerCase(), cell: x => escapeHtml((x.name || "").slice(0, 60) || "—") },
+      { key: "sent", label: "Verzonden", align: "left", val: x => new Date(x.sent_at || 0).getTime(), cell: x => emailDate(x.sent_at) },
+      { key: "recipients", label: "Ontvangers", align: "right", val: x => x.recipients, cell: x => fmt.int(x.recipients) },
+      { key: "open", label: "Open rate", align: "right", val: x => x.openRate, cell: x => emailPct(x.openRate) },
+      { key: "click", label: "Click rate", align: "right", val: x => x.clickRate, cell: x => emailPct(x.clickRate) },
+      { key: "unsub", label: "Unsub rate", align: "right", val: x => x.unsubRate, cell: x => emailPct(x.unsubRate) },
+    ];
+
+    return `
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:var(--grid-gap); margin-bottom:var(--grid-gap);">
+        ${emailKpiCard("Campagnes", fmt.int(rows.length))}
+        ${emailKpiCard("Ontvangers (totaal)", fmt.int(totRcpt))}
+        ${emailKpiCard("Gem. open rate", emailPct(wAvg("openRate")))}
+        ${emailKpiCard("Gem. click rate", emailPct(wAvg("clickRate")))}
+      </div>
+      ${chart}
+      <section class="panel">
+        <div class="panel-header">
+          <div><h2 class="panel-title">E-mailcampagnes</h2><div class="panel-sub">MailerLite · klik een kolom om te sorteren</div></div>
+          <button class="btn tiny" onclick="window.__refreshEmail()">↻ Verversen</button>
+        </div>
+        ${renderEmailTable(rows, cols, "sent")}
       </section>`;
   }
 

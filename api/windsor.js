@@ -89,7 +89,7 @@ module.exports = async (req, res) => {
   // LET OP: de Windsor REST-endpoint negeert de `accounts`-queryparam (geverifieerd) — die werkt
   // alleen via de MCP. Daarom vragen we `account_id` op en filteren we server-side. Alleen voor
   // connectors die een account_id-veld hebben (convertkit heeft er geen → single-account, geen filter).
-  const ACCOUNT_ID_CONNECTORS = new Set(['instagram', 'facebook', 'facebook_organic', 'klaviyo']);
+  const ACCOUNT_ID_CONNECTORS = new Set(['instagram', 'facebook', 'facebook_organic', 'klaviyo', 'mailerlite']);
   // Normaliseer voor vergelijking: string, act_-prefix weg, lowercase.
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').toLowerCase();
   async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
@@ -309,6 +309,21 @@ module.exports = async (req, res) => {
           return res.status(200).json({
             connector: 'klaviyo',
             window: { startDate: from, endDate, capped: from !== startDate, maxDays: EMAIL_MAX_DAYS },
+            campaigns: data,
+            errors: { campaigns: data && data.__error ? data.__error : null },
+          });
+        }
+
+        if (conn === 'mailerlite') {
+          // Campagne-stats zitten genest in campaigns__stats (object met sent/opens/clicks/rates).
+          const ML_FIELDS = [
+            'campaigns__id', 'campaigns__name', 'campaigns__finished_at', 'campaigns__created_at',
+            'campaigns__status', 'campaigns__stats',
+          ].join(',');
+          const data = await windsorScoped('mailerlite', ML_FIELDS, { date_from: startDate, date_to: endDate }, FETCH_MS, 'mailerlite');
+          return res.status(200).json({
+            connector: 'mailerlite',
+            window: { startDate, endDate },
             campaigns: data,
             errors: { campaigns: data && data.__error ? data.__error : null },
           });
