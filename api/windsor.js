@@ -93,8 +93,13 @@ module.exports = async (req, res) => {
   // Normaliseer voor vergelijking: string, act_-prefix weg, lowercase.
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').toLowerCase();
   async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
+    const sharedMode = !!client.windsor_accounts; // gedeeld Windsor-account (meerdere klanten)
     const wantRaw = client.windsor_accounts && client.windsor_accounts[connector];
-    const scope = !!wantRaw && ACCOUNT_ID_CONNECTORS.has(connector);
+    const scopable = ACCOUNT_ID_CONNECTORS.has(connector);
+    // Gedeeld account + scopebare connector zonder configuratie → NIET ophalen. Anders zou een
+    // niet-geconfigureerde connector alle klanten teruggeven (data-lek). Lege dataset.
+    if (sharedMode && scopable && !wantRaw) return { data: [] };
+    const scope = !!wantRaw && scopable;
     let fields = fieldsCsv;
     if (scope) {
       // Vraag zowel account_id als account_name op — de configwaarde mag op één van beide matchen.
