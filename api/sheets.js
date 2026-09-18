@@ -68,7 +68,9 @@ async function getAccessToken() {
 
 // Read Merkcontext tab from Google Sheet
 async function readMerkcontext(sheetId, accessToken) {
-  const range = encodeURIComponent('Merkcontext!A1:B20');
+  // B40 i.p.v. B20: de template loopt tot rij 23 en secties worden nog toegevoegd,
+  // dus een krappe range slikte 'KPI follower groei/maand' en 'Opmerkingen' stilzwijgend in.
+  const range = encodeURIComponent('Merkcontext!A1:B40');
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`;
 
   const res = await fetch(url, {
@@ -83,10 +85,14 @@ async function readMerkcontext(sheetId, accessToken) {
   const data = await res.json();
   const rows = data.values || [];
 
-  // Format as key: value pairs, skip empty rows and header row
+  // Format as key: value pairs, skip empty rows and header row.
+  // Let op: de kopregel staat in de template in kapitalen ('VELD'), dus hoofdletter-
+  // ongevoelig vergelijken. Waarden trimmen: cellen bevatten regelmatig spaties, wat
+  // anders de placeholder-check ('[...]') omzeilt.
   const context = rows
-    .filter(row => row[0] && row[1] && !row[1].startsWith('[') && row[0] !== 'Veld')
-    .map(row => `${row[0]}: ${row[1]}`)
+    .map(row => [(row[0] || '').trim(), (row[1] || '').trim()])
+    .filter(([veld, waarde]) => veld && waarde && !waarde.startsWith('[') && veld.toLowerCase() !== 'veld')
+    .map(([veld, waarde]) => `${veld}: ${waarde}`)
     .join('\n');
 
   return context;
