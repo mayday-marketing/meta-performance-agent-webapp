@@ -583,7 +583,8 @@ async function ensureConfigTab(sheetId, token) {
     const r = await api(`https://sheets.googleapis.com/v4/spreadsheets/${RANGE.sheet}/values/${encodeURIComponent(RANGE.a1)}`, token);
     const rows = r.values || [];
     console.log(`\n${RANGE.a1} — ${rows.length} rij(en)`);
-    rows.forEach((row, i) => console.log(String(i + 1).padStart(3) + '  ' + row.map(c => String(c).slice(0, 22)).join(' | ')));
+    const breed = process.argv.includes('--wide') ? 600 : 22;
+    rows.forEach((row, i) => console.log(String(i + 1).padStart(3) + '  ' + row.map(c => String(c).slice(0, breed)).join(' | ')));
     console.log('');
     return;
   }

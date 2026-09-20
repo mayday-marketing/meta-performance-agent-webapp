@@ -1044,7 +1044,12 @@ module.exports = async (req, res) => {
           const brandedSource = useQueries ? (sd.queries.all || []) : queries;
           if (brandTokens.length) {
             for (const q of brandedSource) {
-              const hay = q.query.toLowerCase();
+              // Search Console levert af en toe een rij zonder querytekst (bij ons
+              // 2 op de 60.000). Die zijn niet te classificeren: ze overslaan is
+              // eerlijker dan ze als niet-merkgebonden meetellen — en zonder deze
+              // controle liet één lege cel de hele Website-tab crashen.
+              if (q == null || q.query == null || q.query === '') continue;
+              const hay = String(q.query).toLowerCase();
               const bucket = brandTokens.some(t => hay.includes(t)) ? split.branded : split.nonbranded;
               bucket.clicks += q.clicks;
               bucket.impressions += q.impressions;
