@@ -3153,7 +3153,11 @@
   // 'Oordeel op' uit de Config-tab, anders GA4. Per klant instelbaar omdat het
   // antwoord afhangt van de trackingkwaliteit — zie renderRoasFootnote().
   function roasMode() {
-    return state.roasRevenueMode || state.roas?.roasConfig?.verdictSource || "ga4";
+    if (state.roasRevenueMode) return state.roasRevenueMode;          // expliciete keuze wint
+    // Zonder GA4-property levert de GA4-modus alleen streepjes op; dan is de
+    // platformomzet de enige bron die er is.
+    if (state.roas && state.roas.hasGa4 === false) return "platform";
+    return state.roas?.roasConfig?.verdictSource || "ga4";
   }
   function roasConfigMode() { return state.roas?.roasConfig?.verdictSource || null; }
 
@@ -3163,6 +3167,9 @@
 
   const roasFmt = {
     eur: (n) => "€ " + Math.round(n || 0).toLocaleString("nl-NL"),
+    // null = niet gemeten (geen GA4-property, connector zonder omzetveld). Bewust
+    // een streepje: '€ 0' leest als 'niets verdiend' en dat is iets heel anders.
+    eurOrDash: (n) => (n == null ? "—" : "€ " + Math.round(n).toLocaleString("nl-NL")),
     ratio: (n) => (n == null || !isFinite(n)) ? "—" : n.toFixed(2).replace(".", ",") + "×",
     pct: (n) => (n == null || !isFinite(n)) ? "—" : (n * 100).toFixed(0) + "%",
     delta: (cur, prev) => {
@@ -3258,7 +3265,10 @@
       { key: "platform", label: "Platform-omzet" },
     ].map(m => `<button class="${m.key === roasMode() ? "on" : ""}" onclick="window.__roasRevenueMode('${m.key}')">${escapeHtml(m.label)}</button>`).join("");
     const cfgMode = roasConfigMode();
-    const modeHint = cfgMode
+    const noGa4 = state.roas && state.roas.hasGa4 === false;
+    const modeHint = (noGa4 && !state.roasRevenueMode)
+      ? "geen GA4-property — platform-omzet is de enige bron"
+      : cfgMode
       ? (state.roasRevenueMode && state.roasRevenueMode !== cfgMode
           ? `afwijkend van de Config-tab (daar staat ${cfgMode === "ga4" ? "GA4-omzet" : "platform-omzet"})`
           : "standaard uit de Config-tab ('Oordeel op')")
@@ -3289,7 +3299,7 @@
     if (roasMode() === "platform") {
       return obj.platformRevenueAvailable === false ? null : obj.platformRevenue;
     }
-    return obj.ga4Revenue;
+    return obj.ga4Available === false ? null : obj.ga4Revenue;
   }
 
   function renderRoasHero() {
@@ -3298,8 +3308,10 @@
     const min = roasMinTarget();
 
     const totalSpend = cur.totals.spend;
-    const totalRoas = safeRoas(cur.totals.revenue, totalSpend);
-    const prevTotalRoas = prev ? safeRoas(prev.totals.revenue, prev.totals.spend) : null;
+    // Zonder GA4 is de totale webshopomzet onbekend → geen blended ROAS, geen 0,00×.
+    const totalRevenue = cur.totals.revenueAvailable === false ? null : cur.totals.revenue;
+    const totalRoas = safeRoas(totalRevenue, totalSpend);
+    const prevTotalRoas = prev ? safeRoas(prev.totals.revenueAvailable === false ? null : prev.totals.revenue, prev.totals.spend) : null;
 
     const card = (opts) => {
       const bar = (opts.roas != null && min.value)
@@ -3342,7 +3354,7 @@
       ${card({
         label: "Totale ROAS (blended)", cvar: "--kpi-1",
         roas: totalRoas, prevRoas: prevTotalRoas,
-        revenue: cur.totals.revenue, spend: totalSpend,
+        revenue: totalRevenue, spend: totalSpend,
       })}
       ${groupCard("social", "Paid social", "--kpi-2")}
       ${groupCard("search", "Paid search", "--kpi-3")}
@@ -3355,14 +3367,17 @@
     const days = cur.daily.filter(d => d.spend > 0 || d.revenue > 0);
     if (days.length < 2) return "";
     const min = roasMinTarget();
+    // Zonder GA4 is er geen omzetlijn en dus ook geen ROAS-lijn: dan alleen de
+    // kosten tonen, met een titel die klopt. Een nullijn zou 0,00× suggereren.
+    const hasRevenue = cur.totals.revenueAvailable !== false;
 
     const spec = {
       width: 980, height: 260,
       x: days.map(d => { const [y, m, dd] = d.date.split("-"); return `${Number(dd)}/${Number(m)}`; }),
       series: [
-        { label: "Omzet", values: days.map(d => d.revenue), kind: "area", axis: "left", color: Charts.seriesColor(0) },
-        { label: "Advertentiekosten", values: days.map(d => d.spend), kind: "bar", axis: "left", color: Charts.seriesColor(1) },
-        { label: "Blended ROAS", values: days.map(d => (d.spend > 0 ? d.revenue / d.spend : 0)), kind: "line", axis: "right", color: Charts.seriesColor(2) },
+        ...(hasRevenue ? [{ label: "Omzet", values: days.map(d => d.revenue), kind: "area", axis: "left", color: Charts.seriesColor(0) }] : []),
+        { label: "Advertentiekosten", values: days.map(d => d.spend), kind: hasRevenue ? "bar" : "area", axis: "left", color: Charts.seriesColor(1) },
+        ...(hasRevenue ? [{ label: "Blended ROAS", values: days.map(d => (d.spend > 0 ? d.revenue / d.spend : 0)), kind: "line", axis: "right", color: Charts.seriesColor(2) }] : []),
       ],
       leftFormat: Charts.fmt.euroK,
       rightFormat: (v) => v.toFixed(1).replace(".", ",") + "×",
@@ -3371,8 +3386,10 @@
     return `<section class="panel" style="margin-bottom:16px;">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">Dagelijkse ROAS</h2>
-          <div class="panel-sub">Totale webshopomzet vs. advertentiekosten per dag${min.value ? ` · drempel ${roasFmt.ratio(min.value)}` : ""}</div>
+          <h2 class="panel-title">${hasRevenue ? "Dagelijkse ROAS" : "Advertentiekosten per dag"}</h2>
+          <div class="panel-sub">${hasRevenue
+            ? `Totale webshopomzet vs. advertentiekosten per dag${min.value ? ` · drempel ${roasFmt.ratio(min.value)}` : ""}`
+            : "Koppel een GA4-property in de Config-tab om hier de omzet en de blended ROAS bij te zien"}</div>
         </div>
       </div>
       ${chartSvg(spec)}
@@ -3406,7 +3423,7 @@
     const rows = chans.map(c => {
       const d = cur.channels[c.key] || {};
       const pd = prev ? (prev.channels[c.key] || {}) : null;
-      const ga4Roas = safeRoas(d.ga4Revenue, d.spend);
+      const ga4Roas = safeRoas(d.ga4Available === false ? null : d.ga4Revenue, d.spend);
       const platRoas = d.platformRevenueAvailable === false ? null : safeRoas(d.platformRevenue, d.spend);
       const activeRoas = safeRoas(roasRevenueOf(d), d.spend);
       const prevRoas = pd ? safeRoas(roasRevenueOf(pd), pd.spend) : null;
@@ -3425,7 +3442,7 @@
       return `<tr>
         <td><strong>${escapeHtml(c.label)}</strong>${c.verified ? "" : ` <span class="muted" style="font-size:10px;">(velden nog te bevestigen)</span>`}${warn}${split}</td>
         <td class="right">${roasFmt.eur(d.spend)}</td>
-        <td class="right">${roasFmt.eur(d.ga4Revenue)}</td>
+        <td class="right">${roasFmt.eurOrDash(d.ga4Available === false ? null : d.ga4Revenue)}</td>
         <td class="right"><strong>${roasFmt.ratio(ga4Roas)}</strong></td>
         <td class="right">${d.platformRevenueAvailable === false ? "—" : roasFmt.eur(d.platformRevenue)}</td>
         <td class="right">${roasFmt.ratio(platRoas)}</td>
@@ -3434,7 +3451,7 @@
       </tr>`;
     }).join("");
 
-    const rest = g.unmatchedGa4Revenue > 0
+    const rest = (g.unmatchedGa4Revenue || 0) > 0
       ? `<tr style="opacity:0.7;">
           <td>Overig betaald verkeer<div class="muted" style="font-size:10px;">GA4-omzet in deze channel group die aan geen gekoppeld kanaal toegewezen kon worden.</div></td>
           <td class="right">—</td>
@@ -3447,7 +3464,7 @@
     const total = `<tr style="border-top:2px solid var(--border); font-weight:600;">
       <td>Totaal ${escapeHtml(title.toLowerCase())}</td>
       <td class="right">${roasFmt.eur(g.spend)}</td>
-      <td class="right">${roasFmt.eur(g.ga4Revenue)}</td>
+      <td class="right">${roasFmt.eurOrDash(g.ga4Revenue)}</td>
       <td class="right">${roasFmt.ratio(safeRoas(g.ga4Revenue, g.spend))}</td>
       <td class="right">${g.platformRevenueAvailable === false ? "—" : roasFmt.eur(g.platformRevenue)}</td>
       <td class="right">${g.platformRevenueAvailable === false ? "—" : roasFmt.ratio(safeRoas(g.platformRevenue, g.spend))}</td>
@@ -3550,7 +3567,8 @@
       // Een ROAS van 0 zou dan 'uitzetten' opleveren terwijl we simpelweg niets
       // meten — die campagnes krijgen expliciet geen oordeel.
       const noRevenue = d.platformRevenueAvailable === false;
-      const ratio = (!noRevenue && d.platformRevenue > 0) ? d.ga4Revenue / d.platformRevenue : null;
+      const ratio = (!noRevenue && d.platformRevenue > 0 && d.ga4Revenue != null)
+        ? d.ga4Revenue / d.platformRevenue : null;
       for (const camp of d.campaigns) {
         const platRoas = noRevenue ? null : safeRoas(camp.platformRevenue, camp.spend);
         const corrected = (platRoas != null && ratio != null) ? platRoas * ratio : null;

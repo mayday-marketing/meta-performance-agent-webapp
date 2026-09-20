@@ -366,6 +366,12 @@ module.exports = async (req, res) => {
           if (ga4Totals && ga4Totals.__error) errors.ga4Totals = ga4Totals.__error;
           if (ga4Split && ga4Split.__error) errors.ga4Split = ga4Split.__error;
 
+          // Zonder GA4-property (of bij een GA4-fout) is de omzet ONBEKEND, niet nul.
+          // Als 0 zou elke ROAS 0,00× worden en zou alles 'uitzetten' krijgen terwijl
+          // er simpelweg niets gemeten is. Daarom expliciete vlaggen + null.
+          const totalsAvailable = hasGa4 && !errors.ga4Totals;
+          const splitAvailable = hasGa4 && !errors.ga4Split;
+
           // --- Omzet & sessies per dag (alle kanalen samen) ---------------------
           const daily = new Map(); // isoDate -> { date, revenue, sessions, transactions, spend }
           const dayOf = (d) => {
@@ -439,9 +445,10 @@ module.exports = async (req, res) => {
               // Platformomzet ontbreekt als de connector die velden niet kent —
               // dan is null eerlijker dan 0 (0 zou 'geen omzet' suggereren).
               platformRevenueAvailable: !result.degraded && !err,
-              ga4Revenue: ga4.revenue,
-              ga4Sessions: ga4.sessions,
-              ga4Transactions: ga4.transactions,
+              ga4Available: splitAvailable,
+              ga4Revenue: splitAvailable ? ga4.revenue : null,
+              ga4Sessions: splitAvailable ? ga4.sessions : null,
+              ga4Transactions: splitAvailable ? ga4.transactions : null,
               daily: Array.from(perDay.values()).sort((a, b) => a.date.localeCompare(b.date)),
               ga4Daily: ga4.daily,
               campaigns: Array.from(campaigns.values()).sort((a, b) => b.spend - a.spend),
@@ -454,25 +461,27 @@ module.exports = async (req, res) => {
           const groups = { social: null, search: null };
           for (const grp of ['social', 'search']) {
             const list = active.filter(c => c.group === grp);
-            const g = { spend: 0, ga4Revenue: 0, platformRevenue: 0, platformRevenueAvailable: list.length > 0, channels: list.map(c => c.key) };
+            const g = { spend: 0, ga4Revenue: 0, platformRevenue: 0, platformRevenueAvailable: list.length > 0, ga4Available: splitAvailable, channels: list.map(c => c.key) };
             for (const ch of list) {
               const c = channels[ch.key];
               g.spend += c.spend;
-              g.ga4Revenue += c.ga4Revenue;
+              g.ga4Revenue += (c.ga4Revenue || 0);
               g.platformRevenue += c.platformRevenue;
               if (!c.platformRevenueAvailable) g.platformRevenueAvailable = false;
             }
-            g.unmatchedGa4Revenue = ga4Unmatched[grp];
+            if (!splitAvailable) g.ga4Revenue = null;
+            g.unmatchedGa4Revenue = splitAvailable ? ga4Unmatched[grp] : null;
             groups[grp] = g;
           }
 
-          const totals = { revenue: 0, sessions: 0, transactions: 0, spend: 0 };
+          const totals = { revenue: 0, sessions: 0, transactions: 0, spend: 0, revenueAvailable: totalsAvailable };
           for (const d of daily.values()) {
             totals.revenue += d.revenue;
             totals.sessions += d.sessions;
             totals.transactions += d.transactions;
             totals.spend += d.spend;
           }
+          if (!totalsAvailable) { totals.revenue = null; totals.sessions = null; totals.transactions = null; }
 
           return {
             window: { startDate: from, endDate: to },

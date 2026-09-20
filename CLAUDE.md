@@ -101,6 +101,12 @@ los van de dashboardperiode in de topbar.
   dan valt `fetchChannel` terug op alleen spend (`platformRevenueAvailable:false`)
   en blijft de GA4-ROAS staan. Campagnes van zo'n kanaal krijgen **geen** oordeel —
   een ROAS van 0 zou anders 'uitzetten' opleveren terwijl er niets gemeten is.
+- **Gedeeltelijke config is een geldige toestand.** Ontbrekende data is *onbekend*,
+  nooit nul: zonder GA4-property zijn `totals.revenue` en `ga4Revenue` `null`
+  (vlaggen `revenueAvailable` / `ga4Available`), toont de UI streepjes en valt de
+  tab terug op platform-omzet. Zonder `Brutomarge` is er geen drempel en dus geen
+  oordeel, maar blijven alle ROAS-cijfers staan. Let op in JS: `null / getal === 0`,
+  dus overal expliciet op `!= null` toetsen.
 - **Isolatie:** elke nieuwe connector-slug hoort in `ACCOUNT_ID_CONNECTORS` in
   `windsor.js`. Ontbreekt hij daar, dan geldt de fail-closed-regel niet en geeft een
   niet-geconfigureerde connector álle klanten terug.
