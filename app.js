@@ -2764,7 +2764,7 @@
     // Empty state — gebruiker moet expliciet de analyse triggeren.
     root.innerHTML = `
       <div class="panel" style="text-align:center; padding:56px 24px;">
-        <div style="font-family:var(--font-serif); font-size:22px; color:var(--text); margin-bottom:8px;">Analyse genereren?</div>
+        <div style="font-size:22px; color:var(--text); margin-bottom:8px;">Analyse genereren?</div>
         <p class="muted" style="margin:0 auto 22px; max-width:520px;">
           De Agent leest ${postsCount} posts en eventuele campagnes uit deze periode (${escapeHtml(periodLabelShort())}) en levert winners, losers en concrete aanbevelingen. Duurt zo'n 5 seconden.
         </p>
@@ -2841,7 +2841,7 @@
   }
   function emailKpiCard(label, value) {
     return `<div class="panel" style="padding:16px 18px;"><div class="muted" style="font-size:12px;">${escapeHtml(label)}</div>
-      <div style="font-family:var(--font-serif); font-size:26px; color:var(--text); margin-top:4px;">${value}</div></div>`;
+      <div style="font-size:26px; color:var(--text); margin-top:4px;">${value}</div></div>`;
   }
 
   function renderEmail() {
@@ -3417,7 +3417,7 @@
       <div class="roas-bar">
         <div>
           <div class="info-label">Periode</div>
-          <div style="font-family:var(--font-serif); font-size:20px; color:var(--text); margin-top:2px;">${escapeHtml(range.label)}</div>
+          <div style="font-size:20px; color:var(--text); margin-top:2px;">${escapeHtml(range.label)}</div>
           <div class="muted" style="font-size:11px; margin-top:2px;">vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}</div>
         </div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -4045,7 +4045,7 @@
       <div class="roas-bar">
         <div>
           <div class="info-label">Periode</div>
-          <div style="font-family:var(--font-serif); font-size:20px; color:var(--text); margin-top:2px;">${escapeHtml(start || "—")} → ${escapeHtml(end || "—")}</div>
+          <div style="font-size:20px; color:var(--text); margin-top:2px;">${escapeHtml(start || "—")} → ${escapeHtml(end || "—")}</div>
           <div class="muted" style="font-size:11px; margin-top:2px;">vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}${typeLine ? ` · ${escapeHtml(typeLine)}` : ""}</div>
         </div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -5418,7 +5418,7 @@
       <div class="roas-bar">
         <div>
           <div class="info-label">Nulmeting</div>
-          <div style="font-family:var(--font-serif); font-size:20px; color:var(--text); margin-top:2px;">
+          <div style="font-size:20px; color:var(--text); margin-top:2px;">
             ${escapeHtml(geoFmt.date(g.auditDate))}${g.label ? ` · ${escapeHtml(g.label)}` : ""}
           </div>
           <div class="muted" style="font-size:11px; margin-top:2px;">${escapeHtml(bits.join(" · "))}</div>

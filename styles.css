@@ -67,9 +67,11 @@
   --pad: 20px;
   --kpi-pad: 20px;
 
-  --font-sans: "Instrument Sans", "Inter", system-ui, sans-serif;
-  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* Compat: beide oude rollen wijzen naar dezelfde letter. */
+  --font-sans: var(--font-body);
+  --font-serif: var(--font-body);
 
   /* ---- Compatibiliteitslaag ----------------------------------------------
      De rest van dit bestand gebruikt nog de oude tokennamen. Die worden hier
@@ -139,21 +141,6 @@
   --kpi-pad: 16px;
 }
 
-@font-face {
-  font-family: "Instrument Serif";
-  font-style: normal;
-  font-weight: 400;
-  src: url("../FONTS/Instrument_Sans,Instrument_Serif/Instrument_Serif/InstrumentSerif-Regular.ttf") format("truetype");
-  font-display: swap;
-}
-@font-face {
-  font-family: "Instrument Sans";
-  font-style: normal;
-  font-weight: 400;
-  src: url("../FONTS/Instrument_Sans,Instrument_Serif/Instrument_Sans/InstrumentSans-VariableFont_wdth,wght.ttf") format("truetype");
-  font-display: swap;
-}
-
 /* ==========================================================
    Base
    ========================================================== */
@@ -161,13 +148,29 @@
 html, body { margin: 0; padding: 0; }
 body {
   min-height: 100vh;
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   background: var(--background);
   color: var(--text);
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
-  letter-spacing: 0.005em;
 }
+/* Typeschaal (§1) — hiërarchie uit grootte, gewicht en kleur. Negatieve
+   letterspacing alleen vanaf 16px; kleiner dan 11px komt nergens voor. */
+/* Geen margin: 0 hier — tientallen blokken leunen nog op de standaardmarge van
+   de browser. Die nullen we pas als de layout per blok expliciet spacing krijgt. */
+h1, h2, h3 { font-family: var(--font-body); line-height: 1.2; text-wrap: balance; }
+h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.022em; }
+h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.014em; }
+h3 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+
+/* Cijfers krijgen tabulaire breedtes, zodat kolommen niet verspringen. */
+.kpi-value {
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
@@ -188,7 +191,6 @@ a { color: inherit; text-decoration: none; }
   margin: 40px auto;
 }
 .auth-card .brand {
-  font-family: var(--font-serif);
   font-size: 18px;
   letter-spacing: 0.18em;
   color: var(--accent-2);
@@ -226,7 +228,6 @@ a { color: inherit; text-decoration: none; }
   margin: 0;
   font-size: 38px;
   line-height: 1.05;
-  font-family: var(--font-serif);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -245,15 +246,18 @@ a { color: inherit; text-decoration: none; }
   font-weight: 600;
 }
 .login-form { display: grid; gap: 18px; padding: 12px 8px; align-content: start; padding-top: 4px; }
+/* Kaarttitel: zelfde schaal als h1 uit §1, zinsvorm i.p.v. kapitalen met
+   sperring. De hint had een negatieve bovenmarge die op de oude letter was
+   afgestemd; met de nieuwe regelhoogte schoof die over de kop heen. */
 .login-form h2 {
-  margin: 0;
-  font-size: 26px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-family: var(--font-serif);
-  color: var(--accent-2);
+  margin: 0 0 4px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  text-transform: none;
+  color: var(--fg);
 }
-.login-form .hint { font-size: 13px; color: var(--text-muted); margin: -10px 0 6px; }
+.login-form .hint { font-size: 13px; color: var(--fg-muted); margin: 0 0 6px; }
 .login-form label {
   display: block; margin-bottom: 8px;
   font-size: 11px; letter-spacing: 0.14em;
@@ -335,7 +339,6 @@ a { color: inherit; text-decoration: none; }
   padding: 26px 18px; gap: 22px;
 }
 .sidebar .brand {
-  font-family: var(--font-serif);
   font-size: 16px; line-height: 1.1;
   color: var(--accent-2);
   text-transform: uppercase;
@@ -410,8 +413,7 @@ a { color: inherit; text-decoration: none; }
 }
 .topbar .crumbs .sep { opacity: 0.5; }
 .topbar h1.page-title {
-  margin: 0; font-family: var(--font-serif);
-  font-size: 28px; font-weight: 400;
+  margin: 0;  font-size: 28px; font-weight: 400;
   letter-spacing: 0.02em;
   color: var(--text);
   text-transform: none;
@@ -480,12 +482,12 @@ a { color: inherit; text-decoration: none; }
   background: var(--accent);
 }
 .kpi-card .value {
-  font-family: var(--font-serif);
-  font-size: 38px;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  line-height: 1;
-  color: var(--text);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--fg);
   margin-top: 4px;
 }
 .kpi-card .delta {
@@ -512,7 +514,6 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 14px; flex-wrap: wrap;
 }
 .panel-title {
-  font-family: var(--font-serif);
   font-size: 22px;
   font-weight: 400;
   color: var(--text);
@@ -561,7 +562,6 @@ a { color: inherit; text-decoration: none; }
   background: var(--surface-strong);
   display: flex; align-items: center; justify-content: center;
   color: #fff;
-  font-family: var(--font-serif);
   font-size: 18px;
   position: relative; overflow: hidden;
 }
@@ -608,7 +608,6 @@ a { color: inherit; text-decoration: none; }
   text-align: right;
 }
 .top-post .stat .n {
-  font-family: var(--font-serif);
   font-size: 18px;
   color: var(--text);
 }
@@ -625,7 +624,7 @@ a { color: inherit; text-decoration: none; }
 .channel-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
 .channel-row .label { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .channel-row .label .swatch { width: 10px; height: 10px; border-radius: 3px; }
-.channel-row .pct { font-family: var(--font-serif); font-size: 16px; }
+.channel-row .pct { font-size: 16px; }
 .channel-bar {
   grid-column: 1 / -1;
   height: 8px;
@@ -785,7 +784,7 @@ a { color: inherit; text-decoration: none; }
   margin-top: 4px;
 }
 .lib-card .stats .s { display: flex; flex-direction: column; gap: 2px; }
-.lib-card .stats .n { font-family: var(--font-serif); font-size: 14px; color: var(--text); }
+.lib-card .stats .n { font-size: 14px; color: var(--text); }
 .lib-card .stats .l { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-soft); font-weight: 700; }
 
 /* Library Table */
@@ -946,8 +945,7 @@ a { color: inherit; text-decoration: none; }
 .insight-card.lose .head .pill { background: rgba(193, 77, 77, 0.14); color: var(--bad); }
 .insight-card.rec .head .pill { background: var(--accent-soft); color: var(--accent); }
 .insight-card .head h3 {
-  margin: 0; font-family: var(--font-serif);
-  font-size: 18px; font-weight: 400;
+  margin: 0;  font-size: 18px; font-weight: 400;
   color: var(--text);
 }
 .insight-list { display: flex; flex-direction: column; gap: 14px; }
@@ -970,7 +968,6 @@ a { color: inherit; text-decoration: none; }
   margin-top: 2px;
 }
 .insight-item .delta {
-  font-family: var(--font-serif);
   font-size: 18px;
   margin-bottom: 2px;
 }
@@ -1026,7 +1023,6 @@ a { color: inherit; text-decoration: none; }
   display: flex; justify-content: space-between; align-items: flex-start;
 }
 .chat-head .title {
-  font-family: var(--font-serif);
   font-size: 18px; color: var(--text);
   margin: 0;
 }
@@ -1139,7 +1135,7 @@ a { color: inherit; text-decoration: none; }
   font-size: 11px;
   display: inline-flex; gap: 6px; align-items: baseline;
 }
-.msg .stat-chip .n { font-family: var(--font-serif); font-size: 14px; color: var(--text); }
+.msg .stat-chip .n { font-size: 14px; color: var(--text); }
 .msg .stat-chip .l { color: var(--text-soft); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
 .msg .typing { display: inline-flex; gap: 4px; padding: 4px 0; }
 .msg .typing span {
@@ -1200,7 +1196,6 @@ a { color: inherit; text-decoration: none; }
 .tweaks-panel.on { display: block; }
 .tweaks-panel h3 {
   margin: 0 0 10px;
-  font-family: var(--font-serif);
   font-size: 16px;
   display: flex; justify-content: space-between; align-items: center;
 }
@@ -1308,7 +1303,6 @@ a { color: inherit; text-decoration: none; }
 
 /* Platform icon glyph (text) */
 .glyph {
-  font-family: var(--font-serif);
   letter-spacing: 0;
 }
 
@@ -1349,7 +1343,7 @@ a { color: inherit; text-decoration: none; }
 #login-error { display: block; }
 
 /* ========== Methodology page (Blok E) ========== */
-#methodology-content .panel-title { font-family: var(--font-serif); font-weight: 400; }
+#methodology-content .panel-title { font-weight: 400; }
 .method-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1373,7 +1367,7 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--border); border-radius: 12px;
   padding: 16px; background: var(--surface);
 }
-.method-thresholds .thr-val { font-family: var(--font-serif); font-size: 26px; line-height: 1; }
+.method-thresholds .thr-val { font-size: 26px; line-height: 1; }
 .method-thresholds .thr-lbl { font-weight: 700; margin: 8px 0 4px; font-size: 13px; }
 .method-thresholds .thr .muted { font-size: 12px; line-height: 1.45; }
 .method-thresholds .thr.good { border-color: rgba(47,143,95,0.4); }
