@@ -71,7 +71,7 @@
     // Live overschrijving van de break-even-parameters uit de Config-tab. null =
     // configwaarde gebruiken. Bewust niet in sessionStorage: dit is een scenario,
     // geen instelling.
-    roasInputs: { grossMargin: null, wave1: null, wave2: null, wave3: null, wave4: null, activeWave: null },
+    roasInputs: { grossMargin: null, seasonalDiscount: null, activeScenario: null },
   };
 
   /* ---------- Session persistence ---------- */
@@ -289,7 +289,7 @@
     state.roasKey = null;
     state.roasError = null;
     state.roasLoading = false;
-    state.roasInputs = { grossMargin: null, wave1: null, wave2: null, wave3: null, wave4: null, activeWave: null };
+    state.roasInputs = { grossMargin: null, seasonalDiscount: null, activeScenario: null };
     state.roasRevenueMode = null;
     state.chatMessages = [];
     dashboardInited = false;
@@ -3087,14 +3087,17 @@
     const cfg = state.roas?.roasConfig || {};
     const o = state.roasInputs;
     const val = (k) => (o[k] != null ? o[k] : (typeof cfg[k] === "number" ? cfg[k] : null));
+    const discount = val("seasonalDiscount");
     return {
       grossMargin: val("grossMargin"),
-      wave1: val("wave1"), wave2: val("wave2"), wave3: val("wave3"), wave4: val("wave4"),
-      activeWave: o.activeWave || cfg.activeWave || "full",
+      seasonalDiscount: discount,
+      // Loopt er een seizoenskorting, dan is díé de drempel — anders volle prijs.
+      // Met één klik om te zetten, zonder de sheet aan te passen.
+      activeScenario: o.activeScenario || ((discount != null && discount > 0) ? "season" : "full"),
       minRoasOverride: typeof cfg.minRoas === "number" ? cfg.minRoas : null,
       fromConfig: {
         grossMargin: typeof cfg.grossMargin === "number",
-        waves: ["wave1", "wave2", "wave3", "wave4"].some(k => typeof cfg[k] === "number"),
+        seasonalDiscount: typeof cfg.seasonalDiscount === "number",
       },
     };
   }
@@ -3102,17 +3105,14 @@
   // Break-even ROAS = (1 − korting) / (brutomarge − korting). Zelfde formule als
   // server-side in _config.js roasTargets(); hier client-side herhaald zodat de
   // live invoer meteen doorrekent zonder round-trip.
-  function roasWaves(p) {
+  function roasScenarios(p) {
     const m = p.grossMargin;
     if (m == null) return [];
-    const defs = [
-      { key: "full", label: "Full price", discount: 0 },
-      { key: "wave1", label: "Wave 1", discount: p.wave1 },
-      { key: "wave2", label: "Wave 2", discount: p.wave2 },
-      { key: "wave3", label: "Wave 3", discount: p.wave3 },
-      { key: "wave4", label: "Wave 4", discount: p.wave4 },
-    ];
-    return defs.filter(w => typeof w.discount === "number").map(w => {
+    const defs = [{ key: "full", label: "Volle prijs", discount: 0 }];
+    if (typeof p.seasonalDiscount === "number" && p.seasonalDiscount > 0) {
+      defs.push({ key: "season", label: "Seizoenskorting", discount: p.seasonalDiscount });
+    }
+    return defs.map(w => {
       const margin = m - w.discount;
       return {
         ...w,
@@ -3124,15 +3124,15 @@
   }
 
   // De drempel waartegen kanalen en campagnes beoordeeld worden: 'Minimum ROAS'
-  // uit de Config-tab wint, anders de break-even van de actieve wave.
+  // uit de Config-tab wint, anders de break-even van het actieve scenario.
   function roasMinTarget() {
     const p = roasParams();
     if (p.minRoasOverride) return { value: p.minRoasOverride, source: "Minimum ROAS (Config-tab)" };
-    const waves = roasWaves(p);
-    const active = waves.find(w => w.key === p.activeWave) || waves[0];
+    const scenarios = roasScenarios(p);
+    const active = scenarios.find(w => w.key === p.activeScenario) || scenarios[0];
     if (!active) return { value: null, source: null };
     if (active.loss) return { value: null, source: `${active.label} — geen marge over`, loss: true };
-    return { value: active.breakEven, source: `Break-even ${active.label}` };
+    return { value: active.breakEven, source: `break-even ${active.label.toLowerCase()}` };
   }
 
   window.__roasInput = (field, raw) => {
@@ -3144,9 +3144,9 @@
     state.roasInputs[field] = Math.max(0, Math.min(1, n));
     renderRoas();
   };
-  window.__roasWave = (k) => { state.roasInputs.activeWave = k; renderRoas(); };
+  window.__roasScenario = (k) => { state.roasInputs.activeScenario = k; renderRoas(); };
   window.__roasResetInputs = () => {
-    state.roasInputs = { grossMargin: null, wave1: null, wave2: null, wave3: null, wave4: null, activeWave: null };
+    state.roasInputs = { grossMargin: null, seasonalDiscount: null, activeScenario: null };
     renderRoas();
   };
   // Actieve omzetdefinitie: een expliciete keuze van de gebruiker wint, anders
@@ -3496,7 +3496,7 @@
 
   function renderRoasBreakEven() {
     const p = roasParams();
-    const waves = roasWaves(p);
+    const scenarios = roasScenarios(p);
     const min = roasMinTarget();
     const cfg = state.roas?.roasConfig || {};
     const edited = Object.entries(state.roasInputs).some(([k, v]) => v != null);
@@ -3511,23 +3511,26 @@
       </label>`;
     };
 
-    const waveRows = waves.map(w => `<tr class="${w.key === p.activeWave ? "on" : ""}" onclick="window.__roasWave('${w.key}')" style="cursor:pointer;">
-        <td><input type="radio" ${w.key === p.activeWave ? "checked" : ""} onclick="window.__roasWave('${w.key}')"> ${escapeHtml(w.label)}</td>
+    // Twee scenario's: volle prijs en de lopende seizoenskorting. Het geselecteerde
+    // scenario is de drempel waartegen kanalen en campagnes beoordeeld worden.
+    const scenarioRows = scenarios.map(w => `<tr class="${w.key === p.activeScenario ? "on" : ""}" onclick="window.__roasScenario('${w.key}')" style="cursor:pointer;">
+        <td><input type="radio" ${w.key === p.activeScenario ? "checked" : ""} onclick="window.__roasScenario('${w.key}')"> ${escapeHtml(w.label)}</td>
         <td class="right">${roasFmt.pct(w.discount)}</td>
         <td class="right">${roasFmt.pct(w.netMargin)}</td>
         <td class="right"><strong>${w.loss ? "verlies" : roasFmt.ratio(w.breakEven)}</strong></td>
       </tr>`).join("");
 
-    const body = waves.length
+    const body = scenarios.length
       ? `<div class="lib-table" style="margin-top:14px;"><table>
-          <thead><tr><th>Wave</th><th class="right">Korting</th><th class="right">Marge na korting</th><th class="right">Break-even ROAS</th></tr></thead>
-          <tbody>${waveRows}</tbody>
+          <thead><tr><th>Scenario</th><th class="right">Korting</th><th class="right">Marge na korting</th><th class="right">Break-even ROAS</th></tr></thead>
+          <tbody>${scenarioRows}</tbody>
         </table></div>
         <p class="muted" style="font-size:11px; margin:12px 0 0;">
-          Break-even = (1 − korting) / (brutomarge − korting). Bij een korting gelijk aan of groter dan de
-          brutomarge blijft er geen marge over om advertenties uit te betalen — dan is er geen haalbare ROAS.
+          Break-even = (1 − korting) / (brutomarge − korting). Kies het scenario dat nu loopt; dat is de drempel
+          voor het oordeel. Is de korting gelijk aan of groter dan de brutomarge, dan blijft er geen marge over
+          om advertenties uit te betalen — dan is er geen haalbare ROAS.
         </p>`
-      : `<p class="muted" style="margin:14px 0 0;">Vul een brutomarge in (of zet <strong>Brutomarge</strong> in de Config-tab) om de break-even-ROAS per wave te berekenen.</p>`;
+      : `<p class="muted" style="margin:14px 0 0;">Vul een brutomarge in (of zet <strong>Brutomarge</strong> in de Config-tab) om de break-even-ROAS te berekenen.</p>`;
 
     return `<section class="panel" style="margin-bottom:16px;">
       <div class="panel-header">
@@ -3539,10 +3542,7 @@
       </div>
       <div class="roas-fields">
         ${field("grossMargin", "Brutomarge")}
-        ${field("wave1", "Korting wave 1")}
-        ${field("wave2", "Korting wave 2")}
-        ${field("wave3", "Korting wave 3")}
-        ${field("wave4", "Korting wave 4")}
+        ${field("seasonalDiscount", "Seizoenskorting")}
       </div>
       ${body}
       ${min.value ? `<div class="roas-target-note">Actieve drempel: <strong>${roasFmt.ratio(min.value)}</strong> — ${escapeHtml(min.source)}</div>` : ""}
@@ -3670,7 +3670,7 @@
         <li><strong>Totale ROAS (blended)</strong> = alle webshopomzet uit GA4 gedeeld door álle advertentiekosten samen. Ook omzet uit organisch, e-mail en direct zit erin: dit is de MER, geen kanaalprestatie.</li>
         <li><strong>GA4-ROAS per kanaal</strong> = GA4-omzet op last-click-basis gedeeld door de spend van dat kanaal. Eén meetlat voor alle kanalen; telt niet dubbel.</li>
         <li><strong>Platform-ROAS</strong> = de omzet die het platform zelf claimt. Inclusief view-through en een eigen attributievenster, dus structureel hoger. Kanalen claimen dezelfde sale: optellen mag niet.</li>
-        <li><strong>Break-even</strong> = (1 − korting) / (brutomarge − korting), per kortingswave. De actieve wave bepaalt de drempel voor het oordeel.</li>
+        <li><strong>Break-even</strong> = (1 − korting) / (brutomarge − korting), voor volle prijs en voor de lopende seizoenskorting. Het gekozen scenario bepaalt de drempel voor het oordeel.</li>
         <li><strong>Welke omzet het oordeel bepaalt</strong> staat per klant in de Config-tab onder <strong>Oordeel op</strong> (<em>GA4</em> of <em>Platform</em>). Met sluitende server-side tracking is GA4 betrouwbaar; zonder goede consent-dekking onderschat GA4 en is platform realistischer. De toggle bovenaan overschrijft dit voor deze sessie.</li>
         <li>Een kanaal verschijnt zodra het bijbehorende ad-account in de <strong>Config-tab</strong> van de klantsheet staat.</li>
       </ul>

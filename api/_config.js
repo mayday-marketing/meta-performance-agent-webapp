@@ -125,15 +125,11 @@ const CONFIG_FIELDS = {
   amazonadsaccount:    { path: 'accounts.amazon_ads',       check: okAccount },
 
   // --- ROAS-tab: break-even-parameters -------------------------------------
-  // Brutomarge + korting per wave bepalen de minimum-ROAS waaronder een kanaal
-  // of campagne verlies draait. Zie roasTargets() hieronder voor de formule.
-  brutomarge:    { path: 'roas.grossMargin', check: okPercent },
-  kortingwave1:  { path: 'roas.wave1',       check: okPercent },
-  kortingwave2:  { path: 'roas.wave2',       check: okPercent },
-  kortingwave3:  { path: 'roas.wave3',       check: okPercent },
-  kortingwave4:  { path: 'roas.wave4',       check: okPercent },
-  actievewave:   { path: 'roas.activeWave',  check: v => /^(full|wave ?[1-4])$/i.test(String(v).trim()) ? String(v).trim().toLowerCase().replace(/\s+/g, '') : null },
-  minimumroas:   { path: 'roas.minRoas',     check: okRatio },
+  // Brutomarge en de lopende seizoenskorting bepalen de minimum-ROAS waaronder
+  // een kanaal of campagne verlies draait. Zie roasTargets() voor de formule.
+  brutomarge:        { path: 'roas.grossMargin',      check: okPercent },
+  seizoenskorting:   { path: 'roas.seasonalDiscount', check: okPercent },
+  minimumroas:       { path: 'roas.minRoas',          check: okRatio },
   // Welke omzetdefinitie het oordeel (uitzetten/bijsturen/schalen) bepaalt.
   // Per klant instelbaar omdat het antwoord afhangt van de kwaliteit van de
   // tracking: met sluitende server-side tracking is GA4 betrouwbaar, zonder
@@ -143,7 +139,7 @@ const CONFIG_FIELDS = {
 };
 
 /**
- * Break-even ROAS per kortingswave.
+ * Break-even ROAS voor twee scenario's: volle prijs en de lopende seizoenskorting.
  *
  * Bij een brutomarge m op de volle prijs en een korting d geldt per €100 catalogus-
  * waarde: kostprijs goederen = 100·(1−m), verkoopprijs = 100·(1−d). De brutowinst
@@ -153,36 +149,38 @@ const CONFIG_FIELDS = {
  *     ROAS_be = (1 − d) / (m − d)
  *
  * Bij d ≥ m is er geen marge meer over: elke euro advertising is dan per definitie
- * verlies (in de WOODY-sheet de '-10,0' bij wave 4). Dat geven we terug als null
- * met een expliciete reden, niet als een misleidend negatief getal.
+ * verlies. Dat geven we terug als null met een expliciete reden, niet als een
+ * misleidend negatief getal.
+ *
+ * Het actieve scenario (= de drempel) is de seizoenskorting zodra die is ingevuld
+ * en groter dan nul; anders volle prijs. In het dashboard is dat met één klik om
+ * te zetten zonder de sheet aan te passen.
  */
 function roasTargets(roas) {
   const m = roas && typeof roas.grossMargin === 'number' ? roas.grossMargin : null;
   if (m == null) return null;
 
-  const waves = [
-    { key: 'full',  label: 'Full price', discount: 0 },
-    { key: 'wave1', label: 'Wave 1',     discount: roas.wave1 },
-    { key: 'wave2', label: 'Wave 2',     discount: roas.wave2 },
-    { key: 'wave3', label: 'Wave 3',     discount: roas.wave3 },
-    { key: 'wave4', label: 'Wave 4',     discount: roas.wave4 },
-  ].filter(w => typeof w.discount === 'number');
+  const discount = typeof roas.seasonalDiscount === 'number' ? roas.seasonalDiscount : null;
+  const scenario = (key, label, d) => {
+    const margin = m - d;
+    return {
+      key, label,
+      discount: d,
+      // Netto marge per €100 catalogusprijs, vóór advertentiekosten.
+      netMargin: Math.round(margin * 10000) / 10000,
+      breakEvenRoas: margin > 0 ? Math.round(((1 - d) / margin) * 100) / 100 : null,
+      loss: margin <= 0,
+    };
+  };
+
+  const scenarios = [scenario('full', 'Volle prijs', 0)];
+  if (discount != null && discount > 0) scenarios.push(scenario('season', 'Seizoenskorting', discount));
 
   return {
     grossMargin: m,
-    activeWave: roas.activeWave || 'full',
-    waves: waves.map(w => {
-      const margin = m - w.discount;
-      return {
-        key: w.key,
-        label: w.label,
-        discount: w.discount,
-        // Netto marge per €100 catalogusprijs, vóór advertentiekosten.
-        netMargin: Math.round((margin) * 10000) / 10000,
-        breakEvenRoas: margin > 0 ? Math.round(((1 - w.discount) / margin) * 100) / 100 : null,
-        loss: margin <= 0,
-      };
-    }),
+    seasonalDiscount: discount,
+    activeScenario: (discount != null && discount > 0) ? 'season' : 'full',
+    scenarios,
   };
 }
 

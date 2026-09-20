@@ -92,10 +92,12 @@ los van de dashboardperiode in de topbar.
   staat per klant in de Config-tab onder `Oordeel op` (`GA4` of `Platform`,
   default GA4); de toggle in de tab overschrijft dat voor de sessie
   (`state.roasRevenueMode = null` betekent 'volg de config').
-- **Break-even** = `(1 − korting) / (brutomarge − korting)` per kortingswave.
-  Brutomarge + kortingen staan in de Config-tab (`Brutomarge`, `Korting wave 1..4`,
-  `Actieve wave`, of `Minimum ROAS` als directe override) en zijn in de tab live
-  te overschrijven voor scenario's — die overschrijving wordt **niet** bewaard.
+- **Break-even** = `(1 − korting) / (brutomarge − korting)`, voor twee scenario's:
+  volle prijs en de lopende seizoenskorting. De Config-tab heeft daarvoor twee
+  velden — `Brutomarge` en `Seizoenskorting` — plus `Minimum ROAS` als directe
+  override. Actief scenario = seizoenskorting zodra die > 0 is, anders volle prijs;
+  in de tab met één klik om te zetten. Beide velden zijn daar ook live te
+  overschrijven voor een scenario — dat wordt **niet** bewaard.
 - **Alleen `facebook` heeft geverifieerde veldnamen.** Voor niet-gekoppelde
   connectors staan kandidaat-omzetvelden in de registry; wijst Windsor er één af,
   dan valt `fetchChannel` terug op alleen spend (`platformRevenueAvailable:false`)

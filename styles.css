@@ -1498,7 +1498,7 @@ a { color: inherit; text-decoration: none; }
 .roas-notes li { margin-bottom: 6px; }
 .roas-notes strong { color: var(--text); }
 
-/* Actieve wave-rij in de break-even-tabel. */
+/* Actief scenario-rij in de break-even-tabel. */
 #page-roas .lib-table tbody tr.on { background: var(--accent-soft); }
 #page-roas .lib-table tbody tr { cursor: default; }
 #page-roas .lib-table table { min-width: 980px; }
