@@ -29,6 +29,15 @@ const ONLY = onlyIdx !== -1 ? (process.argv[onlyIdx + 1] || '').toLowerCase() : 
 //   node scripts/add-config-tab.js --env .env.production.local
 const envIdx = process.argv.indexOf('--env');
 const ENV_FILE = envIdx !== -1 ? process.argv[envIdx + 1] : null;
+// --identify <url|id> …  → zegt per sheet hoe hij heet, waar hij staat en bij
+// welke klant hij hoort. Leest alleen, schrijft nooit.
+const idIdx = process.argv.indexOf('--identify');
+const IDENTIFY = idIdx !== -1
+  ? process.argv.slice(idIdx + 1).filter(a => !a.startsWith('--')).map(a => {
+      const m = /\/spreadsheets\/d\/([A-Za-z0-9_-]+)/.exec(a);
+      return m ? m[1] : a;
+    })
+  : null;
 
 /* ---------- .env.local inlezen (waarden worden nooit geprint) ----------
    Een .env-waarde kan er op drie manieren in staan:
@@ -307,6 +316,28 @@ async function findSheets(rootId, token, maxDepth = 4) {
   return found.filter(f => !f.error).sort((a, b) => score(a) - score(b) || a.path.localeCompare(b.path));
 }
 
+// Loopt via parents omhoog en bouwt het pad, tot we een map raken die als
+// driveFolderId van een klant in CLIENTS staat.
+async function locate(fileId, token, clientFolders) {
+  const f = await api(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents&supportsAllDrives=true`,
+    token
+  );
+  const segments = [];
+  let owner = null;
+  let cur = f.parents && f.parents[0];
+  for (let depth = 0; cur && depth < 12; depth++) {
+    if (clientFolders[cur]) { owner = clientFolders[cur]; break; }
+    const p = await api(
+      `https://www.googleapis.com/drive/v3/files/${cur}?fields=id,name,parents&supportsAllDrives=true`,
+      token
+    );
+    segments.unshift(p.name);
+    cur = p.parents && p.parents[0];
+  }
+  return { id: f.id, name: f.name, mimeType: f.mimeType, path: segments.join('/'), owner };
+}
+
 /* ---------- Inhoud van de Config-tab ---------- */
 
 const ROWS = [
@@ -400,6 +431,26 @@ async function ensureConfigTab(sheetId, token) {
   const { token, email } = await getAccessToken(saKey);
   console.log(`Service-account: ${email}`);
   console.log(APPLY ? 'Modus: UITVOEREN\n' : 'Modus: DROOGLOOP (voeg --apply toe om echt te schrijven)\n');
+
+  if (IDENTIFY) {
+    const clientFolders = {};
+    for (const [id, cfg] of Object.entries(clients)) if (cfg.driveFolderId) clientFolders[cfg.driveFolderId] = id;
+    for (const fid of IDENTIFY) {
+      try {
+        const r = await locate(fid, token, clientFolders);
+        const kind = r.mimeType === GSHEET ? 'Google Sheet' : (r.mimeType === XLSX ? '.xlsx (NIET bruikbaar)' : r.mimeType);
+        console.log(`\n${r.name}`);
+        console.log(`  id:     ${r.id}`);
+        console.log(`  type:   ${kind}`);
+        console.log(`  pad:    ${r.path || '(direct in de klantmap)'}`);
+        console.log(`  klant:  ${r.owner || 'GEEN match met een driveFolderId uit CLIENTS'}`);
+      } catch (e) {
+        console.log(`\n${fid}\n  FOUT: ${e.message}`);
+      }
+    }
+    console.log('');
+    return;
+  }
 
   let created = 0, skipped = 0, failed = 0;
   const discovered = {};   // clientId -> sheetId, om achteraf in CLIENTS te zetten
