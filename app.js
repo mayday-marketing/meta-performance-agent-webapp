@@ -1410,17 +1410,36 @@
     }
   }
 
+  // §4 van de design-system-briefing: een KPI-tegel zonder vergelijking mag niet.
+  // Een kaal getal is niet te beoordelen — de lezer vult dan zelf een referentie in.
+  // Daarom onderscheiden we vier toestanden in plaats van 'delta of streepje':
+  //
+  //   delta  vorige periode > 0  → pijl + percentage, semantische kleur
+  //   flat   niets veranderd     → ±0% in neutraal grijs, nooit groen
+  //   new    vorige was 0, nu >0 → 'nieuw'; groei vanaf nul is geen percentage
+  //   empty  beide periodes 0    → 'geen activiteit'; er ís gemeten, er was niets
+  //   none   geen vorige periode → 'geen vergelijking', met reden in de voetnoot
+  //
+  // `delta` en `direction` houden hun oude betekenis, zodat buildAnalysisSummary
+  // en de analyse-agent ongewijzigd blijven werken.
   function buildKpi(label, current, previous, formatter, deltaUnit) {
-    const delta = previous != null && previous > 0
-      ? deltaUnit === "pp"
-        ? (current - previous)
-        : ((current - previous) / previous) * 100
-      : null;
+    let state = "none";
+    let delta = null;
+
+    if (previous != null && previous > 0) {
+      delta = deltaUnit === "pp" ? (current - previous) : ((current - previous) / previous) * 100;
+      state = Math.abs(delta) < 0.05 ? "flat" : "delta";
+    } else if (previous === 0) {
+      // Vorige periode is gemeten en was nul — dat is iets anders dan geen data.
+      state = current > 0 ? "new" : "empty";
+    }
+
     return {
       label,
       value: formatter(current),
       delta: delta != null ? Math.abs(delta) : null,
       direction: delta == null ? null : (delta >= 0 ? "up" : "down"),
+      state,
       vs: "vs vorige periode",
       unit: deltaUnit,
       spark: [],
@@ -1529,11 +1548,22 @@
     root.innerHTML = ov.kpis.map((k, i) => {
       const cvar = kpiVars[i % kpiVars.length];
       const sparkHex = window.Charts ? Charts.cssVar(cvar, "#400745") : "#400745";
-      let deltaHtml = `<div class="delta"><span class="vs">—</span></div>`;
-      if (k.direction) {
+      // Nooit een kaal streepje: ontbrekende vergelijking is informatie, en die
+      // hoort uitgeschreven te worden in plaats van weggelaten.
+      let deltaHtml;
+      if (k.state === "delta") {
         const arrow = k.direction === "up" ? "↑" : "↓";
         const dv = k.unit === "pp" ? `${k.delta.toFixed(1)}pp` : `${k.delta.toFixed(1)}%`;
         deltaHtml = `<div class="delta ${k.direction}">${arrow} ${dv} <span class="vs">${k.vs}</span></div>`;
+      } else if (k.state === "flat") {
+        const dv = k.unit === "pp" ? "0,0pp" : "0,0%";
+        deltaHtml = `<div class="delta flat">± ${dv} <span class="vs">${k.vs}</span></div>`;
+      } else if (k.state === "empty") {
+        deltaHtml = `<div class="delta none">geen activiteit <span class="vs">in beide periodes</span></div>`;
+      } else if (k.state === "new") {
+        deltaHtml = `<div class="delta new">nieuw <span class="vs">vorige periode geen data</span></div>`;
+      } else {
+        deltaHtml = `<div class="delta none">geen vergelijking <span class="vs">vorige periode ontbreekt</span></div>`;
       }
       return `
         <div class="kpi-card">
