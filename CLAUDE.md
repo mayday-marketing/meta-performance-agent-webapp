@@ -67,6 +67,43 @@ isolation bugs (an email cache that wasn't client-keyed; a `sheetId` IDOR in
   `load-period`, `load-all`, `analysis-benchmarks`, `context`.
 - **Google Sheets** (`api/sheets.js`) — reads `Merkcontext`, appends analysis
   history. Sheet is resolved from `CLIENTS[clientId].sheetId` (never the request).
+- **GA4** (`googleanalytics4` via Windsor) — omzetbron voor de ROAS-tab:
+  `purchase_revenue` per dag, totaal én per `session_source_medium`. Property-id
+  uit de Config-tab (`GA4 property`).
+
+## ROAS-tab (blended MER + kanaalsplitsing)
+
+Gemodelleerd op de handmatige "Daily ROAS"-sheet van een klant. Eigen pagina
+(`#page-roas`, nav `data-page="roas"`) met een **eigen periode** (month-to-date),
+los van de dashboardperiode in de topbar.
+
+- **`api/_channels.js`** — registry van betaalde kanalen: groep (`social`/`search`),
+  Windsor-connector-slug, spend-/omzetveld en een regex om het kanaal in GA4's
+  `session_source_medium` te herkennen. **Een kanaal verschijnt zodra er een
+  account-id voor in de Config-tab staat** — nieuwe kanalen (TikTok, Bing, …)
+  vergen geen codewijziging, alleen een regel in de sheet.
+- **`api/windsor.js` action `getRoas`** — haalt per periode GA4-totalen, de GA4-
+  uitsplitsing per source/medium en elk actief kanaal op campagne-niveau op. Doet
+  dat twee keer (huidige periode + dezelfde periode vorig jaar).
+- **Twee omzetdefinities, nooit opgeteld:** GA4-omzet (last click, één meetlat,
+  telt niet dubbel) en platform-omzet (wat het kanaal zelf claimt, inclusief
+  view-through). De UI toont ze naast elkaar en waarschuwt als ze aan weerszijden
+  van de break-even-drempel uitkomen. **Welke van de twee het oordeel bepaalt**
+  staat per klant in de Config-tab onder `Oordeel op` (`GA4` of `Platform`,
+  default GA4); de toggle in de tab overschrijft dat voor de sessie
+  (`state.roasRevenueMode = null` betekent 'volg de config').
+- **Break-even** = `(1 − korting) / (brutomarge − korting)` per kortingswave.
+  Brutomarge + kortingen staan in de Config-tab (`Brutomarge`, `Korting wave 1..4`,
+  `Actieve wave`, of `Minimum ROAS` als directe override) en zijn in de tab live
+  te overschrijven voor scenario's — die overschrijving wordt **niet** bewaard.
+- **Alleen `facebook` heeft geverifieerde veldnamen.** Voor niet-gekoppelde
+  connectors staan kandidaat-omzetvelden in de registry; wijst Windsor er één af,
+  dan valt `fetchChannel` terug op alleen spend (`platformRevenueAvailable:false`)
+  en blijft de GA4-ROAS staan. Campagnes van zo'n kanaal krijgen **geen** oordeel —
+  een ROAS van 0 zou anders 'uitzetten' opleveren terwijl er niets gemeten is.
+- **Isolatie:** elke nieuwe connector-slug hoort in `ACCOUNT_ID_CONNECTORS` in
+  `windsor.js`. Ontbreekt hij daar, dan geldt de fail-closed-regel niet en geeft een
+  niet-geconfigureerde connector álle klanten terug.
 
 ## The two AI agents (know which prompt serves which consumer)
 

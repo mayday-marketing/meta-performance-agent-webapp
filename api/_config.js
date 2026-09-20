@@ -77,6 +77,14 @@ function okRatio(v) {
   return n > 0 && n < 1000 ? Math.round(n * 100) / 100 : null;
 }
 
+// 'GA4', 'ga4-omzet', 'Platform', 'platform-omzet' → 'ga4' | 'platform'.
+function okVerdictSource(v) {
+  const s = String(v).toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.startsWith('ga4') || s.startsWith('analytics')) return 'ga4';
+  if (s.startsWith('platform') || s.startsWith('kanaal')) return 'platform';
+  return null;
+}
+
 function okHttpsUrl(v, hosts) {
   try {
     const u = new URL(String(v).trim());
@@ -126,6 +134,12 @@ const CONFIG_FIELDS = {
   kortingwave4:  { path: 'roas.wave4',       check: okPercent },
   actievewave:   { path: 'roas.activeWave',  check: v => /^(full|wave ?[1-4])$/i.test(String(v).trim()) ? String(v).trim().toLowerCase().replace(/\s+/g, '') : null },
   minimumroas:   { path: 'roas.minRoas',     check: okRatio },
+  // Welke omzetdefinitie het oordeel (uitzetten/bijsturen/schalen) bepaalt.
+  // Per klant instelbaar omdat het antwoord afhangt van de kwaliteit van de
+  // tracking: met sluitende server-side tracking is GA4 betrouwbaar, zonder
+  // consent-mode-dekking onderschat GA4 structureel en is platform realistischer.
+  // De toggle in de ROAS-tab blijft altijd beschikbaar; dit zet alleen de default.
+  oordeelop:     { path: 'roas.verdictSource', check: okVerdictSource },
 };
 
 /**

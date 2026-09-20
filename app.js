@@ -61,6 +61,17 @@
     emailKey: null,                   // periodeKey waarvoor email geladen is (lazy refresh)
     emailOverlays: { open: true, click: false, revenue: true, rev_rcpt: false }, // aan/uit overlay-lijnen
     emailSort: { key: null, dir: "desc" }, // sorteer-state e-mailtabellen (null = default per tabel)
+    // ROAS-tab — eigen periode (month-to-date), los van de dashboardperiode.
+    roas: null,                       // getRoas-respons: { current, previous, channels, targets, ... }
+    roasLoading: false,
+    roasError: null,
+    roasKey: null,                    // klant+periode waarvoor roas geladen is (lazy refresh)
+    roasPeriod: "mtd",                // 'mtd' | 'prevmonth' | '30d'
+    roasRevenueMode: null,            // omzetdefinitie voor kaarten + oordeel; null = volg 'Oordeel op' uit de Config-tab
+    // Live overschrijving van de break-even-parameters uit de Config-tab. null =
+    // configwaarde gebruiken. Bewust niet in sessionStorage: dit is een scenario,
+    // geen instelling.
+    roasInputs: { grossMargin: null, wave1: null, wave2: null, wave3: null, wave4: null, activeWave: null },
   };
 
   /* ---------- Session persistence ---------- */
@@ -274,6 +285,12 @@
     state.emailKey = null;
     state.emailError = null;
     state.emailLoading = false;
+    state.roas = null;
+    state.roasKey = null;
+    state.roasError = null;
+    state.roasLoading = false;
+    state.roasInputs = { grossMargin: null, wave1: null, wave2: null, wave3: null, wave4: null, activeWave: null };
+    state.roasRevenueMode = null;
     state.chatMessages = [];
     dashboardInited = false;
     $("#brand-input").value = "";
@@ -426,6 +443,7 @@
       library:     { title: "Library",     crumbs: ["Dashboard", "Library"] },
       analysis:    { title: "Analysis",    crumbs: ["Dashboard", "Analysis"] },
       email:       { title: "E-mail",      crumbs: ["Dashboard", "E-mail"] },
+      roas:        { title: "ROAS",        crumbs: ["Dashboard", "ROAS"] },
       methodology: { title: "Methodology", crumbs: ["Dashboard", "Methodology"] },
     };
     const t = titles[page] || titles.overview;
@@ -435,6 +453,9 @@
     ).join("");
     // E-mail wordt lui geladen bij het eerste bezoek (en opnieuw na periode-wissel).
     if (page === "email" && typeof refreshEmail === "function") refreshEmail();
+    // ROAS heeft een eigen periode (month-to-date) en wordt daarom niet door de
+    // dashboard-periodewissel ververst, alleen bij het eerste bezoek.
+    if (page === "roas" && typeof roasFetch === "function") roasFetch();
   }
 
   // Spring vanuit de Analyse naar een specifieke advertentie in de Library: filter op
@@ -2964,6 +2985,679 @@
         <div class="panel-header"><div><h2 class="panel-title">Verzonden broadcasts</h2><div class="panel-sub">${broadcasts.length} in deze periode · klik een kolom om te sorteren</div></div></div>
         ${broadcasts.length ? renderEmailTable(broadcasts, bcCols, "date") : `<p class="muted" style="margin:0;">Geen broadcasts in deze periode.</p>`}
       </section>`;
+  }
+
+  /* ---------- ROAS (blended MER + per betaald kanaal, via Windsor) ----------
+     Deze tab heeft bewust een EIGEN periodekiezer: ROAS wordt per kalendermaand
+     opgevolgd (month-to-date), niet over de vrije dashboardperiode. De
+     vergelijking is standaard dezelfde periode vorig jaar — dezelfde opzet als de
+     MTD-kolommen in de WOODY-sheet waar deze tab op gemodelleerd is.
+
+     Twee ROAS-definities staan naast elkaar, nooit opgeteld:
+       GA4-ROAS      = GA4 purchase_revenue (last click) / spend
+       platform-ROAS = door het kanaal zelf geclaimde omzet / spend
+     De blended ROAS (MER) is totale webshopomzet / totale advertentiekosten. */
+
+  const ROAS_PERIODS = [
+    { key: "mtd", label: "Deze maand" },
+    { key: "prevmonth", label: "Vorige maand" },
+    { key: "30d", label: "30 dagen" },
+  ];
+
+  const MONTHS_NL = ["januari", "februari", "maart", "april", "mei", "juni",
+    "juli", "augustus", "september", "oktober", "november", "december"];
+
+  // Datums als string opbouwen i.p.v. via toISOString(): een lokale middernacht
+  // valt in UTC+2 op de dág ervoor, wat de MTD-grens een dag zou verschuiven.
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const ymd = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
+  const lastDayOf = (y, m) => new Date(y, m + 1, 0).getDate();
+
+  function roasRange(key) {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    if (key === "prevmonth") {
+      const py = m === 0 ? y - 1 : y, pm = m === 0 ? 11 : m - 1;
+      return { start: ymd(py, pm, 1), end: ymd(py, pm, lastDayOf(py, pm)), label: `${MONTHS_NL[pm]} ${py}` };
+    }
+    if (key === "30d") {
+      const s = new Date(y, m, d - 29, 12);
+      return {
+        start: ymd(s.getFullYear(), s.getMonth(), s.getDate()),
+        end: ymd(y, m, d),
+        label: "laatste 30 dagen",
+      };
+    }
+    return { start: ymd(y, m, 1), end: ymd(y, m, d), label: `1–${d} ${MONTHS_NL[m]} ${y}` };
+  }
+
+  // Zelfde dagen, één jaar eerder. 29 februari bestaat niet elk jaar → terugvallen
+  // op de laatste dag van die maand i.p.v. stil doorschuiven naar 1 maart.
+  function roasCompareRange(range) {
+    const shift = (iso) => {
+      const [y, m, d] = iso.split("-").map(Number);
+      const py = y - 1, pm = m - 1;
+      return ymd(py, pm, Math.min(d, lastDayOf(py, pm)));
+    };
+    return { start: shift(range.start), end: shift(range.end) };
+  }
+
+  function roasFetch() {
+    if (!state.session) return;
+    const range = roasRange(state.roasPeriod);
+    const cmp = roasCompareRange(range);
+    const key = `${state.session.clientId}|${state.roasPeriod}|${range.start}|${range.end}`;
+    if (state.roasLoading) return;
+    if (state.roas && state.roasKey === key) { renderRoas(); return; }
+    if (!state.session.hasWindsor) { renderRoas(); return; }
+
+    state.roasLoading = true;
+    state.roasError = null;
+    state.roas = null;
+    state.roasKey = key;
+    renderRoas();
+
+    windsorCall("getRoas", {
+      startDate: range.start, endDate: range.end,
+      compareStartDate: cmp.start, compareEndDate: cmp.end,
+    })
+      .then((res) => {
+        if (state.roasKey !== key) return; // periode gewisseld tijdens fetch
+        state.roas = res;
+        state.roasLoading = false;
+        renderRoas();
+      })
+      .catch((err) => {
+        if (state.roasKey !== key) return;
+        state.roasLoading = false;
+        state.roasError = err.message || "Onbekende fout bij laden ROAS-data.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderRoas();
+      });
+  }
+  window.__refreshRoas = () => { state.roas = null; state.roasKey = null; roasFetch(); };
+  window.__roasPeriod = (k) => { state.roasPeriod = k; roasFetch(); };
+
+  /* ---------- Break-even ---------- */
+
+  // Effectieve break-even-parameters: Config-tab als basis, live invoer van de
+  // gebruiker daarbovenop. De live waarden blijven in het geheugen van deze sessie
+  // (scenario's doorrekenen) en worden niet naar de sheet teruggeschreven.
+  function roasParams() {
+    const cfg = state.roas?.roasConfig || {};
+    const o = state.roasInputs;
+    const val = (k) => (o[k] != null ? o[k] : (typeof cfg[k] === "number" ? cfg[k] : null));
+    return {
+      grossMargin: val("grossMargin"),
+      wave1: val("wave1"), wave2: val("wave2"), wave3: val("wave3"), wave4: val("wave4"),
+      activeWave: o.activeWave || cfg.activeWave || "full",
+      minRoasOverride: typeof cfg.minRoas === "number" ? cfg.minRoas : null,
+      fromConfig: {
+        grossMargin: typeof cfg.grossMargin === "number",
+        waves: ["wave1", "wave2", "wave3", "wave4"].some(k => typeof cfg[k] === "number"),
+      },
+    };
+  }
+
+  // Break-even ROAS = (1 − korting) / (brutomarge − korting). Zelfde formule als
+  // server-side in _config.js roasTargets(); hier client-side herhaald zodat de
+  // live invoer meteen doorrekent zonder round-trip.
+  function roasWaves(p) {
+    const m = p.grossMargin;
+    if (m == null) return [];
+    const defs = [
+      { key: "full", label: "Full price", discount: 0 },
+      { key: "wave1", label: "Wave 1", discount: p.wave1 },
+      { key: "wave2", label: "Wave 2", discount: p.wave2 },
+      { key: "wave3", label: "Wave 3", discount: p.wave3 },
+      { key: "wave4", label: "Wave 4", discount: p.wave4 },
+    ];
+    return defs.filter(w => typeof w.discount === "number").map(w => {
+      const margin = m - w.discount;
+      return {
+        ...w,
+        netMargin: margin,
+        breakEven: margin > 0 ? (1 - w.discount) / margin : null,
+        loss: margin <= 0,
+      };
+    });
+  }
+
+  // De drempel waartegen kanalen en campagnes beoordeeld worden: 'Minimum ROAS'
+  // uit de Config-tab wint, anders de break-even van de actieve wave.
+  function roasMinTarget() {
+    const p = roasParams();
+    if (p.minRoasOverride) return { value: p.minRoasOverride, source: "Minimum ROAS (Config-tab)" };
+    const waves = roasWaves(p);
+    const active = waves.find(w => w.key === p.activeWave) || waves[0];
+    if (!active) return { value: null, source: null };
+    if (active.loss) return { value: null, source: `${active.label} — geen marge over`, loss: true };
+    return { value: active.breakEven, source: `Break-even ${active.label}` };
+  }
+
+  window.__roasInput = (field, raw) => {
+    const s = String(raw).replace("%", "").replace(",", ".").trim();
+    if (s === "") { state.roasInputs[field] = null; renderRoas(); return; }
+    let n = parseFloat(s);
+    if (!isFinite(n)) return;
+    if (n > 1) n = n / 100;
+    state.roasInputs[field] = Math.max(0, Math.min(1, n));
+    renderRoas();
+  };
+  window.__roasWave = (k) => { state.roasInputs.activeWave = k; renderRoas(); };
+  window.__roasResetInputs = () => {
+    state.roasInputs = { grossMargin: null, wave1: null, wave2: null, wave3: null, wave4: null, activeWave: null };
+    renderRoas();
+  };
+  // Actieve omzetdefinitie: een expliciete keuze van de gebruiker wint, anders
+  // 'Oordeel op' uit de Config-tab, anders GA4. Per klant instelbaar omdat het
+  // antwoord afhangt van de trackingkwaliteit — zie renderRoasFootnote().
+  function roasMode() {
+    return state.roasRevenueMode || state.roas?.roasConfig?.verdictSource || "ga4";
+  }
+  function roasConfigMode() { return state.roas?.roasConfig?.verdictSource || null; }
+
+  window.__roasRevenueMode = (m) => { state.roasRevenueMode = m; renderRoas(); };
+
+  /* ---------- Formatters + verdict ---------- */
+
+  const roasFmt = {
+    eur: (n) => "€ " + Math.round(n || 0).toLocaleString("nl-NL"),
+    ratio: (n) => (n == null || !isFinite(n)) ? "—" : n.toFixed(2).replace(".", ",") + "×",
+    pct: (n) => (n == null || !isFinite(n)) ? "—" : (n * 100).toFixed(0) + "%",
+    delta: (cur, prev) => {
+      if (prev == null || !isFinite(prev) || prev === 0 || cur == null || !isFinite(cur)) return null;
+      return (cur - prev) / prev;
+    },
+  };
+
+  // Zowel spend als omzet moeten een getal zijn: ontbrekende platformomzet (null)
+  // gedeeld door spend gaf eerder 0,00× — wat 'niets verdiend' suggereert terwijl
+  // we simpelweg niets meten.
+  const safeRoas = (rev, spend) => (spend > 0 && rev != null && isFinite(rev) ? rev / spend : null);
+
+  // Oordeel t.o.v. de minimum-ROAS. De marges rond de drempel zijn bewust ruim:
+  // onder 0,8× break-even is het verlies structureel, boven 1,3× is er ruimte om
+  // te schalen. Daartussen is bijsturen zinvoller dan aan/uit zetten.
+  function roasVerdict(roas, minRoas, spend, minSpend) {
+    if (spend < minSpend) return { key: "nodata", label: "Te weinig spend", tone: "mute", advice: "Nog geen oordeel — te weinig besteed om betrouwbaar te meten." };
+    if (roas == null) return { key: "nodata", label: "Geen data", tone: "mute", advice: "Geen omzet gemeten op dit kanaal." };
+    if (minRoas == null) return { key: "unknown", label: "Geen doel", tone: "mute", advice: "Vul brutomarge in om een break-even te berekenen." };
+    if (roas < minRoas * 0.8) return { key: "off", label: "Uitzetten", tone: "bad", advice: "Structureel onder break-even — pauzeren of grondig herzien." };
+    if (roas < minRoas) return { key: "fix", label: "Bijsturen", tone: "warn", advice: "Net onder break-even — bied, doelgroep of creatie bijstellen." };
+    if (roas > minRoas * 1.3) return { key: "scale", label: "Schalen", tone: "good", advice: "Ruim boven break-even — budget verhogen kan uit." };
+    return { key: "hold", label: "Houden", tone: "ok", advice: "Boven break-even, maar zonder marge om te schalen." };
+  }
+
+  function roasBadge(v) {
+    const colors = {
+      good: "background:rgba(47,143,95,0.16); color:var(--good);",
+      ok: "background:var(--surface-strong); color:var(--text);",
+      warn: "background:rgba(214,158,46,0.18); color:#8a6d1f;",
+      bad: "background:rgba(192,57,43,0.14); color:#c0392b;",
+      mute: "background:var(--surface-mute); color:var(--text-soft);",
+    };
+    return `<span class="badge" style="${colors[v.tone] || colors.mute}">${escapeHtml(v.label)}</span>`;
+  }
+
+  function roasDeltaHtml(cur, prev, label) {
+    const d = roasFmt.delta(cur, prev);
+    if (d == null) return `<div class="delta"><span class="vs">geen vergelijking</span></div>`;
+    const dir = d >= 0 ? "up" : "down";
+    return `<div class="delta ${dir}">${d >= 0 ? "↑" : "↓"} ${(Math.abs(d) * 100).toFixed(1)}% <span class="vs">${escapeHtml(label)}</span></div>`;
+  }
+
+  /* ---------- Render ---------- */
+
+  function renderRoas() {
+    const root = $("#roas-content");
+    if (!root) return;
+
+    if (!state.session?.hasWindsor) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">De ROAS-tab draait op Windsor-data. Voor deze klant is geen Windsor-koppeling geconfigureerd.</p>`);
+      return;
+    }
+    const periodBar = renderRoasPeriodBar();
+    if (state.roasLoading) {
+      root.innerHTML = periodBar + renderAnalysisEmpty(`<p class="muted" style="margin:0;">ROAS-data laden…</p>`);
+      return;
+    }
+    if (state.roasError) {
+      root.innerHTML = periodBar + renderAnalysisEmpty(`<p style="color:#c0392b; margin:0;">${escapeHtml(state.roasError)}</p>
+        <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshRoas()">Opnieuw proberen</button>`);
+      return;
+    }
+    const r = state.roas;
+    if (!r) { root.innerHTML = periodBar; return; }
+
+    if (!r.hasGa4 && (!r.channels || !r.channels.length)) {
+      root.innerHTML = periodBar + renderAnalysisEmpty(`
+        <p class="muted" style="margin:0 0 10px;">Nog geen bronnen gekoppeld voor deze tab.</p>
+        <p class="muted" style="margin:0; font-size:12px;">Zet in de <strong>Config-tab</strong> van de klantsheet minstens een <em>GA4 property</em> (voor de omzet) en één ad-account (bv. <em>Meta ad-account</em>) klaar.</p>`);
+      return;
+    }
+
+    root.innerHTML = periodBar
+      + renderRoasHero()
+      + renderRoasDailyChart()
+      + renderRoasGroup("social", "Paid social")
+      + renderRoasGroup("search", "Paid search")
+      + renderRoasBreakEven()
+      + renderRoasAdvice()
+      + renderRoasFootnote();
+  }
+
+  function renderRoasPeriodBar() {
+    const range = roasRange(state.roasPeriod);
+    const cmp = roasCompareRange(range);
+    const buttons = ROAS_PERIODS.map(p =>
+      `<button class="${p.key === state.roasPeriod ? "on" : ""}" onclick="window.__roasPeriod('${p.key}')">${escapeHtml(p.label)}</button>`
+    ).join("");
+    const modes = [
+      { key: "ga4", label: "GA4-omzet" },
+      { key: "platform", label: "Platform-omzet" },
+    ].map(m => `<button class="${m.key === roasMode() ? "on" : ""}" onclick="window.__roasRevenueMode('${m.key}')">${escapeHtml(m.label)}</button>`).join("");
+    const cfgMode = roasConfigMode();
+    const modeHint = cfgMode
+      ? (state.roasRevenueMode && state.roasRevenueMode !== cfgMode
+          ? `afwijkend van de Config-tab (daar staat ${cfgMode === "ga4" ? "GA4-omzet" : "platform-omzet"})`
+          : "standaard uit de Config-tab ('Oordeel op')")
+      : "standaard GA4 — zet 'Oordeel op' in de Config-tab om dit per klant vast te leggen";
+
+    return `<section class="panel" style="padding:14px 18px; margin-bottom:16px;">
+      <div class="roas-bar">
+        <div>
+          <div class="info-label">Periode</div>
+          <div style="font-family:var(--font-serif); font-size:20px; color:var(--text); margin-top:2px;">${escapeHtml(range.label)}</div>
+          <div class="muted" style="font-size:11px; margin-top:2px;">vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <div class="period-toggle">${buttons}</div>
+          <div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end;">
+            <div class="period-toggle" title="Bepaalt welke omzetdefinitie in de kaarten en het oordeel gebruikt wordt">${modes}</div>
+            <span class="muted" style="font-size:10px;">${escapeHtml(modeHint)}</span>
+          </div>
+          <button class="btn tiny" onclick="window.__refreshRoas()">↻ Verversen</button>
+        </div>
+      </div>
+    </section>`;
+  }
+
+  // Omzet van een kanaal volgens de actieve definitie. Platformomzet kan ontbreken
+  // (connector kent het veld niet) — dan null i.p.v. 0, zodat de ROAS '—' toont.
+  function roasRevenueOf(obj) {
+    if (roasMode() === "platform") {
+      return obj.platformRevenueAvailable === false ? null : obj.platformRevenue;
+    }
+    return obj.ga4Revenue;
+  }
+
+  function renderRoasHero() {
+    const r = state.roas;
+    const cur = r.current, prev = r.previous;
+    const min = roasMinTarget();
+
+    const totalSpend = cur.totals.spend;
+    const totalRoas = safeRoas(cur.totals.revenue, totalSpend);
+    const prevTotalRoas = prev ? safeRoas(prev.totals.revenue, prev.totals.spend) : null;
+
+    const card = (opts) => {
+      const bar = (opts.roas != null && min.value)
+        ? `<div class="roas-target-bar" title="${escapeHtml(opts.roas >= min.value ? "Boven" : "Onder")} de minimum-ROAS van ${roasFmt.ratio(min.value)}">
+             <div class="fill ${opts.roas >= min.value ? "ok" : "under"}" style="width:${Math.min(100, (opts.roas / (min.value * 1.5)) * 100).toFixed(1)}%;"></div>
+             <div class="mark" style="left:66.6%;" title="Break-even ${roasFmt.ratio(min.value)}"></div>
+           </div>
+           <div class="muted" style="font-size:10px; margin-top:4px;">drempel ${roasFmt.ratio(min.value)}</div>`
+        : `<div class="muted" style="font-size:10px; margin-top:8px;">${min.value ? "" : "geen drempel ingesteld"}</div>`;
+      return `<div class="kpi-card">
+        <div class="label"><span class="dot" style="background:var(${opts.cvar})"></span>${escapeHtml(opts.label)}</div>
+        <div class="value">${roasFmt.ratio(opts.roas)}</div>
+        ${roasDeltaHtml(opts.roas, opts.prevRoas, "vs vorig jaar")}
+        <div class="muted" style="font-size:11px; margin-top:8px;">${opts.revenue == null ? "geen omzetdata" : roasFmt.eur(opts.revenue) + " omzet"} · ${roasFmt.eur(opts.spend)} spend</div>
+        ${bar}
+      </div>`;
+    };
+
+    const groupCard = (grp, label, cvar) => {
+      const g = cur.groups[grp];
+      const pg = prev ? prev.groups[grp] : null;
+      if (!g || !g.channels.length) {
+        return `<div class="kpi-card" style="opacity:0.72;">
+          <div class="label"><span class="dot" style="background:var(--text-soft)"></span>${escapeHtml(label)}</div>
+          <div class="value" style="font-size:22px;">Niet gekoppeld</div>
+          <div class="muted" style="font-size:11px; margin-top:10px;">Geen ad-account voor dit type in de Config-tab.</div>
+        </div>`;
+      }
+      const rev = roasRevenueOf(g);
+      const prevRev = pg ? roasRevenueOf(pg) : null;
+      return card({
+        label, cvar,
+        roas: safeRoas(rev, g.spend),
+        prevRoas: pg ? safeRoas(prevRev, pg.spend) : null,
+        revenue: rev, spend: g.spend,
+      });
+    };
+
+    return `<div class="kpi-grid" style="margin-bottom:16px;">
+      ${card({
+        label: "Totale ROAS (blended)", cvar: "--kpi-1",
+        roas: totalRoas, prevRoas: prevTotalRoas,
+        revenue: cur.totals.revenue, spend: totalSpend,
+      })}
+      ${groupCard("social", "Paid social", "--kpi-2")}
+      ${groupCard("search", "Paid search", "--kpi-3")}
+    </div>`;
+  }
+
+  function renderRoasDailyChart() {
+    const cur = state.roas?.current;
+    if (!cur || !cur.daily.length || !window.Charts) return "";
+    const days = cur.daily.filter(d => d.spend > 0 || d.revenue > 0);
+    if (days.length < 2) return "";
+    const min = roasMinTarget();
+
+    const spec = {
+      width: 980, height: 260,
+      x: days.map(d => { const [y, m, dd] = d.date.split("-"); return `${Number(dd)}/${Number(m)}`; }),
+      series: [
+        { label: "Omzet", values: days.map(d => d.revenue), kind: "area", axis: "left", color: Charts.seriesColor(0) },
+        { label: "Advertentiekosten", values: days.map(d => d.spend), kind: "bar", axis: "left", color: Charts.seriesColor(1) },
+        { label: "Blended ROAS", values: days.map(d => (d.spend > 0 ? d.revenue / d.spend : 0)), kind: "line", axis: "right", color: Charts.seriesColor(2) },
+      ],
+      leftFormat: Charts.fmt.euroK,
+      rightFormat: (v) => v.toFixed(1).replace(".", ",") + "×",
+      maxXLabels: 10,
+    };
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Dagelijkse ROAS</h2>
+          <div class="panel-sub">Totale webshopomzet vs. advertentiekosten per dag${min.value ? ` · drempel ${roasFmt.ratio(min.value)}` : ""}</div>
+        </div>
+      </div>
+      ${chartSvg(spec)}
+    </section>`;
+  }
+
+  function renderRoasGroup(grp, title) {
+    const r = state.roas;
+    const cur = r.current, prev = r.previous;
+    const chans = (r.channels || []).filter(c => c.group === grp);
+    const pend = (r.pending || []).filter(c => c.group === grp);
+    const g = cur.groups[grp];
+    const min = roasMinTarget();
+
+    const pendLine = pend.length
+      ? `<div class="muted" style="font-size:11px; margin-top:12px;">Nog niet gekoppeld: ${pend.map(c => escapeHtml(c.label)).join(" · ")} — voeg het ad-account toe in de Config-tab en het kanaal verschijnt hier automatisch.</div>`
+      : "";
+
+    if (!chans.length) {
+      return `<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">${escapeHtml(title)}</h2>
+          <div class="panel-sub">Geen kanaal van dit type gekoppeld</div>
+        </div></div>
+        ${pendLine}
+      </section>`;
+    }
+
+    // Eén rij per kanaal + een restregel voor betaalde GA4-omzet die geen enkel
+    // kanaal matcht (verkeerd getagde UTM's, of een platform zonder connector).
+    const rows = chans.map(c => {
+      const d = cur.channels[c.key] || {};
+      const pd = prev ? (prev.channels[c.key] || {}) : null;
+      const ga4Roas = safeRoas(d.ga4Revenue, d.spend);
+      const platRoas = d.platformRevenueAvailable === false ? null : safeRoas(d.platformRevenue, d.spend);
+      const activeRoas = safeRoas(roasRevenueOf(d), d.spend);
+      const prevRoas = pd ? safeRoas(roasRevenueOf(pd), pd.spend) : null;
+      const verdict = roasVerdict(activeRoas, min.value, d.spend, 25);
+      const delta = roasFmt.delta(activeRoas, prevRoas);
+      const warn = d.error
+        ? `<div class="muted" style="font-size:10px; color:#c0392b;">${escapeHtml(d.error)}</div>`
+        : (d.degradedReason ? `<div class="muted" style="font-size:10px;">Platformomzet niet beschikbaar voor deze connector.</div>` : "");
+      // De twee attributiebronnen kunnen aan wéérszijden van de drempel uitkomen.
+      // Dat is geen detail: het bepaalt of je dit kanaal uitzet of opschaalt, dus
+      // vermelden we het expliciet in plaats van de actieve definitie te laten winnen.
+      const split = (min.value && ga4Roas != null && platRoas != null
+        && (ga4Roas < min.value) !== (platRoas < min.value))
+        ? `<div class="muted" style="font-size:10px;">⚠ GA4 en het platform zijn het oneens over de drempel — beslis niet op één bron.</div>`
+        : "";
+      return `<tr>
+        <td><strong>${escapeHtml(c.label)}</strong>${c.verified ? "" : ` <span class="muted" style="font-size:10px;">(velden nog te bevestigen)</span>`}${warn}${split}</td>
+        <td class="right">${roasFmt.eur(d.spend)}</td>
+        <td class="right">${roasFmt.eur(d.ga4Revenue)}</td>
+        <td class="right"><strong>${roasFmt.ratio(ga4Roas)}</strong></td>
+        <td class="right">${d.platformRevenueAvailable === false ? "—" : roasFmt.eur(d.platformRevenue)}</td>
+        <td class="right">${roasFmt.ratio(platRoas)}</td>
+        <td class="right">${delta == null ? "—" : `<span class="${delta >= 0 ? "delta up" : "delta down"}" style="display:inline;">${delta >= 0 ? "↑" : "↓"} ${(Math.abs(delta) * 100).toFixed(0)}%</span>`}</td>
+        <td class="right">${roasBadge(verdict)}</td>
+      </tr>`;
+    }).join("");
+
+    const rest = g.unmatchedGa4Revenue > 0
+      ? `<tr style="opacity:0.7;">
+          <td>Overig betaald verkeer<div class="muted" style="font-size:10px;">GA4-omzet in deze channel group die aan geen gekoppeld kanaal toegewezen kon worden.</div></td>
+          <td class="right">—</td>
+          <td class="right">${roasFmt.eur(g.unmatchedGa4Revenue)}</td>
+          <td class="right">—</td><td class="right">—</td><td class="right">—</td><td class="right">—</td><td class="right">—</td>
+        </tr>`
+      : "";
+
+    const groupRev = roasRevenueOf(g);
+    const total = `<tr style="border-top:2px solid var(--border); font-weight:600;">
+      <td>Totaal ${escapeHtml(title.toLowerCase())}</td>
+      <td class="right">${roasFmt.eur(g.spend)}</td>
+      <td class="right">${roasFmt.eur(g.ga4Revenue)}</td>
+      <td class="right">${roasFmt.ratio(safeRoas(g.ga4Revenue, g.spend))}</td>
+      <td class="right">${g.platformRevenueAvailable === false ? "—" : roasFmt.eur(g.platformRevenue)}</td>
+      <td class="right">${g.platformRevenueAvailable === false ? "—" : roasFmt.ratio(safeRoas(g.platformRevenue, g.spend))}</td>
+      <td class="right">—</td>
+      <td class="right">${roasBadge(roasVerdict(safeRoas(groupRev, g.spend), min.value, g.spend, 25))}</td>
+    </tr>`;
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">${escapeHtml(title)}</h2>
+        <div class="panel-sub">${chans.length} kanaal${chans.length === 1 ? "" : "en"} · oordeel op ${roasMode() === "platform" ? "platform-omzet" : "GA4-omzet"} t.o.v. ${escapeHtml(min.source || "geen drempel")}</div>
+      </div></div>
+      <div class="lib-table"><table>
+        <thead><tr>
+          <th>Kanaal</th>
+          <th class="right">Spend</th>
+          <th class="right">GA4-omzet</th>
+          <th class="right">GA4-ROAS</th>
+          <th class="right">Platform-omzet</th>
+          <th class="right">Platform-ROAS</th>
+          <th class="right">vs vorig jaar</th>
+          <th class="right">Oordeel</th>
+        </tr></thead>
+        <tbody>${rows}${rest}${total}</tbody>
+      </table></div>
+      ${pendLine}
+    </section>`;
+  }
+
+  function renderRoasBreakEven() {
+    const p = roasParams();
+    const waves = roasWaves(p);
+    const min = roasMinTarget();
+    const cfg = state.roas?.roasConfig || {};
+    const edited = Object.entries(state.roasInputs).some(([k, v]) => v != null);
+
+    const field = (key, label) => {
+      const v = state.roasInputs[key] != null ? state.roasInputs[key] : (typeof cfg[key] === "number" ? cfg[key] : null);
+      const shown = v == null ? "" : String(Math.round(v * 1000) / 10).replace(".", ",");
+      return `<label class="roas-field">
+        <span>${escapeHtml(label)}</span>
+        <span class="roas-input"><input type="text" inputmode="decimal" value="${escapeHtml(shown)}" placeholder="—"
+          onchange="window.__roasInput('${key}', this.value)"><span class="suffix">%</span></span>
+      </label>`;
+    };
+
+    const waveRows = waves.map(w => `<tr class="${w.key === p.activeWave ? "on" : ""}" onclick="window.__roasWave('${w.key}')" style="cursor:pointer;">
+        <td><input type="radio" ${w.key === p.activeWave ? "checked" : ""} onclick="window.__roasWave('${w.key}')"> ${escapeHtml(w.label)}</td>
+        <td class="right">${roasFmt.pct(w.discount)}</td>
+        <td class="right">${roasFmt.pct(w.netMargin)}</td>
+        <td class="right"><strong>${w.loss ? "verlies" : roasFmt.ratio(w.breakEven)}</strong></td>
+      </tr>`).join("");
+
+    const body = waves.length
+      ? `<div class="lib-table" style="margin-top:14px;"><table>
+          <thead><tr><th>Wave</th><th class="right">Korting</th><th class="right">Marge na korting</th><th class="right">Break-even ROAS</th></tr></thead>
+          <tbody>${waveRows}</tbody>
+        </table></div>
+        <p class="muted" style="font-size:11px; margin:12px 0 0;">
+          Break-even = (1 − korting) / (brutomarge − korting). Bij een korting gelijk aan of groter dan de
+          brutomarge blijft er geen marge over om advertenties uit te betalen — dan is er geen haalbare ROAS.
+        </p>`
+      : `<p class="muted" style="margin:14px 0 0;">Vul een brutomarge in (of zet <strong>Brutomarge</strong> in de Config-tab) om de break-even-ROAS per wave te berekenen.</p>`;
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Break-even ROAS</h2>
+          <div class="panel-sub">${p.fromConfig.grossMargin ? "Basis uit de Config-tab" : "Nog niets in de Config-tab"}${edited ? " · aangepast voor dit scenario" : ""}</div>
+        </div>
+        ${edited ? `<button class="btn tiny" onclick="window.__roasResetInputs()">↺ Terug naar Config</button>` : ""}
+      </div>
+      <div class="roas-fields">
+        ${field("grossMargin", "Brutomarge")}
+        ${field("wave1", "Korting wave 1")}
+        ${field("wave2", "Korting wave 2")}
+        ${field("wave3", "Korting wave 3")}
+        ${field("wave4", "Korting wave 4")}
+      </div>
+      ${body}
+      ${min.value ? `<div class="roas-target-note">Actieve drempel: <strong>${roasFmt.ratio(min.value)}</strong> — ${escapeHtml(min.source)}</div>` : ""}
+    </section>`;
+  }
+
+  /* ---------- Advies per campagne ---------- */
+
+  // GA4 kan omzet niet per campagne toewijzen zonder sluitende UTM-tagging, dus
+  // campagnes worden beoordeeld op platformomzet. Die claimt structureel meer dan
+  // GA4 meet; we schalen hem daarom met de verhouding GA4/platform van het kanaal
+  // zélf, zodat de campagne-ROAS op dezelfde meetlat ligt als de break-even.
+  function roasCampaignRows() {
+    const r = state.roas;
+    if (!r?.current) return [];
+    const min = roasMinTarget();
+    const out = [];
+    for (const c of (r.channels || [])) {
+      const d = r.current.channels[c.key];
+      if (!d || !d.campaigns?.length) continue;
+      // Zonder omzetveld van de connector is er per campagne géén omzet bekend.
+      // Een ROAS van 0 zou dan 'uitzetten' opleveren terwijl we simpelweg niets
+      // meten — die campagnes krijgen expliciet geen oordeel.
+      const noRevenue = d.platformRevenueAvailable === false;
+      const ratio = (!noRevenue && d.platformRevenue > 0) ? d.ga4Revenue / d.platformRevenue : null;
+      for (const camp of d.campaigns) {
+        const platRoas = noRevenue ? null : safeRoas(camp.platformRevenue, camp.spend);
+        const corrected = (platRoas != null && ratio != null) ? platRoas * ratio : null;
+        const judged = corrected != null ? corrected : platRoas;
+        out.push({
+          channel: c.label, group: c.group, name: camp.name,
+          spend: camp.spend,
+          platformRevenue: noRevenue ? null : camp.platformRevenue,
+          platRoas, corrected, judged, ratio, noRevenue,
+          verdict: noRevenue
+            ? { key: "norevenue", label: "Geen omzetdata", tone: "mute", advice: `Deze connector levert geen omzet per campagne — beoordeel ${c.label} op kanaalniveau.` }
+            : roasVerdict(judged, min.value, camp.spend, 25),
+        });
+      }
+    }
+    return out.sort((a, b) => b.spend - a.spend);
+  }
+
+  function renderRoasAdvice() {
+    const rows = roasCampaignRows();
+    const min = roasMinTarget();
+    if (!rows.length) {
+      return `<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Advies per campagne</h2>
+          <div class="panel-sub">Geen campagnedata in deze periode</div>
+        </div></div>
+      </section>`;
+    }
+
+    const order = { off: 0, fix: 1, hold: 2, scale: 3, nodata: 4, norevenue: 5, unknown: 6 };
+    const sorted = [...rows].sort((a, b) => (order[a.verdict.key] - order[b.verdict.key]) || (b.spend - a.spend));
+
+    const counts = sorted.reduce((acc, x) => { acc[x.verdict.key] = (acc[x.verdict.key] || 0) + 1; return acc; }, {});
+    const wasted = sorted.filter(x => x.verdict.key === "off").reduce((s, x) => s + x.spend, 0);
+
+    const summary = min.value
+      ? `<div class="roas-advice-summary">
+          <div><strong>${counts.off || 0}</strong> uitzetten · <strong>${counts.fix || 0}</strong> bijsturen · <strong>${counts.scale || 0}</strong> schalen</div>
+          ${wasted > 0 ? `<div class="muted">${roasFmt.eur(wasted)} spend zit in campagnes onder 0,8× de drempel.</div>` : ""}
+        </div>`
+      : `<div class="roas-advice-summary"><div class="muted">Vul een brutomarge in om campagnes tegen een break-even te beoordelen.</div></div>`;
+
+    const body = sorted.map(x => `<tr${x.noRevenue ? ' style="opacity:0.72;"' : ''}>
+      <td><strong>${escapeHtml(x.name)}</strong><div class="muted" style="font-size:10px;">${escapeHtml(x.channel)}</div></td>
+      <td class="right">${roasFmt.eur(x.spend)}</td>
+      <td class="right">${x.noRevenue ? "—" : roasFmt.eur(x.platformRevenue)}</td>
+      <td class="right">${roasFmt.ratio(x.platRoas)}</td>
+      <td class="right"><strong>${roasFmt.ratio(x.corrected)}</strong></td>
+      <td class="right">${roasBadge(x.verdict)}</td>
+      <td class="muted" style="font-size:11px;">${escapeHtml(x.verdict.advice)}</td>
+    </tr>`).join("");
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Advies per campagne</h2>
+        <div class="panel-sub">Beoordeeld tegen ${escapeHtml(min.source || "geen drempel")}${min.value ? ` (${roasFmt.ratio(min.value)})` : ""}</div>
+      </div></div>
+      ${summary}
+      <div class="lib-table" style="margin-top:12px;"><table>
+        <thead><tr>
+          <th>Campagne</th>
+          <th class="right">Spend</th>
+          <th class="right">Platform-omzet</th>
+          <th class="right">Platform-ROAS</th>
+          <th class="right">Gecorrigeerd</th>
+          <th class="right">Oordeel</th>
+          <th>Waarom</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table></div>
+      <p class="muted" style="font-size:11px; margin:12px 0 0;">
+        Campagnes worden op platformomzet beoordeeld — GA4 kan omzet niet per campagne toewijzen zonder sluitende
+        UTM-tagging. De kolom <em>Gecorrigeerd</em> schaalt de platform-ROAS met de GA4/platform-verhouding van het
+        kanaal, zodat hij op dezelfde meetlat ligt als de break-even. Campagnes onder ${roasFmt.eur(25)} spend krijgen
+        geen oordeel.
+      </p>
+    </section>`;
+  }
+
+  function renderRoasFootnote() {
+    const r = state.roas;
+    const errs = [];
+    if (r.current?.errors?.ga4Totals) errs.push(`GA4-totalen: ${r.current.errors.ga4Totals}`);
+    if (r.current?.errors?.ga4Split) errs.push(`GA4-uitsplitsing: ${r.current.errors.ga4Split}`);
+    if (r.previousError) errs.push(`Vergelijkingsperiode: ${r.previousError}`);
+    if (!r.hasGa4) errs.push("Geen GA4-property in de Config-tab — zonder GA4 is er geen blended omzet en geen GA4-ROAS.");
+
+    const errHtml = errs.length
+      ? `<div style="margin-top:10px; font-size:11px; color:#c0392b;">${errs.map(e => escapeHtml(e)).join("<br>")}</div>`
+      : "";
+
+    return `<section class="panel">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Hoe deze cijfers berekend zijn</h2>
+        <div class="panel-sub">Zodat het oordeel navolgbaar blijft</div>
+      </div></div>
+      <ul class="roas-notes">
+        <li><strong>Totale ROAS (blended)</strong> = alle webshopomzet uit GA4 gedeeld door álle advertentiekosten samen. Ook omzet uit organisch, e-mail en direct zit erin: dit is de MER, geen kanaalprestatie.</li>
+        <li><strong>GA4-ROAS per kanaal</strong> = GA4-omzet op last-click-basis gedeeld door de spend van dat kanaal. Eén meetlat voor alle kanalen; telt niet dubbel.</li>
+        <li><strong>Platform-ROAS</strong> = de omzet die het platform zelf claimt. Inclusief view-through en een eigen attributievenster, dus structureel hoger. Kanalen claimen dezelfde sale: optellen mag niet.</li>
+        <li><strong>Break-even</strong> = (1 − korting) / (brutomarge − korting), per kortingswave. De actieve wave bepaalt de drempel voor het oordeel.</li>
+        <li><strong>Welke omzet het oordeel bepaalt</strong> staat per klant in de Config-tab onder <strong>Oordeel op</strong> (<em>GA4</em> of <em>Platform</em>). Met sluitende server-side tracking is GA4 betrouwbaar; zonder goede consent-dekking onderschat GA4 en is platform realistischer. De toggle bovenaan overschrijft dit voor deze sessie.</li>
+        <li>Een kanaal verschijnt zodra het bijbehorende ad-account in de <strong>Config-tab</strong> van de klantsheet staat.</li>
+      </ul>
+      ${errHtml}
+    </section>`;
   }
 
   /* ---------- Chat panel (mock, stap 6) ---------- */
