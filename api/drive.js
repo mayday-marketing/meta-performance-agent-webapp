@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { getAccessToken: googleAccessToken } = require('./_config');
+const { getAccessToken: googleAccessToken, captureOidcToken } = require('./_config');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -151,6 +151,7 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
+  captureOidcToken(req);   // OIDC-token uit de request-header (zie _config.js)
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   const { clientId, token, action, period } = req.query || {};

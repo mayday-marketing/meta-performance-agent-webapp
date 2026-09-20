@@ -31,7 +31,7 @@
    ========================================================== */
 
 const crypto = require('crypto');
-const { getClientConfig } = require('./_config');
+const { getClientConfig, captureOidcToken } = require('./_config');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -245,6 +245,7 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
+  captureOidcToken(req);   // OIDC-token uit de request-header (zie _config.js)
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { action, clientId, token, keywords: reqKeywords, force } = req.body || {};

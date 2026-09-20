@@ -381,10 +381,27 @@ const IAM_CREDENTIALS = 'https://iamcredentials.googleapis.com/v1';
 // een minuut marge zodat een token niet halverwege een reeks calls verloopt.
 const tokenCache = new Map(); // scope -> { token, exp }
 
+/* Waar het OIDC-token vandaan komt, verschilt per omgeving (geverifieerd in de
+   Vercel-documentatie en aan den lijve): in een draaiende Function zit het in de
+   header `x-vercel-oidc-token` van het request, in een build en lokaal
+   (`vercel env pull`) in de env var VERCEL_OIDC_TOKEN. Alleen naar de env var
+   kijken betekent dus: lokaal werkt de federatie, in productie stilletjes niet.
+
+   Elke handler die uiteindelijk bij Google uitkomt geeft het request hier even
+   door. Het token leeft twee uur en Vercel hergebruikt het tot 90 minuten, dus
+   het bewaren tussen aanroepen van dezelfde warme instantie is prima. */
+let runtimeOidcToken = null;
+
+function captureOidcToken(req) {
+  const h = req && req.headers;
+  const token = (h && typeof h.get === 'function') ? h.get('x-vercel-oidc-token') : (h && h['x-vercel-oidc-token']);
+  if (token) runtimeOidcToken = token;
+}
+
 function federationConfig() {
   const audience = process.env.GCP_WORKLOAD_IDENTITY_AUDIENCE;
   const serviceAccount = process.env.GCP_SERVICE_ACCOUNT_EMAIL;
-  const oidcToken = process.env.VERCEL_OIDC_TOKEN;
+  const oidcToken = runtimeOidcToken || process.env.VERCEL_OIDC_TOKEN;
   if (!audience || !serviceAccount || !oidcToken) return null;
   return { audience, serviceAccount, oidcToken };
 }
@@ -528,4 +545,4 @@ async function getClientConfig(clientId) {
 
 // getAccessToken wordt ook door _sheetdata.js gebruikt — één implementatie i.p.v.
 // een derde kopie van hetzelfde JWT-dansje.
-module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets, getAccessToken, SHEETS_SCOPE };
+module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets, getAccessToken, captureOidcToken, SHEETS_SCOPE };
