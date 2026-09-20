@@ -115,6 +115,20 @@ node scripts/add-config-tab.js --apply --only <klantcode>
 Zonder `--apply` is het een droogloop die alleen toont wat er zou gebeuren. Een
 bestaande `Config`-tab wordt nooit overschreven.
 
+Waarden invullen kan ook vanaf de commandoregel, bijvoorbeeld als je meerdere
+klanten tegelijk bijwerkt:
+
+```bash
+# bestaande rij vullen
+node scripts/add-config-tab.js --apply --only <klantcode> --set "GA4 property=491908260"
+
+# veld dat nog niet in de tab staat onderaan toevoegen
+node scripts/add-config-tab.js --apply --only <klantcode> --add "Steunkleur=#fbe431"
+```
+
+`--set` slaat een veld over dat niet in de tab staat; `--add` zet het op de
+eerste vrije rij en laat de bestaande indeling en opmaak met rust.
+
 ## 6 · Deel de klantsheet met het service-account
 
 Rol **Editor** — nodig omdat `Analysehistoriek` beschreven wordt. Sheet-id uit
@@ -127,8 +141,8 @@ Rol **Editor** — nodig omdat `Analysehistoriek` beschreven wordt. Sheet-id uit
 ## 7 · Vul de Config-tab in
 
 Kolom A = veldnaam, kolom B = waarde, kolom C = toelichting (wordt niet
-gelezen). `scripts/add-config-tab.js` zet alle velden hieronder als template in de
-tab; jij vult kolom B in. Veldnamen zijn hoofdletter-, spatie- en
+gelezen). `scripts/add-config-tab.js` zet vrijwel alle velden hieronder als
+template in de tab; jij vult kolom B in. Veldnamen zijn hoofdletter-, spatie- en
 accent-ongevoelig. Een waarde tussen `[ ]` of een `—` telt als niet ingevuld. Een
 ongeldige waarde breekt niets: het veld valt weg en de reden komt terug als
 waarschuwing.
@@ -138,8 +152,19 @@ waarschuwing.
 | Veld | Waarde |
 |---|---|
 | `Merknaam` | vrije tekst, max 60 tekens |
-| `Accentkleur` / `Accenttekstkleur` | `#rrggbb` |
+| `Accentkleur` | `#rrggbb` — de merkkleur. Moet 4,5:1 halen op de achtergrond |
+| `Accenttekstkleur` | `#rrggbb` — alleen invullen als het accent die 4,5:1 níet haalt |
+| `Steunkleur` (of `Tweede kleur`) | `#rrggbb` — tweede merkkleur, **alleen als vlakvulling** |
 | `Logo URL` | https-URL, alleen van `drive.google.com`, `lh3.googleusercontent.com` of `mayday.marketing` |
+
+De steunkleur is bedoeld voor kleuren die als tekst onbruikbaar zijn maar als
+highlight-vlak prima werken — bij Spotto haalt het geel `#fbe431` 1,23:1 op de
+achtergrond, maar 13,46:1 met donkere tekst erop. Het dashboard zet hem daarom
+alleen als achtergrond in, nooit als tekst-, reeks- of statuskleur. Heeft de
+klant maar één merkkleur, laat het veld dan leeg.
+
+Dit veld staat **niet** in de template die `add-config-tab.js` schrijft; voeg het
+met de hand toe of met `--add` (zie stap 5).
 
 **Kanalen — de sleutel is de Windsor-connector-slug**
 
