@@ -569,6 +569,9 @@ async function ensureConfigTab(sheetId, token) {
       const wa = cfg.windsor_accounts || {};
       const keys = Object.keys(wa);
       console.log(`\n- ${id}  (email_connector: ${cfg.email_connector || '—'})`);
+      console.log(`    ${'sheetId'.padEnd(18)} ${cfg.sheetId || '—'}`);
+      console.log(`    ${'dataSheetId'.padEnd(18)} ${cfg.dataSheetId || '— (leest dan via de Windsor-API)'}`);
+      console.log(`    ${'driveFolderId'.padEnd(18)} ${cfg.driveFolderId || '—'}`);
       if (!keys.length) { console.log('    geen windsor_accounts in CLIENTS'); continue; }
       for (const k of keys) console.log(`    ${k.padEnd(18)} ${wa[k]}`);
     }
