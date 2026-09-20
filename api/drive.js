@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { getAccessToken: googleAccessToken } = require('./_config');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -19,33 +20,11 @@ function verifyToken(token, clientId) {
   } catch { return false; }
 }
 
-async function getAccessToken() {
-  const keyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!keyRaw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY niet ingesteld.');
-  const key = JSON.parse(keyRaw);
-  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
-  const now = Math.floor(Date.now() / 1000);
-  const claimSet = Buffer.from(JSON.stringify({
-    iss: key.client_email,
-    scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets',
-    aud: 'https://oauth2.googleapis.com/token',
-    exp: now + 3600,
-    iat: now,
-  })).toString('base64url');
-  const sigInput = `${header}.${claimSet}`;
-  const sign = crypto.createSign('RSA-SHA256');
-  sign.update(sigInput);
-  const signature = sign.sign(key.private_key, 'base64url');
-  const jwt = `${sigInput}.${signature}`;
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
-  });
-  const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) throw new Error('Kon geen Google access token verkrijgen.');
-  return tokenData.access_token;
-}
+// Eén tokenimplementatie voor de hele app (zie _config.js): federatie waar het
+// kan, de service-account-sleutel als terugval. Dit bestand leest Drive én
+// schrijft in Sheets, vandaar allebei de scopes.
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/spreadsheets';
+const getAccessToken = () => googleAccessToken(DRIVE_SCOPE);
 
 // Mapnamen vergelijken zonder leestekens: '01_MERK-STRATEGIE' en '01_MERKSTRATEGIE'
 // zijn dezelfde map. Zonder deze stap mist een klantmap met een koppelteken meer

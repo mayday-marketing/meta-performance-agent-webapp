@@ -349,11 +349,104 @@ function parseConfigRows(rows) {
   return { config, warnings };
 }
 
-// Service-account JWT → access token. De scope is een parameter omdat dezelfde
-// functie ook Drive-lezers bedient (_geodata.js): met alleen de spreadsheets-scope
-// geeft elke Drive-call een 403 'insufficient authentication scopes'.
+/* ==========================================================
+   Google-token — twee wegen, in deze volgorde
+   ==========================================================
+   1. WORKLOAD IDENTITY FEDERATION (voorkeur). Vercel geeft elke functie een
+      kortlevend OIDC-token in VERCEL_OIDC_TOKEN. Google's STS ruilt dat in voor
+      een federated token, en daarmee doen we ons voor als het service-account.
+      Er bestaat dan nergens een private key: niet in een env var, niet in een
+      bestand, niet in een foutmelding.
+
+      Waarom nog steeds impersonatie en niet rechtstreeks de federated identity:
+      Drive- en Sheets-toegang hangt aan het e-MAILADRES van het service-account
+      (dat is met elke klantmap gedeeld). Een federated principal heeft geen
+      adres om mee te delen, dus we lenen dat van het service-account. Alle
+      bestaande shares blijven daardoor werken.
+
+   2. SERVICE-ACCOUNT-SLEUTEL (terugval). Werkt zoals altijd. Nodig voor lokale
+      scripts en als vangnet zolang de federatie niet bewezen is. Zodra die staat
+      kan GOOGLE_SERVICE_ACCOUNT_KEY uit Vercel en de sleutel uit Google weg.
+
+   De scope is een parameter omdat dezelfde functie Sheets- én Drive-lezers
+   bedient: met alleen de spreadsheets-scope geeft elke Drive-call een 403
+   'insufficient authentication scopes'.
+   ========================================================== */
+
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+const STS_URL = 'https://sts.googleapis.com/v1/token';
+const IAM_CREDENTIALS = 'https://iamcredentials.googleapis.com/v1';
+
+// Tokens leven een uur; we hergebruiken ze binnen één warme instantie en laten
+// een minuut marge zodat een token niet halverwege een reeks calls verloopt.
+const tokenCache = new Map(); // scope -> { token, exp }
+
+function federationConfig() {
+  const audience = process.env.GCP_WORKLOAD_IDENTITY_AUDIENCE;
+  const serviceAccount = process.env.GCP_SERVICE_ACCOUNT_EMAIL;
+  const oidcToken = process.env.VERCEL_OIDC_TOKEN;
+  if (!audience || !serviceAccount || !oidcToken) return null;
+  return { audience, serviceAccount, oidcToken };
+}
+
+async function tokenViaFederation(cfg, scope) {
+  // Stap 1 — OIDC-token inruilen bij Google's STS.
+  const stsRes = await fetch(STS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+      audience: cfg.audience,
+      scope: 'https://www.googleapis.com/auth/cloud-platform',
+      requested_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+      subject_token: cfg.oidcToken,
+      subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
+    }),
+  });
+  const sts = await stsRes.json().catch(() => ({}));
+  if (!stsRes.ok || !sts.access_token) {
+    throw new Error(`STS ${stsRes.status}: ${String(sts.error_description || sts.error || '').slice(0, 200)}`);
+  }
+
+  // Stap 2 — met dat token het service-account impersoneren, voor de scope die
+  // de aanroeper nodig heeft.
+  const impRes = await fetch(
+    `${IAM_CREDENTIALS}/projects/-/serviceAccounts/${encodeURIComponent(cfg.serviceAccount)}:generateAccessToken`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${sts.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: scope.split(/\s+/).filter(Boolean), lifetime: '3600s' }),
+    });
+  const imp = await impRes.json().catch(() => ({}));
+  if (!impRes.ok || !imp.accessToken) {
+    throw new Error(`Impersonatie ${impRes.status}: ${String(imp.error?.message || '').slice(0, 200)}`);
+  }
+  return imp.accessToken;
+}
+
 async function getAccessToken(scope = SHEETS_SCOPE) {
+  const hit = tokenCache.get(scope);
+  if (hit && hit.exp > Date.now() + 60000) return hit.token;
+
+  const cfg = federationConfig();
+  if (cfg) {
+    try {
+      const token = await tokenViaFederation(cfg, scope);
+      tokenCache.set(scope, { token, exp: Date.now() + 3600000 });
+      return token;
+    } catch (e) {
+      // Zolang er nog een sleutel is, is een mislukte federatie geen storing.
+      // Wel luid loggen: anders migreren we stilzwijgend nooit.
+      if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) throw e;
+      console.error('[auth] federatie mislukt, terugval op de sleutel:', e.message);
+    }
+  }
+
+  const token = await tokenViaServiceAccountKey(scope);
+  tokenCache.set(scope, { token, exp: Date.now() + 3600000 });
+  return token;
+}
+
+async function tokenViaServiceAccountKey(scope = SHEETS_SCOPE) {
   const keyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (!keyRaw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY niet ingesteld.');
 
