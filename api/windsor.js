@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getClientConfig } = require('./_config');
+const { activeChannels, pendingChannels, matchGa4Channel, ga4GroupOf } = require('./_channels');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -87,8 +88,10 @@ module.exports = async (req, res) => {
   // één voor één gemigreerd kunnen worden. Beide zijn server-side; het request levert
   // nooit een account-id aan.
   let sheetAccounts = {};
+  let clientConfig = null;
   try {
     const { config } = await getClientConfig(clientId);
+    clientConfig = config;
     sheetAccounts = config.accounts || {};
   } catch (e) {
     console.error('[windsor] config-tab lezen mislukt:', e.message);
@@ -104,7 +107,15 @@ module.exports = async (req, res) => {
   // LET OP: de Windsor REST-endpoint negeert de `accounts`-queryparam (geverifieerd) — die werkt
   // alleen via de MCP. Daarom vragen we `account_id` op en filteren we server-side. Alleen voor
   // connectors die een account_id-veld hebben (convertkit heeft er geen → single-account, geen filter).
-  const ACCOUNT_ID_CONNECTORS = new Set(['instagram', 'facebook', 'facebook_organic', 'klaviyo', 'mailerlite']);
+  // Let op: élke connector die in een gedeeld Windsor-account meerdere klanten kan
+  // bevatten hoort hier te staan. Ontbreekt hij, dan geldt de fail-closed-regel
+  // hieronder niet en zou een niet-geconfigureerde connector álle klanten teruggeven.
+  const ACCOUNT_ID_CONNECTORS = new Set([
+    'instagram', 'facebook', 'facebook_organic', 'klaviyo', 'mailerlite',
+    // ROAS-tab: omzetbron + betaalde kanalen (zie _channels.js).
+    'googleanalytics4', 'tiktok', 'google_ads', 'bing', 'linkedin', 'pinterest',
+    'snapchat', 'amazon_ads',
+  ]);
   // Normaliseer voor vergelijking: string, act_-prefix weg, lowercase.
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').toLowerCase();
   async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
@@ -291,6 +302,212 @@ module.exports = async (req, res) => {
             adsVideo: adsVideoData && adsVideoData.__error ? adsVideoData.__error : null,
             adsConv: adsConvData && adsConvData.__error ? adsConvData.__error : null,
           },
+        });
+      }
+
+      // ROAS-tab — blended MER + ROAS per betaald kanaal, opgesplitst naar paid
+      // social en paid search. Twee omzetdefinities naast elkaar:
+      //   GA4-omzet      → purchase_revenue per session_source_medium (last click,
+      //                    één meetlat, telt niet dubbel over kanalen heen)
+      //   platform-omzet → wat het kanaal zélf claimt (view-through inbegrepen)
+      // Welke kanalen meedoen komt uit de Config-tab (zie _channels.js); een kanaal
+      // zonder account-id wordt niet opgehaald en verschijnt als 'niet gekoppeld'.
+      case 'getRoas': {
+        if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
+
+        const active = activeChannels(scopedAccounts);
+        const pending = pendingChannels(scopedAccounts);
+        const hasGa4 = !!scopedAccounts.googleanalytics4;
+
+        // GA4 levert de datum als YYYYMMDD; ad-connectors als YYYY-MM-DD.
+        const isoDate = (v) => {
+          const d = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+          return d.length >= 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : String(v || '');
+        };
+        const num = (v) => {
+          if (v == null || v === '') return 0;
+          const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+          return isFinite(n) ? n : 0;
+        };
+        const rowsOf = (d) => (d && Array.isArray(d.data) ? d.data : []);
+        // Eerste veld uit een kandidatenlijst dat in de rij zit. Nodig omdat de
+        // omzetveldnaam per connector verschilt en alleen Meta geverifieerd is.
+        const pick = (row, keys) => {
+          for (const k of keys) if (row[k] != null && row[k] !== '') return num(row[k]);
+          return 0;
+        };
+
+        // Eén kanaal ophalen op campagne-niveau. De omzet-/conversievelden zijn voor
+        // niet-geverifieerde connectors een gok; wijst Windsor er één af (400), dan
+        // halen we het kanaal opnieuw op met alleen spend. De GA4-ROAS blijft dan staan,
+        // alleen de platform-ROAS ontbreekt — beter dan een leeg kanaal.
+        async function fetchChannel(ch, params, timeout) {
+          const base = ['date', ch.campaignField, ch.spendField].filter(Boolean);
+          const extra = [...ch.revenueFields, ...ch.convFields];
+          const full = await windsorScoped(ch.connector, [...base, ...extra].join(','), params, timeout, `roas-${ch.key}`);
+          if (!full || !full.__error) return { data: full, degraded: false };
+          const minimal = await windsorScoped(ch.connector, base.join(','), params, timeout, `roas-${ch.key}-min`);
+          return { data: minimal, degraded: !minimal.__error, firstError: full.__error };
+        }
+
+        // Alles voor één periode: GA4-totalen, GA4-uitsplitsing en elk actief kanaal.
+        async function buildRange(from, to, timeout) {
+          const params = { date_from: from, date_to: to };
+          const GA4_TOTALS = 'date,sessions,purchase_revenue,transactions';
+          const GA4_SPLIT = 'date,session_default_channel_group,session_source_medium,sessions,purchase_revenue,transactions';
+
+          const [ga4Totals, ga4Split, ...channelResults] = await Promise.all([
+            hasGa4 ? windsorScoped('googleanalytics4', GA4_TOTALS, params, timeout, 'roas-ga4-totals') : Promise.resolve({ data: [] }),
+            hasGa4 ? windsorScoped('googleanalytics4', GA4_SPLIT, params, timeout, 'roas-ga4-split') : Promise.resolve({ data: [] }),
+            ...active.map(ch => fetchChannel(ch, params, timeout)),
+          ]);
+
+          const errors = {};
+          if (ga4Totals && ga4Totals.__error) errors.ga4Totals = ga4Totals.__error;
+          if (ga4Split && ga4Split.__error) errors.ga4Split = ga4Split.__error;
+
+          // --- Omzet & sessies per dag (alle kanalen samen) ---------------------
+          const daily = new Map(); // isoDate -> { date, revenue, sessions, transactions, spend }
+          const dayOf = (d) => {
+            if (!daily.has(d)) daily.set(d, { date: d, revenue: 0, sessions: 0, transactions: 0, spend: 0 });
+            return daily.get(d);
+          };
+          for (const r of rowsOf(ga4Totals)) {
+            const day = dayOf(isoDate(r.date));
+            day.revenue += num(r.purchase_revenue);
+            day.sessions += num(r.sessions);
+            day.transactions += num(r.transactions);
+          }
+
+          // --- GA4-omzet per kanaal + restposten per groep ----------------------
+          const ga4ByChannel = {};   // channelKey -> { revenue, sessions, transactions }
+          const ga4Unmatched = { social: 0, search: 0, other: 0 };
+          for (const r of rowsOf(ga4Split)) {
+            const revenue = num(r.purchase_revenue);
+            const key = matchGa4Channel(r.session_source_medium);
+            if (key) {
+              const c = (ga4ByChannel[key] = ga4ByChannel[key] || { revenue: 0, sessions: 0, transactions: 0, daily: {} });
+              c.revenue += revenue;
+              c.sessions += num(r.sessions);
+              c.transactions += num(r.transactions);
+              const d = isoDate(r.date);
+              c.daily[d] = (c.daily[d] || 0) + revenue;
+              continue;
+            }
+            // Geen kanaalmatch: alleen meetellen als de rij in een bétaalde
+            // channel group zit — anders is het organisch verkeer.
+            const grp = ga4GroupOf(r.session_default_channel_group);
+            if (grp) ga4Unmatched[grp] += revenue;
+          }
+
+          // --- Spend + platformomzet per kanaal ---------------------------------
+          const channels = {};
+          active.forEach((ch, i) => {
+            const result = channelResults[i] || {};
+            const raw = result.data;
+            const err = raw && raw.__error ? raw.__error : null;
+            const ga4 = ga4ByChannel[ch.key] || { revenue: 0, sessions: 0, transactions: 0, daily: {} };
+
+            const campaigns = new Map();
+            const perDay = new Map();
+            let spend = 0, platformRevenue = 0, platformConversions = 0;
+
+            for (const r of rowsOf(raw)) {
+              const s = num(r[ch.spendField]);
+              const rev = pick(r, ch.revenueFields);
+              const conv = pick(r, ch.convFields);
+              spend += s;
+              platformRevenue += rev;
+              platformConversions += conv;
+
+              const d = isoDate(r.date);
+              const dd = perDay.get(d) || { date: d, spend: 0, platformRevenue: 0 };
+              dd.spend += s; dd.platformRevenue += rev;
+              perDay.set(d, dd);
+              dayOf(d).spend += s;
+
+              const name = String(r[ch.campaignField] || '(onbekend)');
+              const c = campaigns.get(name) || { name, spend: 0, platformRevenue: 0, platformConversions: 0 };
+              c.spend += s; c.platformRevenue += rev; c.platformConversions += conv;
+              campaigns.set(name, c);
+            }
+
+            channels[ch.key] = {
+              spend,
+              platformRevenue,
+              platformConversions,
+              // Platformomzet ontbreekt als de connector die velden niet kent —
+              // dan is null eerlijker dan 0 (0 zou 'geen omzet' suggereren).
+              platformRevenueAvailable: !result.degraded && !err,
+              ga4Revenue: ga4.revenue,
+              ga4Sessions: ga4.sessions,
+              ga4Transactions: ga4.transactions,
+              daily: Array.from(perDay.values()).sort((a, b) => a.date.localeCompare(b.date)),
+              ga4Daily: ga4.daily,
+              campaigns: Array.from(campaigns.values()).sort((a, b) => b.spend - a.spend),
+              error: err,
+              degradedReason: result.degraded ? result.firstError : null,
+            };
+          });
+
+          // --- Groepstotalen ----------------------------------------------------
+          const groups = { social: null, search: null };
+          for (const grp of ['social', 'search']) {
+            const list = active.filter(c => c.group === grp);
+            const g = { spend: 0, ga4Revenue: 0, platformRevenue: 0, platformRevenueAvailable: list.length > 0, channels: list.map(c => c.key) };
+            for (const ch of list) {
+              const c = channels[ch.key];
+              g.spend += c.spend;
+              g.ga4Revenue += c.ga4Revenue;
+              g.platformRevenue += c.platformRevenue;
+              if (!c.platformRevenueAvailable) g.platformRevenueAvailable = false;
+            }
+            g.unmatchedGa4Revenue = ga4Unmatched[grp];
+            groups[grp] = g;
+          }
+
+          const totals = { revenue: 0, sessions: 0, transactions: 0, spend: 0 };
+          for (const d of daily.values()) {
+            totals.revenue += d.revenue;
+            totals.sessions += d.sessions;
+            totals.transactions += d.transactions;
+            totals.spend += d.spend;
+          }
+
+          return {
+            window: { startDate: from, endDate: to },
+            totals,
+            daily: Array.from(daily.values()).sort((a, b) => a.date.localeCompare(b.date)),
+            channels,
+            groups,
+            unmatchedGa4Revenue: ga4Unmatched,
+            errors,
+          };
+        }
+
+        // Huidige periode krijgt het ruime budget; de vergelijkingsperiode een
+        // krappere timeout — die is nice-to-have en mag de hoofdcijfers niet ophouden.
+        const compareFrom = req.body?.compareStartDate;
+        const compareTo = req.body?.compareEndDate;
+        const [current, previous] = await Promise.all([
+          buildRange(startDate, endDate, 45000),
+          (compareFrom && compareTo)
+            ? buildRange(compareFrom, compareTo, 30000).catch(e => ({ __error: e.message }))
+            : Promise.resolve(null),
+        ]);
+
+        return res.status(200).json({
+          period: { startDate, endDate },
+          comparePeriod: (compareFrom && compareTo) ? { startDate: compareFrom, endDate: compareTo } : null,
+          hasGa4,
+          // Metadata zodat de frontend geen eigen kopie van de registry nodig heeft.
+          channels: active.map(c => ({ key: c.key, label: c.label, group: c.group, connector: c.connector, verified: c.verified })),
+          pending: pending.map(c => ({ key: c.key, label: c.label, group: c.group, connector: c.connector })),
+          targets: clientConfig?.roasTargets || null,
+          roasConfig: clientConfig?.roas || {},
+          current,
+          previous: previous && previous.__error ? null : previous,
+          previousError: previous && previous.__error ? previous.__error : null,
         });
       }
 

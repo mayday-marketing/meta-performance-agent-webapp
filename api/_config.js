@@ -57,6 +57,26 @@ function okAccount(v) {
   return ACCOUNT_RE.test(s) ? s : null;
 }
 
+// Percentages in de Config-tab mogen er uitzien zoals een mens ze schrijft:
+// '45', '45%', '0,45' en '0.45' worden allemaal 0.45. Buiten 0–1 → ongeldig.
+function okPercent(v) {
+  const s = String(v).replace('%', '').replace(',', '.').trim();
+  if (!/^-?\d+(\.\d+)?$/.test(s)) return null;
+  let n = parseFloat(s);
+  if (!isFinite(n)) return null;
+  if (n > 1) n = n / 100;        // 45 → 0.45
+  if (n < 0 || n > 1) return null;
+  return Math.round(n * 10000) / 10000;
+}
+
+// Een ROAS-doel als getal: '3,2' en '3.2' worden 3.2. Negatief/nul is geen doel.
+function okRatio(v) {
+  const s = String(v).replace(/[x×]/i, '').replace(',', '.').trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const n = parseFloat(s);
+  return n > 0 && n < 1000 ? Math.round(n * 100) / 100 : null;
+}
+
 function okHttpsUrl(v, hosts) {
   try {
     const u = new URL(String(v).trim());
@@ -81,10 +101,79 @@ const CONFIG_FIELDS = {
   klaviyoaccount:    { path: 'accounts.klaviyo',           check: okAccount },
   mailerliteaccount: { path: 'accounts.mailerlite',        check: okAccount },
   convertkitaccount: { path: 'accounts.convertkit',        check: okAccount },
+
+  // --- ROAS-tab: omzetbron + betaalde kanalen (zie _channels.js) ------------
+  // Elk kanaal verschijnt in de ROAS-tab zodra hier een account-id staat. De
+  // sleutel onder accounts.* is de Windsor-connector-slug.
+  ga4property:         { path: 'accounts.googleanalytics4', check: okAccount },
+  googleanalyticsid:   { path: 'accounts.googleanalytics4', check: okAccount },
+  tiktokadaccount:     { path: 'accounts.tiktok',           check: okAccount },
+  googleadsaccount:    { path: 'accounts.google_ads',       check: okAccount },
+  bingadaccount:       { path: 'accounts.bing',             check: okAccount },
+  microsoftadsaccount: { path: 'accounts.bing',             check: okAccount },
+  linkedinadaccount:   { path: 'accounts.linkedin',         check: okAccount },
+  pinterestadaccount:  { path: 'accounts.pinterest',        check: okAccount },
+  snapchatadaccount:   { path: 'accounts.snapchat',         check: okAccount },
+  amazonadsaccount:    { path: 'accounts.amazon_ads',       check: okAccount },
+
+  // --- ROAS-tab: break-even-parameters -------------------------------------
+  // Brutomarge + korting per wave bepalen de minimum-ROAS waaronder een kanaal
+  // of campagne verlies draait. Zie roasTargets() hieronder voor de formule.
+  brutomarge:    { path: 'roas.grossMargin', check: okPercent },
+  kortingwave1:  { path: 'roas.wave1',       check: okPercent },
+  kortingwave2:  { path: 'roas.wave2',       check: okPercent },
+  kortingwave3:  { path: 'roas.wave3',       check: okPercent },
+  kortingwave4:  { path: 'roas.wave4',       check: okPercent },
+  actievewave:   { path: 'roas.activeWave',  check: v => /^(full|wave ?[1-4])$/i.test(String(v).trim()) ? String(v).trim().toLowerCase().replace(/\s+/g, '') : null },
+  minimumroas:   { path: 'roas.minRoas',     check: okRatio },
 };
 
+/**
+ * Break-even ROAS per kortingswave.
+ *
+ * Bij een brutomarge m op de volle prijs en een korting d geldt per €100 catalogus-
+ * waarde: kostprijs goederen = 100·(1−m), verkoopprijs = 100·(1−d). De brutowinst
+ * die overblijft om advertenties te betalen is dus (1−d) − (1−m) = m − d, op een
+ * omzet van (1−d). Break-even = omzet / advertentiekosten =
+ *
+ *     ROAS_be = (1 − d) / (m − d)
+ *
+ * Bij d ≥ m is er geen marge meer over: elke euro advertising is dan per definitie
+ * verlies (in de WOODY-sheet de '-10,0' bij wave 4). Dat geven we terug als null
+ * met een expliciete reden, niet als een misleidend negatief getal.
+ */
+function roasTargets(roas) {
+  const m = roas && typeof roas.grossMargin === 'number' ? roas.grossMargin : null;
+  if (m == null) return null;
+
+  const waves = [
+    { key: 'full',  label: 'Full price', discount: 0 },
+    { key: 'wave1', label: 'Wave 1',     discount: roas.wave1 },
+    { key: 'wave2', label: 'Wave 2',     discount: roas.wave2 },
+    { key: 'wave3', label: 'Wave 3',     discount: roas.wave3 },
+    { key: 'wave4', label: 'Wave 4',     discount: roas.wave4 },
+  ].filter(w => typeof w.discount === 'number');
+
+  return {
+    grossMargin: m,
+    activeWave: roas.activeWave || 'full',
+    waves: waves.map(w => {
+      const margin = m - w.discount;
+      return {
+        key: w.key,
+        label: w.label,
+        discount: w.discount,
+        // Netto marge per €100 catalogusprijs, vóór advertentiekosten.
+        netMargin: Math.round((margin) * 10000) / 10000,
+        breakEvenRoas: margin > 0 ? Math.round(((1 - w.discount) / margin) * 100) / 100 : null,
+        loss: margin <= 0,
+      };
+    }),
+  };
+}
+
 function emptyConfig() {
-  return { brandName: null, accent: null, accentText: null, logoUrl: null, accounts: {}, links: {} };
+  return { brandName: null, accent: null, accentText: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null };
 }
 
 function setPath(obj, path, value) {
@@ -127,6 +216,11 @@ function parseConfigRows(rows) {
 
     warnings.push(`Onbekend veld '${veld}' — genegeerd.`);
   }
+
+  // Break-even-targets één keer server-side afleiden, zodat het dashboard, de
+  // analyse-agent en de chat allemaal dezelfde drempels zien. De ROAS-tab mag ze
+  // live overschrijven voor scenario's; dat blijft client-side en wordt niet bewaard.
+  config.roasTargets = roasTargets(config.roas);
 
   return { config, warnings };
 }
@@ -212,4 +306,4 @@ async function getClientConfig(clientId) {
   }
 }
 
-module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey };
+module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets };
