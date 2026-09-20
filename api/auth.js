@@ -46,6 +46,12 @@ module.exports = async (req, res) => {
     sheetId: client.sheetId || null,
     hasDrive: !!client.driveFolderId,
     hasMetricool: !!client.metricool_token,
-    hasWindsor: !!client.windsor_api_key,
+    // 'hasWindsor' betekent voor de frontend: er is een bron achter het
+    // windsor-endpoint. Dat is de API-sleutel óf de datasheet — zonder deze
+    // tweede voorwaarde slaat de UI het ophalen over bij een klant die wél een
+    // datasheet heeft, en blijven de tabs leeg terwijl de data er is.
+    hasWindsor: !!(client.windsor_api_key || client.dataSheetId),
+    // Waar die data vandaan komt, zodat de UI het verschil kan tonen.
+    windsorSource: client.windsor_api_key ? 'api' : (client.dataSheetId ? 'sheet' : null),
   });
 };
