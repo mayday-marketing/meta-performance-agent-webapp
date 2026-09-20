@@ -10,11 +10,15 @@
     const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return v || fallback || "";
   }
-  // Categorical series palette (muted, distinguishable) — cycles 1..3
+  // Reekspalet volgens §2.4 van de design-system-briefing: reeks 1 is het
+  // merkaccent, reeks 2 de lichtere stap ervan (bedoeld voor 'vorige periode'),
+  // en daarna een vast, kleurenblind-veilig palet. Bewust maximaal zes reeksen:
+  // daarboven is een grafiek niet meer te lezen en hoort er een restpost te zijn.
+  const SERIES_TOKENS = ["--accent-100", "--accent-75", "--chart-3", "--chart-4", "--chart-5", "--chart-6"];
   function seriesColor(i) {
-    return cssVar("--series-" + ((i % 3) + 1), "#4a7aa8");
+    return cssVar(SERIES_TOKENS[i % SERIES_TOKENS.length], "#0072b2");
   }
-  const softColor = () => cssVar("--text-soft", "#969696");
+  const softColor = () => cssVar("--fg-muted", "#6b6560");
   const surfaceColor = () => cssVar("--surface", "#ffffff");
 
   // Round an axis maximum up to a clean number

@@ -51,7 +51,7 @@
     <div class="auth-card">
       <div class="brand">mayday marketing</div>
       <div style="margin-top: 16px;">
-        <h1 style="font-size:30px; font-weight:400; letter-spacing:0.04em; color:var(--text); margin:0 0 8px;">Hoe wil je starten?</h1>
+        <h1 style="font-size:30px; font-weight:400; letter-spacing:0.04em; color:var(--fg); margin:0 0 8px;">Hoe wil je starten?</h1>
         <p class="muted" style="margin:0; font-size:14px; line-height:1.7;">Kies de gewenste onboardingflow voor de tool.</p>
       </div>
       <div class="source-grid">
@@ -86,7 +86,7 @@
       <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:16px;">
         <div>
           <div class="brand">mayday marketing</div>
-          <h1 style="font-size:28px; font-weight:400; letter-spacing:0.04em; color:var(--text); margin:14px 0 6px;">Handmatige upload</h1>
+          <h1 style="font-size:28px; font-weight:400; letter-spacing:0.04em; color:var(--fg); margin:14px 0 6px;">Handmatige upload</h1>
           <p class="muted" style="margin:0; font-size:13px;">Upload CSV-bestanden die later gebruikt worden in de dashboardflow.</p>
         </div>
         <button class="btn" onclick="showScreen('source-screen')">← Terug</button>
@@ -118,8 +118,8 @@
         <textarea id="manual-context"
           rows="6"
           placeholder="Bv. 'Spotto is een Belgisch modemerk voor vrouwen 25-45. Tone: warm, persoonlijk, geen jargon. Avoid: salesy taal, kortingacties zonder context. Lopende campagnes: voorjaarscollectie 2026 (mrt–mei)...'"
-          style="width:100%; min-height:120px; padding:12px 14px; font:inherit; font-size:13px; line-height:1.55; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:10px; resize:vertical; margin-top:12px; box-sizing:border-box;"></textarea>
-        <div id="manual-context-count" style="font-size:10px; color:var(--text-soft); letter-spacing:0.06em; text-transform:uppercase; font-weight:700; margin-top:8px; min-height:14px;"></div>
+          style="width:100%; min-height:120px; padding:12px 14px; font:inherit; font-size:13px; line-height:1.55; color:var(--fg); background:var(--surface); border:1px solid var(--border); border-radius:10px; resize:vertical; margin-top:12px; box-sizing:border-box;"></textarea>
+        <div id="manual-context-count" style="font-size:10px; color:var(--fg-muted); letter-spacing:0.06em; text-transform:uppercase; font-weight:700; margin-top:8px; min-height:14px;"></div>
       </div>
       <button class="upload-action primary" onclick="showScreen('app-screen')">Dashboard openen →</button>
     </div>
@@ -133,7 +133,7 @@
       <aside class="sidebar">
         <div class="brand">mayday<br><span>marketing · social agent</span></div>
         <div class="brand-pill">
-          <span style="width:6px; height:6px; border-radius:50%; background:var(--good);"></span>
+          <span style="width:6px; height:6px; border-radius:50%; background:var(--positive);"></span>
           <span id="sidebar-brand">Klant: —</span>
         </div>
         <div id="sidebar-context" class="brand-pill" style="display:none;" title="Merkcontext zoals opgegeven bij handmatige upload">
@@ -185,7 +185,7 @@
           <div id="connectors-list"></div>
         </div>
 
-        <div id="sidebar-brand-sub" style="font-size:10px; color:var(--text-soft); letter-spacing:0.06em; padding:0 6px;">—</div>
+        <div id="sidebar-brand-sub" style="font-size:10px; color:var(--fg-muted); letter-spacing:0.06em; padding:0 6px;">—</div>
         <button class="logout" onclick="logout()">
           <span style="font-size:14px;">↪</span>
           Afmelden
@@ -252,9 +252,9 @@
                 <div id="channel-mix" class="channel-mix"></div>
 
                 <div style="margin-top:24px; padding-top:18px; border-top:1px solid var(--border);">
-                  <div class="info-label" style="font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-soft); font-weight:700; margin-bottom:10px;">Posting cadens</div>
+                  <div class="info-label" style="font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--fg-muted); font-weight:700; margin-bottom:10px;">Posting cadens</div>
                   <div id="cadence" class="cadence"></div>
-                  <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:10px; color:var(--text-soft); letter-spacing:0.06em;">
+                  <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:10px; color:var(--fg-muted); letter-spacing:0.06em;">
                     <span>Minder</span>
                     <span style="display:inline-flex; gap:3px; align-items:center;">
                       <span style="width:10px; height:10px; border-radius:3px; background:var(--surface-strong);"></span>
@@ -281,14 +281,14 @@
                 <div id="top-posts" class="top-posts"></div>
               </section>
 
-              <section class="panel" style="background:linear-gradient(170deg, var(--accent-soft), transparent 70%); border-color:rgba(255,104,59,0.18);">
+              <section class="panel" style="background:linear-gradient(170deg, var(--accent-10), transparent 70%); border-color:rgba(255,104,59,0.18);">
                 <div class="panel-header">
                   <div>
                     <h2 class="panel-title">Insight van de week</h2>
                     <div class="panel-sub">Komt in een volgende fase</div>
                   </div>
                 </div>
-                <div style="font-size:22px; line-height:1.35; color:var(--text); letter-spacing:0.005em; text-wrap:pretty;">
+                <div style="font-size:22px; line-height:1.35; color:var(--fg); letter-spacing:0.005em; text-wrap:pretty;">
                   Auto-gegenereerde inzichten worden in de volgende fase toegevoegd. Praat ondertussen met de Agent voor een doorgewinterde analyse van deze periode.
                 </div>
                 <button class="btn primary" style="margin-top:18px; width:100%; justify-content:center;" onclick="window.toggleChat()">
@@ -303,7 +303,7 @@
             <div class="lib-toolbar">
               <div class="chip-row" id="lib-filters"></div>
               <div style="display:flex; gap:10px; align-items:center;">
-                <span id="lib-count" style="font-size:11px; color:var(--text-soft); letter-spacing:0.06em; text-transform:uppercase; font-weight:700;">14 posts</span>
+                <span id="lib-count" style="font-size:11px; color:var(--fg-muted); letter-spacing:0.06em; text-transform:uppercase; font-weight:700;">14 posts</span>
                 <div class="search-input">
                   <input id="lib-search" type="text" placeholder="Zoek in captions…">
                 </div>

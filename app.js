@@ -138,7 +138,7 @@
   // geen eigen accent heeft (uitloggen → inloggen in hetzelfde tabblad).
   function resetBrandConfig() {
     const root = document.documentElement;
-    ["--accent", "--accent-text", "--btn-primary", "--accent-soft", "--heat"]
+    ["--accent", "--accent-text", "--heat"]
       .forEach(prop => root.style.removeProperty(prop));
     const logo = $("#brand-logo");
     if (logo) { logo.hidden = true; logo.removeAttribute("src"); }
@@ -152,8 +152,6 @@
     if (cfg.accent) {
       root.style.setProperty("--accent", cfg.accent);
       root.style.setProperty("--accent-text", cfg.accentText || cfg.accent);
-      root.style.setProperty("--btn-primary", cfg.accent);
-      root.style.setProperty("--accent-soft", `color-mix(in oklch, ${cfg.accent} 12%, white)`);
       const rgb = hexToRgbTriplet(cfg.accent);
       if (rgb) root.style.setProperty("--heat", rgb);
     }
@@ -541,7 +539,7 @@
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.style.transition = "background-color .4s";
       const orig = el.style.backgroundColor;
-      el.style.backgroundColor = "var(--accent-soft)"; // accent-tint, werkt op tr én card
+      el.style.backgroundColor = "var(--accent-10)"; // accent-tint, werkt op tr én card
       setTimeout(() => { el.style.backgroundColor = orig; }, 2200);
     }, 120);
   }
@@ -977,9 +975,9 @@
     const adsReach = adsReachCur; // reuse from KPI calc above
     const totalChannelReach = igReach + fbReach + adsReach || 1;
     const channels = [
-      { label: "Instagram", color: "var(--series-1)", value: Math.round((igReach / totalChannelReach) * 100) },
-      { label: "Facebook",  color: "var(--series-2)", value: Math.round((fbReach / totalChannelReach) * 100) },
-      { label: "Meta Ads",  color: "var(--series-3)", value: Math.round((adsReach / totalChannelReach) * 100) },
+      { label: "Instagram", color: "var(--accent-100)", value: Math.round((igReach / totalChannelReach) * 100) },
+      { label: "Facebook",  color: "var(--chart-3)", value: Math.round((fbReach / totalChannelReach) * 100) },
+      { label: "Meta Ads",  color: "var(--chart-4)", value: Math.round((adsReach / totalChannelReach) * 100) },
     ];
 
     // Top posts (top 5 by engagement, organic only — ads excluded per architectuur)
@@ -1320,9 +1318,9 @@
     const adsReach = adsReachCur;
     const totalChannelReach = igReach + fbReach + adsReach || 1;
     const channels = [
-      { label: "Instagram", color: "var(--series-1)", value: Math.round((igReach / totalChannelReach) * 100) },
-      { label: "Facebook",  color: "var(--series-2)", value: Math.round((fbReach / totalChannelReach) * 100) },
-      { label: "Meta Ads",  color: "var(--series-3)", value: Math.round((adsReach / totalChannelReach) * 100) },
+      { label: "Instagram", color: "var(--accent-100)", value: Math.round((igReach / totalChannelReach) * 100) },
+      { label: "Facebook",  color: "var(--chart-3)", value: Math.round((fbReach / totalChannelReach) * 100) },
+      { label: "Meta Ads",  color: "var(--chart-4)", value: Math.round((adsReach / totalChannelReach) * 100) },
     ];
 
     // Top posts (organic IG, top 5 op engagement-rate)
@@ -1460,12 +1458,14 @@
 
   function gradientFor(i) {
     // Neutrale, palette-gestuurde thumbnail-fallbacks (var() werkt in style-attribuut).
+    // Decoratie, geen data: daarom accenttinten en geen chartkleuren. Kleur hoort
+    // in dit systeem betekenis te dragen — een thumbnail-fallback draagt er geen.
     const palette = [
-      "linear-gradient(135deg, var(--series-1), var(--series-2))",
-      "linear-gradient(135deg, var(--series-2), var(--series-3))",
-      "linear-gradient(135deg, var(--series-3), var(--series-1))",
-      "linear-gradient(135deg, var(--series-1), var(--series-3))",
-      "linear-gradient(135deg, var(--series-2), var(--series-1))",
+      "linear-gradient(135deg, var(--accent-25), var(--accent-50))",
+      "linear-gradient(135deg, var(--accent-50), var(--accent-25))",
+      "linear-gradient(135deg, var(--accent-10), var(--accent-50))",
+      "linear-gradient(135deg, var(--accent-50), var(--accent-75))",
+      "linear-gradient(135deg, var(--accent-25), var(--accent-75))",
     ];
     return palette[i % palette.length];
   }
@@ -2066,7 +2066,7 @@
 
     el.innerHTML = rows.map(r => {
       const badge = r.live
-        ? `<span class="badge" style="background:rgba(47,143,95,0.16); color:var(--good);">Live</span>`
+        ? `<span class="badge" style="background:rgba(47,143,95,0.16); color:var(--positive);">Live</span>`
         : `<span class="badge">Soon</span>`;
       return `<button class="nav-link" disabled style="opacity:0.7; cursor:default;">
         <span class="icon">${r.live ? "◉" : "◌"}</span>
@@ -2764,7 +2764,7 @@
     // Empty state — gebruiker moet expliciet de analyse triggeren.
     root.innerHTML = `
       <div class="panel" style="text-align:center; padding:56px 24px;">
-        <div style="font-size:22px; color:var(--text); margin-bottom:8px;">Analyse genereren?</div>
+        <div style="font-size:22px; color:var(--fg); margin-bottom:8px;">Analyse genereren?</div>
         <p class="muted" style="margin:0 auto 22px; max-width:520px;">
           De Agent leest ${postsCount} posts en eventuele campagnes uit deze periode (${escapeHtml(periodLabelShort())}) en levert winners, losers en concrete aanbevelingen. Duurt zo'n 5 seconden.
         </p>
@@ -2841,7 +2841,7 @@
   }
   function emailKpiCard(label, value) {
     return `<div class="panel" style="padding:16px 18px;"><div class="muted" style="font-size:12px;">${escapeHtml(label)}</div>
-      <div style="font-size:26px; color:var(--text); margin-top:4px;">${value}</div></div>`;
+      <div style="font-size:26px; color:var(--fg); margin-top:4px;">${value}</div></div>`;
   }
 
   function renderEmail() {
@@ -3337,11 +3337,11 @@
 
   function roasBadge(v) {
     const colors = {
-      good: "background:rgba(47,143,95,0.16); color:var(--good);",
-      ok: "background:var(--surface-strong); color:var(--text);",
+      good: "background:rgba(47,143,95,0.16); color:var(--positive);",
+      ok: "background:var(--surface-strong); color:var(--fg);",
       warn: "background:rgba(214,158,46,0.18); color:#8a6d1f;",
       bad: "background:rgba(192,57,43,0.14); color:#c0392b;",
-      mute: "background:var(--surface-mute); color:var(--text-soft);",
+      mute: "background:var(--surface-mute); color:var(--fg-muted);",
     };
     return `<span class="badge" style="${colors[v.tone] || colors.mute}">${escapeHtml(v.label)}</span>`;
   }
@@ -3417,7 +3417,7 @@
       <div class="roas-bar">
         <div>
           <div class="info-label">Periode</div>
-          <div style="font-size:20px; color:var(--text); margin-top:2px;">${escapeHtml(range.label)}</div>
+          <div style="font-size:20px; color:var(--fg); margin-top:2px;">${escapeHtml(range.label)}</div>
           <div class="muted" style="font-size:11px; margin-top:2px;">vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}</div>
         </div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -3474,7 +3474,7 @@
       const pg = prev ? prev.groups[grp] : null;
       if (!g || !g.channels.length) {
         return `<div class="kpi-card" style="opacity:0.72;">
-          <div class="label"><span class="dot" style="background:var(--text-soft)"></span>${escapeHtml(label)}</div>
+          <div class="label"><span class="dot" style="background:var(--fg-muted)"></span>${escapeHtml(label)}</div>
           <div class="value" style="font-size:22px;">Niet gekoppeld</div>
           <div class="muted" style="font-size:11px; margin-top:10px;">Geen ad-account voor dit type in de Config-tab.</div>
         </div>`;
@@ -4045,7 +4045,7 @@
       <div class="roas-bar">
         <div>
           <div class="info-label">Periode</div>
-          <div style="font-size:20px; color:var(--text); margin-top:2px;">${escapeHtml(start || "—")} → ${escapeHtml(end || "—")}</div>
+          <div style="font-size:20px; color:var(--fg); margin-top:2px;">${escapeHtml(start || "—")} → ${escapeHtml(end || "—")}</div>
           <div class="muted" style="font-size:11px; margin-top:2px;">vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}${typeLine ? ` · ${escapeHtml(typeLine)}` : ""}</div>
         </div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -5418,7 +5418,7 @@
       <div class="roas-bar">
         <div>
           <div class="info-label">Nulmeting</div>
-          <div style="font-size:20px; color:var(--text); margin-top:2px;">
+          <div style="font-size:20px; color:var(--fg); margin-top:2px;">
             ${escapeHtml(geoFmt.date(g.auditDate))}${g.label ? ` · ${escapeHtml(g.label)}` : ""}
           </div>
           <div class="muted" style="font-size:11px; margin-top:2px;">${escapeHtml(bits.join(" · "))}</div>
