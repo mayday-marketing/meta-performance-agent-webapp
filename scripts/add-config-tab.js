@@ -604,6 +604,23 @@ async function ensureConfigTab(sheetId, token) {
     return;
   }
 
+  if (process.argv.includes('--sizes')) {
+    const sid = SHEET_OVERRIDE || (ONLY && clients[ONLY] && clients[ONLY].dataSheetId);
+    const meta = await api(`https://sheets.googleapis.com/v4/spreadsheets/${sid}?fields=sheets.properties(title,gridProperties)`, token);
+    const rijen = (meta.sheets || []).map(x => ({
+      titel: x.properties.title,
+      rijen: x.properties.gridProperties.rowCount,
+      kolommen: x.properties.gridProperties.columnCount,
+    })).sort((a, b) => b.rijen - a.rijen);
+    let totaal = 0;
+    for (const r of rijen) {
+      totaal += r.rijen * r.kolommen;
+      console.log(`  ${String(r.rijen).padStart(8)} rijen x ${String(r.kolommen).padStart(3)} kol   ${r.titel.slice(0, 50)}`);
+    }
+    console.log(`\n  totaal cellen: ${totaal.toLocaleString('nl-NL')}  (limiet van Google Sheets: 10.000.000)`);
+    return;
+  }
+
   if (RANGE) {
     const r = await api(`https://sheets.googleapis.com/v4/spreadsheets/${RANGE.sheet}/values/${encodeURIComponent(RANGE.a1)}`, token);
     const rows = r.values || [];
