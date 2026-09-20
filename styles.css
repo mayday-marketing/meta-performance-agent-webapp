@@ -1,36 +1,55 @@
 /* ==========================================================
-   Social Performance Agent — Tokens & Theme
+   Design system — tokens
+   ==========================================================
+   Eén merkkleur per klant, de rest is vast. Gebaseerd op
+   BRIEFING_dashboard-design-system_brand-agnostic.md (§2 en §8).
+
+   --accent is het ENIGE dat per klant verandert. app.js zet hem na login uit de
+   Config-tab van de klantsheet; de waarde hieronder is de mayday-standaard voor
+   klanten zonder eigen accent. De vier accent-stappen worden er met color-mix
+   uit afgeleid, dus je hoeft nooit een tint met de hand te kiezen.
+
+   Regels die de briefing hard stelt: het accent is NOOIT een statuskleur;
+   accent-50/25/10 worden nooit voor tekst gebruikt; alleen reeks #1 is het
+   accent, reeks #2 is accent-75, de rest komt uit het vaste chartpalet.
    ========================================================== */
+
+/* ===== MERKBLOK — alleen deze regel verschilt per merk ===== */
+:root { --accent: #400745; --accent-text: var(--accent); }
+
+/* ===== SYSTEEM — niet aanpassen ===== */
 :root {
-  /* Brand */
-  --background: #fff7fc;
+  color-scheme: light;
+
+  /* Neutralen (§2.1) */
+  --bg: #faf9f7;
   --surface: #ffffff;
-  --surface-strong: #f7ebf6;
-  --surface-mute: #faf2f8;
-  --text: #400745;
-  --text-muted: #6b5878;
-  --text-soft: #9888a3;
-  --accent: #ff683b;
-  --accent-soft: rgba(255, 104, 59, 0.12);
-  --accent-2: #351f69;
-  --accent-3: #c0507f;
-  --good: #2f8f5f;
-  --bad: #c14d4d;
-  /* Chart palette — categorical trio + KPI accents + heatmap base + CTA fill.
-     Color identificeert DATA, niet chrome. Overschreven per [data-palette]. */
-  --series-1: #c12057;
-  --series-2: #1769c0;
-  --series-3: #ff683b;
-  --kpi-1: #ff683b;
-  --kpi-2: #6a3bff;
-  --kpi-3: #351f69;
-  --kpi-4: #1f9b8a;
-  --heat: 255, 104, 59;
-  /* Donut-slices — categorische identiteit, bewust NIET aan het merkaccent
-     gekoppeld: een kanaalgroep moet in elk thema dezelfde kleur houden, anders
-     verspringt 'organisch' van teal naar zand als iemand het thema wisselt.
-     Vaste volgorde, nooit op rangorde: kleur volgt het kanaal, niet zijn grootte.
-     Gevalideerd op lichtheid, chroma, kleurenblindheid en contrast (7 slots). */
+  --border: #e6e3df;
+  --fg: #1a1a1a;
+  --fg-muted: #6b6560;
+
+  /* Accentstappen (§2.2) — mengen naar wit in lichte modus */
+  --accent-100: var(--accent);
+  --accent-75: color-mix(in oklch, var(--accent) 75%, white);
+  --accent-50: color-mix(in oklch, var(--accent) 50%, white);
+  --accent-25: color-mix(in oklch, var(--accent) 25%, white);
+  --accent-10: color-mix(in oklch, var(--accent) 10%, white);
+
+  /* Statuskleuren (§2.3) — vast voor elk merk, nooit het accent */
+  --positive: #1e7f4f; --positive-bg: #dcfce7;
+  --negative: #b42318; --negative-bg: #fee2e2;
+  --warning:  #b45309; --warning-bg:  #fef3c7;
+  --info:     #185fa5; --info-bg:     #dbeafe;
+
+  /* Chartpalet (§2.4) — kleurenblind-veilig, max 6 reeksen */
+  --chart-3: #0072b2;
+  --chart-4: #e69f00;
+  --chart-5: #009e73;
+  --chart-6: #cc79a7;
+  --chart-other: #9ca3af;
+
+  /* Donut-slices — categorische identiteit per kanaalgroep, bewust los van het
+     merkaccent zodat 'organisch' in elk thema dezelfde kleur houdt. */
   --slice-1: #2a78d6;
   --slice-2: #eb6834;
   --slice-3: #1baf7a;
@@ -38,83 +57,72 @@
   --slice-5: #e87ba4;
   --slice-6: #008300;
   --slice-7: #4a3aa7;
-  --btn-primary: #400745;
-  --border: rgba(52, 7, 69, 0.12);
-  --border-strong: rgba(52, 7, 69, 0.22);
-  --shadow: 0 24px 60px rgba(52, 7, 69, 0.08);
-  --shadow-sm: 0 8px 24px rgba(52, 7, 69, 0.06);
-  --radius: 22px;
-  --radius-sm: 14px;
-  --radius-lg: 28px;
+
+  /* Vorm en ritme (§3) */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --space: 8px;
+  --grid-gap: 16px;
+  --pad: 20px;
+  --kpi-pad: 20px;
+
   --font-sans: "Instrument Sans", "Inter", system-ui, sans-serif;
   --font-serif: "Instrument Serif", Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --grid-gap: 18px;
-  --pad: 24px;
-  --kpi-pad: 22px;
+
+  /* ---- Compatibiliteitslaag ----------------------------------------------
+     De rest van dit bestand gebruikt nog de oude tokennamen. Die worden hier
+     doorgezet naar de nieuwe, zodat de overstap in één keer kan zonder alle
+     verwijzingen tegelijk te hernoemen. Ze verdwijnen zodra dat hernoemen af is.
+     ---------------------------------------------------------------------- */
+  --background: var(--bg);
+  --text: var(--fg);
+  --text-muted: var(--fg-muted);
+  --text-soft: var(--fg-muted);
+  --surface-strong: color-mix(in oklch, var(--fg) 6%, var(--surface));
+  --surface-mute: color-mix(in oklch, var(--fg) 3%, var(--surface));
+  --border-strong: color-mix(in oklch, var(--fg) 22%, var(--surface));
+  --accent-soft: var(--accent-10);
+  --accent-2: var(--fg);
+  --accent-3: var(--accent-75);
+  --btn-primary: var(--accent-100);
+  --good: var(--positive);
+  --bad: var(--negative);
+  --series-1: var(--accent-100);
+  --series-2: var(--accent-75);
+  --series-3: var(--chart-3);
+  --kpi-1: var(--accent-100);
+  --kpi-2: var(--chart-3);
+  --kpi-3: var(--chart-4);
+  --kpi-4: var(--chart-5);
+  --heat: 64, 7, 69;           /* app.js overschrijft dit met het klantaccent */
+  --shadow: none;              /* §3: kaarten hebben een rand, geen schaduw */
+  --shadow-sm: none;
 }
 
-/* ============ Neutral palettes — applied via [data-palette] ============
-   Chrome wordt rustig; charts gebruiken een gedempte categorische trio i.p.v.
-   drie luide tinten. Ink is de productie-baseline (zie index.html). ========= */
-
-/* Stone — warm greige, taupe accent */
-:root[data-palette="stone"] {
-  --background: #f7f5f1; --surface: #ffffff; --surface-strong: #ece9e2; --surface-mute: #f2efe9;
-  --text: #2c2825; --text-muted: #6f675e; --text-soft: #9c9389;
-  --accent: #93794f; --accent-soft: rgba(147, 121, 79, 0.14); --accent-2: #3d372f;
-  --good: #5a7a52; --bad: #a8654f;
-  --border: rgba(44, 40, 37, 0.12); --border-strong: rgba(44, 40, 37, 0.2);
-  --shadow: 0 24px 60px rgba(44, 40, 37, 0.07); --shadow-sm: 0 8px 24px rgba(44, 40, 37, 0.05);
-  --series-1: #2c2825; --series-2: #8a7a63; --series-3: #c6b9a4;
-  --kpi-1: #93794f; --kpi-2: #6f675e; --kpi-3: #2c2825; --kpi-4: #b0a08a;
-  --heat: 147, 121, 79; --btn-primary: #3d372f;
-}
-
-/* Slate — cool neutral, muted slate-blue accent */
-:root[data-palette="slate"] {
-  --background: #f5f7f9; --surface: #ffffff; --surface-strong: #e6ecf0; --surface-mute: #eef2f5;
-  --text: #212934; --text-muted: #5a6673; --text-soft: #8b97a4;
-  --accent: #4f6b82; --accent-soft: rgba(79, 107, 130, 0.14); --accent-2: #2c3a48;
-  --good: #3f7a63; --bad: #a05a55;
-  --border: rgba(33, 41, 52, 0.12); --border-strong: rgba(33, 41, 52, 0.2);
-  --shadow: 0 24px 60px rgba(33, 41, 52, 0.08); --shadow-sm: 0 8px 24px rgba(33, 41, 52, 0.06);
-  --series-1: #2c3a48; --series-2: #5f7d93; --series-3: #a9bccb;
-  --kpi-1: #4f6b82; --kpi-2: #5a6673; --kpi-3: #2c3a48; --kpi-4: #91a6b6;
-  --heat: 79, 107, 130; --btn-primary: #2c3a48;
-}
-
-/* Ink — near-monochrome chrome, mayday-purple CTAs, muted categorical charts */
-:root[data-palette="ink"] {
-  --background: #fafafa; --surface: #ffffff; --surface-strong: #ededed; --surface-mute: #f4f4f4;
-  --text: #1a1a1a; --text-muted: #5c5c5c; --text-soft: #969696;
-  --accent: #400745; --accent-soft: rgba(64, 7, 69, 0.10); --accent-2: #400745;
-  --good: #4f7a5a; --bad: #b25a4d;
-  --border: rgba(26, 26, 26, 0.12); --border-strong: rgba(26, 26, 26, 0.2);
-  --shadow: 0 24px 60px rgba(26, 26, 26, 0.07); --shadow-sm: 0 8px 24px rgba(26, 26, 26, 0.05);
-  /* Muted-but-distinguishable categorical trio (IG rose / FB blue / Ads amber) */
-  --series-1: #bd5c81; --series-2: #4a7aa8; --series-3: #cf9750;
-  --kpi-1: #400745; --kpi-2: #4a7aa8; --kpi-3: #5c8a6a; --kpi-4: #cf9750;
-  --heat: 64, 7, 69; --btn-primary: #400745;
-}
-
-/* ============ Theme variants — applied via [data-accent] / [data-theme] ============ */
-:root[data-accent="purple"] {
-  --accent: #6a3bff;
-  --accent-soft: rgba(106, 59, 255, 0.12);
-}
-:root[data-accent="teal"] {
-  --accent: #1f9b8a;
-  --accent-soft: rgba(31, 155, 138, 0.14);
-}
-:root[data-accent="rose"] {
-  --accent: #d6406b;
-  --accent-soft: rgba(214, 64, 107, 0.12);
-}
-
-/* Donkere stappen van dezelfde zeven tinten, apart gekozen en gevalideerd tegen
-   het donkere oppervlak — geen automatische omkering van de lichte waarden. */
+/* Donkere modus (§2.1 en §8) — opt-in via data-theme="dark". */
 :root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121212;
+  --surface: #1e1e1e;
+  --border: #2e2e2e;
+  --fg: #e6e1e5;
+  --fg-muted: #a8a29e;
+
+  /* Accentstappen mengen naar het donkere oppervlak i.p.v. naar wit. */
+  --accent-75: color-mix(in oklch, var(--accent) 75%, #121212);
+  --accent-50: color-mix(in oklch, var(--accent) 50%, #121212);
+  --accent-25: color-mix(in oklch, var(--accent) 25%, #121212);
+  --accent-10: color-mix(in oklch, var(--accent) 10%, #121212);
+
+  --positive: #4ade80;
+  --negative: #f87171;
+  --warning:  #fbbf24;
+  --info:     #60a5fa;
+
+  /* Donkere stappen van dezelfde zeven slice-tinten, apart gevalideerd tegen
+     het donkere oppervlak — geen automatische omkering van de lichte waarden. */
   --slice-1: #3987e5;
   --slice-2: #d95926;
   --slice-3: #199e70;
@@ -122,26 +130,13 @@
   --slice-5: #d55181;
   --slice-6: #008300;
   --slice-7: #9085e9;
-  --background: #1a0e21;
-  --surface: #261734;
-  --surface-strong: #2f1f3f;
-  --surface-mute: #1f132a;
-  --text: #f6ebf2;
-  --text-muted: #b59ac0;
-  --text-soft: #80708e;
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
-  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.3);
-  --accent-2: #f6ebf2;
 }
 
+/* Compacte dichtheid — alleen ritme, nooit de radius of de kleuren. */
 :root[data-density="compact"] {
   --grid-gap: 12px;
   --pad: 16px;
   --kpi-pad: 16px;
-  --radius: 16px;
-  --radius-sm: 10px;
 }
 
 @font-face {

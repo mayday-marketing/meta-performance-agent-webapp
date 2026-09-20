@@ -5901,8 +5901,7 @@
     });
     window.parent.postMessage({ type: "__edit_mode_available" }, "*");
     const t = window.TWEAK_DEFAULTS;
-    setAccent(t.accent); setDensity(t.density); setTheme(t.theme);
-    $$("[data-tweak-accent]").forEach(b => { b.onclick = () => { setAccent(b.dataset.tweakAccent); persist({ accent: b.dataset.tweakAccent }); }; });
+    setDensity(t.density); setTheme(t.theme);
     $$("[data-tweak-density]").forEach(b => { b.onclick = () => { setDensity(b.dataset.tweakDensity); persist({ density: b.dataset.tweakDensity }); }; });
     $$("[data-tweak-theme]").forEach(b => { b.onclick = () => { setTheme(b.dataset.tweakTheme); persist({ theme: b.dataset.tweakTheme }); }; });
     $("#tweaks-close").onclick = () => { closeTweaks(); window.parent.postMessage({ type: "__edit_mode_dismissed" }, "*"); };
@@ -5918,7 +5917,6 @@
     if (state.overview) renderOverview();
     if (state.website && typeof renderWebsite === "function") renderWebsite();
   }
-  function setAccent(v) { document.documentElement.setAttribute("data-accent", v); $$("[data-tweak-accent]").forEach(b => b.classList.toggle("on", b.dataset.tweakAccent === v)); repaintCharts(); }
   function setDensity(v) { document.documentElement.setAttribute("data-density", v); $$("[data-tweak-density]").forEach(b => b.classList.toggle("on", b.dataset.tweakDensity === v)); }
   function setTheme(v) { document.documentElement.setAttribute("data-theme", v); $$("[data-tweak-theme]").forEach(b => b.classList.toggle("on", b.dataset.tweakTheme === v)); repaintCharts(); }
 
