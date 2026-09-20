@@ -2,7 +2,8 @@
 /* ==========================================================
    add-config-tab.js — zet de Config-tab in elke klantsheet
    ==========================================================
-   Leest CLIENTS + GOOGLE_SERVICE_ACCOUNT_KEY uit .env.local (of uit de omgeving),
+   Leest CLIENTS uit .env.local (of uit de omgeving) plus Google-toegang: het
+   OIDC-token van de federatie, of anders GOOGLE_SERVICE_ACCOUNT_KEY,
    en maakt in elke klantsheet een tab `Config` met dezelfde veld/waarde-vorm als
    Klant_Context_TEMPLATE.xlsx. Bestaat de tab al, dan slaat hij die klant over —
    het script overschrijft nooit iets.
@@ -18,7 +19,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 const APPLY = process.argv.includes('--apply');
 const DEBUG = process.argv.includes('--debug');
@@ -270,37 +270,56 @@ function loadEnv() {
     ? JSON.parse(process.env.CLIENTS)
     : (raw ? parseJsonValue(raw, 'CLIENTS') : null);
 
-  let saKey = (!ENV_FILE && process.env.GOOGLE_SERVICE_ACCOUNT_KEY) || null;
-  if (!saKey && raw) saKey = JSON.stringify(parseJsonValue(raw, 'GOOGLE_SERVICE_ACCOUNT_KEY'));
+  // De sleutel mag ontbreken: sinds de overstap op workload identity federation
+  // is hij er in productie niet meer, en lokaal werkt hetzelfde recept met het
+  // OIDC-token dat `vercel env pull` naar .env.local schrijft.
+  let saKey = null;
+  try {
+    saKey = (!ENV_FILE && process.env.GOOGLE_SERVICE_ACCOUNT_KEY) || null;
+    if (!saKey && raw) saKey = JSON.stringify(parseJsonValue(raw, 'GOOGLE_SERVICE_ACCOUNT_KEY'));
+  } catch { saKey = null; }
 
-  return { clients, saKey };
+  const plain = (key) => (!ENV_FILE && process.env[key]) || (raw ? plainValue(raw, key) : null);
+  const audience = plain('GCP_WORKLOAD_IDENTITY_AUDIENCE');
+  const serviceAccount = plain('GCP_SERVICE_ACCOUNT_EMAIL');
+  const oidcToken = plain('VERCEL_OIDC_TOKEN');
+  const federation = (audience && serviceAccount && oidcToken)
+    ? { audience, serviceAccount, oidcToken }
+    : null;
+
+  return { clients, saKey, federation };
+}
+
+// Waarde van een gewone (niet-JSON) env-regel. parseJsonValue kan hier niet mee
+// overweg, want dit zijn kale strings.
+function plainValue(raw, key) {
+  const after = rawAfterKey(raw, key);
+  if (!after) return null;
+  const { body } = extractValue(after);
+  return body ? body.trim() : null;
 }
 
 /* ---------- Google auth ---------- */
 
-async function getAccessToken(keyRaw) {
-  const key = JSON.parse(keyRaw);
-  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
-  const now = Math.floor(Date.now() / 1000);
-  const claimSet = Buffer.from(JSON.stringify({
-    iss: key.client_email,
-    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly',
-    aud: 'https://oauth2.googleapis.com/token',
-    exp: now + 3600,
-    iat: now,
-  })).toString('base64url');
-  const sigInput = `${header}.${claimSet}`;
-  const sign = crypto.createSign('RSA-SHA256');
-  sign.update(sigInput);
-  const jwt = `${sigInput}.${sign.sign(key.private_key, 'base64url')}`;
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
-  });
-  const data = await res.json();
-  if (!data.access_token) throw new Error('Geen access token: ' + JSON.stringify(data).slice(0, 200));
-  return { token: data.access_token, email: key.client_email };
+const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly';
+
+/* Eén tokenimplementatie voor app én scripts (api/_config.js): federatie waar
+   het kan, de service-account-sleutel als terugval. We zetten hier alleen de
+   omgeving klaar en laten die functie kiezen — zo kan dit script niet uit de
+   pas gaan lopen met wat er in productie gebeurt. */
+async function getAccessToken(env) {
+  if (env.saKey) process.env.GOOGLE_SERVICE_ACCOUNT_KEY = env.saKey;
+  if (env.federation) {
+    process.env.GCP_WORKLOAD_IDENTITY_AUDIENCE = env.federation.audience;
+    process.env.GCP_SERVICE_ACCOUNT_EMAIL = env.federation.serviceAccount;
+    process.env.VERCEL_OIDC_TOKEN = env.federation.oidcToken;
+  }
+  const { getAccessToken: googleAccessToken } = require('../api/_config.js');
+  const token = await googleAccessToken(GOOGLE_SCOPE);
+  const email = env.federation
+    ? env.federation.serviceAccount
+    : JSON.parse(env.saKey).client_email;
+  return { token, email, via: env.federation ? 'federatie' : 'sleutel' };
 }
 
 async function api(url, token, method, body) {
@@ -492,21 +511,27 @@ async function ensureConfigTab(sheetId, token) {
 }
 
 (async () => {
-  let clients, saKey;
+  let clients, saKey, federation;
   try {
     const env = loadEnv();
     clients = env.clients;
     saKey = env.saKey;
+    federation = env.federation;
   } catch (e) {
     console.error(e.message);
     process.exit(1);
   }
   if (!clients) { console.error('CLIENTS niet gevonden in .env.local of omgeving.'); process.exit(1); }
-  if (!saKey) { console.error('GOOGLE_SERVICE_ACCOUNT_KEY niet gevonden.'); process.exit(1); }
+  if (!saKey && !federation) {
+    console.error('Geen Google-toegang: noch GOOGLE_SERVICE_ACCOUNT_KEY, noch een volledige\n'
+      + 'federatie-opzet (GCP_WORKLOAD_IDENTITY_AUDIENCE + GCP_SERVICE_ACCOUNT_EMAIL +\n'
+      + 'VERCEL_OIDC_TOKEN) gevonden. Haal ze op met: vercel env pull .env.local');
+    process.exit(1);
+  }
   console.log(`Klanten in CLIENTS: ${Object.keys(clients).length}`);
 
-  const { token, email } = await getAccessToken(saKey);
-  console.log(`Service-account: ${email}`);
+  const { token, email, via } = await getAccessToken({ saKey, federation });
+  console.log(`Service-account: ${email} (via ${via})`);
   console.log(APPLY ? 'Modus: UITVOEREN\n' : 'Modus: DROOGLOOP (voeg --apply toe om echt te schrijven)\n');
 
   if (SETS.length || ADDS.length) {
