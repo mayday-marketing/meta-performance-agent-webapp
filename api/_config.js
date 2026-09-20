@@ -125,6 +125,48 @@ function okWebsiteType(v) {
   return null;
 }
 
+// Merk-domein voor de SEO-tab. Alleen de host telt: DataForSEO geeft in een
+// SERP-resultaat ook alleen een host terug. Protocol, www en pad gaan eraf,
+// zodat 'https://www.merk.be/nl/' en 'merk.be' hetzelfde veld opleveren.
+function okDomain(v) {
+  let s = String(v).trim().toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/[/?#].*$/, '');
+  const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+  return HOST.test(s) && s.length <= 100 ? s : null;
+}
+
+// Markt voor DataForSEO: 'Belgium', 'Netherlands', 'Antwerp,Flanders,Belgium'.
+// De waarde moet exact matchen met een locatienaam uit hun lijst; we kunnen die
+// hier niet controleren, dus beperken we de vorm en laten de API de rest zeggen.
+function okLocationName(v) {
+  const s = String(v).trim().replace(/\s*,\s*/g, ',');
+  return /^[\p{L}][\p{L} .,'()-]{1,79}$/u.test(s) ? s : null;
+}
+
+// Tweeletterige taalcode ('nl', 'fr', 'en'). DataForSEO kent ook varianten als
+// 'nl-BE', maar die accepteren we bewust niet: bij de zoekvolume-endpoint is
+// dat een stille bron van lege resultaten.
+function okLanguageCode(v) {
+  const s = String(v).trim().toLowerCase();
+  return /^[a-z]{2}$/.test(s) ? s : null;
+}
+
+// Keywordlijst in één cel: gescheiden door komma, puntkomma of regeleinde.
+// Zelfde sanering als api/seo.js (controletekens weg, max 80 tekens per stuk,
+// ontdubbeld), zodat de sheet nooit iets doorlaat dat de API afkeurt.
+function okKeywordList(v) {
+  const out = [];
+  for (const raw of String(v).split(/[,;\n\r]+/)) {
+    const k = raw.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!k || k.length > 80) continue;
+    if (!out.includes(k)) out.push(k);
+    if (out.length >= 60) break;
+  }
+  return out.length ? out : null;
+}
+
 function okHttpsUrl(v, hosts) {
   try {
     const u = new URL(String(v).trim());
@@ -177,6 +219,18 @@ const CONFIG_FIELDS = {
   // 'property_form_submit'. Bepaalt de conversiekolom in de hele tab.
   conversiedoel:         { path: 'website.goalEvent', check: okEventName },
   conversiedoellabel:    { path: 'website.goalLabel', check: v => v.slice(0, 40) },
+
+  // --- SEO-tab: DataForSEO (zoekvolumes + posities) ------------------------
+  // Geen account-id: DataForSEO werkt met één gedeeld account. Wat hier staat
+  // bepaalt wélke markt, taal, keywords en welk domein er bevraagd worden. De
+  // inloggegevens zelf blijven in de CLIENTS env var — nooit in deze tab.
+  seodomein:      { path: 'seo.domain',   check: okDomain },
+  seodomain:      { path: 'seo.domain',   check: okDomain },
+  seomarkt:       { path: 'seo.location', check: okLocationName },
+  seolocatie:     { path: 'seo.location', check: okLocationName },
+  seotaal:        { path: 'seo.language', check: okLanguageCode },
+  seokeywords:    { path: 'seo.keywords', check: okKeywordList },
+  seozoekwoorden: { path: 'seo.keywords', check: okKeywordList },
 
   // --- ROAS-tab: break-even-parameters -------------------------------------
   // Brutomarge en de lopende seizoenskorting bepalen de minimum-ROAS waaronder
@@ -239,7 +293,7 @@ function roasTargets(roas) {
 }
 
 function emptyConfig() {
-  return { brandName: null, accent: null, accentText: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null, website: {} };
+  return { brandName: null, accent: null, accentText: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null, website: {}, seo: {} };
 }
 
 function setPath(obj, path, value) {
@@ -372,4 +426,6 @@ async function getClientConfig(clientId) {
   }
 }
 
-module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets };
+// getAccessToken wordt ook door _sheetdata.js gebruikt — één implementatie i.p.v.
+// een derde kopie van hetzelfde JWT-dansje.
+module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets, getAccessToken };

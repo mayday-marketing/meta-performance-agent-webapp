@@ -45,6 +45,26 @@ const SHEET_OVERRIDE = sheetIdx !== -1
 // --verify  → leest de Config-tab terug en haalt hem door DEZELFDE parser als de
 // app (api/_config.js), zodat je ziet wat het dashboard straks werkelijk krijgt.
 const VERIFY = process.argv.includes('--verify');
+// --dump <sheetId>   → toont de Config-tab letterlijk, cel voor cel.
+// --scan <folderId>  → zoekt spreadsheets in een map (om duplicaten te vinden).
+const dumpIdx = process.argv.indexOf('--dump');
+const DUMP = dumpIdx !== -1 ? (process.argv[dumpIdx + 1] || '').replace(/.*\/d\/([A-Za-z0-9_-]+).*/, '$1') : null;
+const scanIdx = process.argv.indexOf('--scan');
+const SCAN = scanIdx !== -1 ? (process.argv[scanIdx + 1] || '') : null;
+// --accounts → toont per klant de windsor_accounts uit CLIENTS, zodat je die
+// naar de Config-tab kunt overzetten. Account-ids zijn geen geheimen.
+const ACCOUNTS = process.argv.includes('--accounts');
+// --set "Veld=Waarde"  (herhaalbaar) → vult kolom B van de Config-tab.
+// Matcht op de veldnaam in kolom A, hoofdletter- en spatie-ongevoelig. Schrijft
+// alleen met --apply; zonder --apply zie je wat er zou veranderen.
+const SETS = [];
+process.argv.forEach((a, i) => {
+  if (a === '--set' && process.argv[i + 1]) {
+    const raw = process.argv[i + 1];
+    const eq = raw.indexOf('=');
+    if (eq > 0) SETS.push({ field: raw.slice(0, eq).trim(), value: raw.slice(eq + 1).trim() });
+  }
+});
 const idIdx = process.argv.indexOf('--identify');
 const IDENTIFY = idIdx !== -1
   ? process.argv.slice(idIdx + 1).filter(a => !a.startsWith('--')).map(a => {
@@ -334,7 +354,7 @@ async function findSheets(rootId, token, maxDepth = 4) {
 // driveFolderId van een klant in CLIENTS staat.
 async function locate(fileId, token, clientFolders) {
   const f = await api(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents&supportsAllDrives=true`,
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,parents,trashed,owners(emailAddress)&supportsAllDrives=true`,
     token
   );
   const segments = [];
@@ -349,7 +369,7 @@ async function locate(fileId, token, clientFolders) {
     segments.unshift(p.name);
     cur = p.parents && p.parents[0];
   }
-  return { id: f.id, name: f.name, mimeType: f.mimeType, path: segments.join('/'), owner };
+  return { id: f.id, name: f.name, mimeType: f.mimeType, path: segments.join('/'), owner, trashed: f.trashed, owners: f.owners };
 }
 
 /* ---------- Inhoud van de Config-tab ---------- */
@@ -390,14 +410,26 @@ const ROWS = [
   ['Minimum ROAS', '[leeg laten tenzij je de break-even wil overrulen]', 'Directe override van de drempel'],
   ['Oordeel op', '[GA4 of Platform]', 'Welke omzetdefinitie het oordeel bepaalt. Standaard GA4'],
 
+  ['SEO (DATAFORSEO)', '', ''],
+  ['SEO domein', '[merk.be]', 'Merk-domein voor de rank-check. Zonder dit veld geen posities, wel volumes. Subdomeinen tellen mee'],
+  ['SEO markt', '[Belgium]', 'Locatienaam zoals DataForSEO hem kent, bv. Belgium of Netherlands. Leeg = Belgium'],
+  ['SEO taal', '[nl]', 'Tweeletterige taalcode: nl, fr, en. Leeg = nl'],
+  ['SEO keywords', '[keyword 1, keyword 2, keyword 3]', 'Startlijst, gescheiden door komma. In de tab zelf aan te vullen; max 60 hier'],
+
   ['DOCUMENTLINKS', '', ''],
   ['Merkbrief link', '[https://...]', "Elk veld dat op 'link' of 'url' eindigt wordt automatisch meegenomen"],
   ['Strategie link', '[https://...]', ''],
   ['Rapportage link', '[https://...]', ''],
 ];
 
-// Titel, kopregel en de sectiekoppen — indexen volgen ROWS hierboven.
-const BOLD_ROWS = [0, 3, 4, 9, 16, 22, 34];
+// Titel, kopregel en de sectiekoppen. Afgeleid uit ROWS in plaats van met de
+// hand genummerd: een sectiekop is een rij zonder waarde en zonder toelichting.
+// De vaste lijst die hier stond liep bij elke nieuwe sectie uit de pas (de laatste
+// kop bleef onopgemaakt en er stond een index die niet bestond).
+const BOLD_ROWS = ROWS
+  .map((r, i) => ({ r, i }))
+  .filter(({ r, i }) => i === 0 || i === 3 || (i > 3 && r[1] === '' && r[2] === ''))
+  .map(({ i }) => i);
 
 /* ---------- Uitvoeren ---------- */
 
@@ -462,6 +494,75 @@ async function ensureConfigTab(sheetId, token) {
   const { token, email } = await getAccessToken(saKey);
   console.log(`Service-account: ${email}`);
   console.log(APPLY ? 'Modus: UITVOEREN\n' : 'Modus: DROOGLOOP (voeg --apply toe om echt te schrijven)\n');
+
+  if (SETS.length) {
+    const { normKey, parseConfigRows } = require('../api/_config.js');
+    const target = SHEET_OVERRIDE || (ONLY && clients[ONLY] && clients[ONLY].sheetId);
+    if (!target) { console.error('--set vereist --sheet <id>, of een klant met sheetId via --only.'); process.exit(1); }
+
+    const cur = await api(`https://sheets.googleapis.com/v4/spreadsheets/${target}/values/${encodeURIComponent('Config!A1:B60')}`, token);
+    const rows = cur.values || [];
+    const rowOf = {};
+    rows.forEach((r, i) => { const k = normKey(r[0] || ''); if (k) rowOf[k] = i + 1; });
+
+    const updates = [];
+    for (const st of SETS) {
+      const row = rowOf[normKey(st.field)];
+      if (!row) { console.log(`  ! veld '${st.field}' staat niet in de Config-tab — overgeslagen`); continue; }
+      const oud = (rows[row - 1] && rows[row - 1][1]) || '';
+      console.log(`  rij ${String(row).padStart(2)}  ${st.field.padEnd(20)} ${oud || '(leeg)'}  →  ${st.value}`);
+      updates.push({ range: `Config!B${row}`, values: [[st.value]] });
+    }
+
+    if (!updates.length) { console.log('\nNiets te doen.'); return; }
+    if (!APPLY) { console.log('\nDroogloop — voeg --apply toe om dit weg te schrijven.'); return; }
+
+    await api(`https://sheets.googleapis.com/v4/spreadsheets/${target}/values:batchUpdate`, token, 'POST',
+      { valueInputOption: 'RAW', data: updates });
+    console.log(`\n✓ ${updates.length} cel(len) bijgewerkt.`);
+
+    const after = await api(`https://sheets.googleapis.com/v4/spreadsheets/${target}/values/${encodeURIComponent('Config!A1:B60')}`, token);
+    const { config, warnings } = parseConfigRows(after.values || []);
+    console.log('\nZoals de app het nu leest:');
+    console.log('  merknaam: ' + (config.brandName || '—'));
+    console.log('  accent:   ' + (config.accent || '—') + (config.accentText ? ' / tekst ' + config.accentText : ''));
+    console.log('  accounts: ' + (Object.entries(config.accounts).map(([k, v]) => k + '=' + v).join(', ') || '—'));
+    console.log('  warnings: ' + (warnings.length ? warnings.join(' | ') : 'geen'));
+    console.log('');
+    return;
+  }
+
+  if (ACCOUNTS) {
+    for (const [id, cfg] of Object.entries(clients)) {
+      if (ONLY && id.toLowerCase() !== ONLY) continue;
+      const wa = cfg.windsor_accounts || {};
+      const keys = Object.keys(wa);
+      console.log(`\n- ${id}  (email_connector: ${cfg.email_connector || '—'})`);
+      if (!keys.length) { console.log('    geen windsor_accounts in CLIENTS'); continue; }
+      for (const k of keys) console.log(`    ${k.padEnd(18)} ${wa[k]}`);
+    }
+    console.log('');
+    return;
+  }
+
+  if (DUMP) {
+    const r = await api(`https://sheets.googleapis.com/v4/spreadsheets/${DUMP}/values/${encodeURIComponent('Config!A1:C60')}`, token);
+    (r.values || []).forEach((row, i) => {
+      const a = (row[0] || '').slice(0, 34).padEnd(34);
+      const b = (row[1] || '').slice(0, 40);
+      if (row[0] || row[1]) console.log(String(i + 1).padStart(3) + '  ' + a + ' | ' + b);
+    });
+    console.log('');
+    return;
+  }
+
+  if (SCAN) {
+    const hits = await findSheets(SCAN, token);
+    console.log(`\n${hits.length} spreadsheet(s):`);
+    for (const h of hits) console.log(`  ${h.office ? '[.xlsx]' : '[Sheet]'} ${h.path}\n          id: ${h.id}`);
+    console.log('');
+    return;
+  }
 
   if (VERIFY) {
     const { parseConfigRows } = require('../api/_config.js');
@@ -537,6 +638,8 @@ async function ensureConfigTab(sheetId, token) {
         console.log(`  id:     ${r.id}`);
         console.log(`  type:   ${kind}`);
         console.log(`  pad:    ${r.path || '(direct in de klantmap)'}`);
+        console.log(`  status: ${r.trashed ? 'IN DE PRULLENBAK' : 'actief'}`);
+        console.log(`  eigenaar: ${(r.owners || []).map(o => o.emailAddress).join(', ') || 'onbekend'}`);
         console.log(`  klant:  ${r.owner || 'GEEN match met een driveFolderId uit CLIENTS'}`);
         if (r.mimeType === GSHEET) {
           try {

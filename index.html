@@ -161,6 +161,14 @@
             <span class="icon">◎</span>
             <span>Website</span>
           </button>
+          <button class="nav-link" data-page="seo">
+            <span class="icon">⌕</span>
+            <span>SEO</span>
+          </button>
+          <button class="nav-link" data-page="geo">
+            <span class="icon">◈</span>
+            <span>GEO</span>
+          </button>
           <button class="nav-link" data-page="roas">
             <span class="icon">€</span>
             <span>ROAS</span>
@@ -325,6 +333,25 @@
                periode uit de topbar; de opbouw staat in renderWebsite() in app.js. -->
           <div id="page-website" class="dash-page" style="display:none;">
             <div id="website-content"></div>
+          </div>
+
+          <!-- ========== SEO PAGE ========== -->
+          <!-- Zoekvolumes, concurrentie, CPC, 12-maandstrend en de organische
+               positie van het merk-domein per keyword. Bron: DataForSEO via
+               api/seo.js. Eigen keywordlijst, geen periode uit de topbar —
+               zoekvolume is een maandcijfer, geen dagreeks. Opbouw:
+               renderSeo() in app.js. -->
+          <div id="page-seo" class="dash-page" style="display:none;">
+            <div id="seo-content"></div>
+          </div>
+
+          <!-- ========== GEO PAGE ========== -->
+          <!-- AI-zichtbaarheid: hoe LLM's over het merk praten. De gemeten
+               baseline komt uit geo-dashboard.json in de Drive-map van de klant
+               (schema: agents/GEO_Dashboard_Schema.md); alleen de Sources-tab
+               haalt live op. Opbouw: renderGeo() in app.js. -->
+          <div id="page-geo" class="dash-page" style="display:none;">
+            <div id="geo-content"></div>
           </div>
 
           <!-- ========== ROAS PAGE ========== -->

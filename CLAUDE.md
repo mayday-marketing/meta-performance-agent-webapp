@@ -150,6 +150,69 @@ topbar — anders dan de ROAS-tab, die een eigen maandperiode heeft.
   volledige domeinnaam erin: voor `spotto.be` viel de query "spotto" (2.852 kliks)
   daar onder *niet*-merkgebonden.
 
+### Donut, verschilkolommen en zoeken in de Website-tab
+
+- **Donut onder Kanalen** (`Charts.donut` in `charts.js`) vat GA4's dozijn channel
+  groups samen tot zeven vaste groepen: organisch, betaald, direct, verwijzing,
+  e-mail, AI, overig. De volgorde ligt vast en daarmee de kleur — **kleur volgt het
+  kanaal, nooit zijn rangorde**, dus 'organisch' blijft dezelfde tint ook als het
+  een keer het kleinste segment is. Lege groepen blijven in de legenda staan zodat
+  de toewijzing niet verschuift.
+- **Eigen slice-palet** (`--slice-1` … `--slice-7`), bewust los van het merkaccent:
+  een kanaalgroep moet in elk thema dezelfde kleur houden. Zeven tinten voor licht
+  en zeven aparte stappen voor donker, allebei gevalideerd op lichtheid, chroma,
+  kleurenblindheid en contrast. Het lichte palet zakt onder 3:1 contrast, wat is
+  opgevangen met de legenda die de cijfers draagt en 2px tussenruimte tussen de
+  segmenten. Vervang die waarden niet zonder opnieuw te valideren.
+- **Grafieken bakken hun kleuren in de SVG.** Na een thema- of accentwissel moet de
+  pagina opnieuw getekend worden; dat doet `repaintCharts()` in `app.js`.
+- **Verschilkolommen bij Bronnen** vergen de bronnenuitsplitsing óók voor de
+  vergelijkingsperiode. Daarom staat `GA4_SOURCES` in `core` en niet bij de add-ons,
+  en leidt `_sheetdata.js` de bronnen af uit de kanaal-tab (die heeft
+  `session_source_medium` al). Een bron die vorige periode niet bestond krijgt het
+  label 'nieuw' in plaats van een misleidende +100%.
+- **Zoeken in landingspagina's** filtert client-side over de 200 rijen die de
+  server meestuurt (getoond worden er 15). De rijen zitten in een eigen `tbody`
+  met een id, zodat een aanslag alleen dat blok hertekent — een volledige
+  re-render zou het invoerveld vervangen en de focus wegnemen.
+
+## Datasheet-eerst (api/_sheetdata.js)
+
+Windsor exporteert per klant elke nacht naar een **Windsor.ai-data-sheet**. De
+Website-tab leest die eerst en gaat alleen naar de API voor wat de sheet niet dekt.
+Gemeten: een sheet-tab lezen duurt 0,3–2,3 s, een koude Windsor-fetch over 90 dagen
+17,9 s met 13–21 aanroepen per bezoek.
+
+- **`CLIENTS[clientId].dataSheetId`** wijst de spreadsheet aan. Bewust in de env var
+  en **niet** in de Config-tab: die tab staat in een sheet dat met de klant gedeeld
+  kán worden, en een sheet-id daaruit accepteren zou een klant laten kiezen wiens
+  data hij leest.
+- **Tabs worden op patroon herkend**, niet op naam: de exportnamen verschillen per
+  klant (`Google Analytics 4 - dag - SPOTTO - windsor.ai`). `_windsor_staging_*` is
+  een restant van een lopende export en wordt overgeslagen.
+- **Koppen worden genormaliseerd** (kleine letters, leestekens weg): GA4 schrijft
+  `Date`, Search Console `date`. Het doelveld heet `Key event count for <event>` en
+  wordt op voorvoegsel herkend.
+- **Dekking wordt op gaten gecontroleerd**, niet alleen op begin en eind. Een
+  lopende backfill levert losse dagen over een jaar: min/max zien er dan goed uit
+  terwijl de helft ontbreekt, en het totaal zou stilzwijgend te laag worden. Per
+  bron geldt een marge (GA4 2 dagen, Search Console 4) omdat de dag van vandaag
+  nog niet geëxporteerd is.
+- **Per blok terugvallen.** `origin` in de respons zegt per blok `sheet` of `api`;
+  de voetnoot in de UI toont dat, inclusief de reden waarom een tab afviel.
+- **Twee dingen kan een dagtabel niet.** Unieke gebruikers zijn niet optelbaar
+  (`users: null`, de UI toont nieuwe gebruikers, die zijn wél optelbaar). En
+  sessies liggen ~1,2% hoger dan GA4's eigen periodetotaal, omdat een sessie over
+  middernacht in twee dagen telt: gemeten 280.576 tegenover 277.353.
+- **De querytabel telt nooit op tot het totaal.** Google geeft alleen zoekopdrachten
+  boven een privacydrempel vrij én kapt af op 5.000 rijen per dag. Gemeten: 59.754
+  kliks op queryniveau tegenover 146.543 in de dagtabel. Het totaal komt daarom
+  altijd uit de dag-tab, nooit uit een som over zoekopdrachten.
+- **Let op de API-sleutel in de sheet.** Windsor schrijft mislukte runs inclusief
+  de volledige aanroep-URL naar de `Queries`-tab, mét `api_key=`. Die sleutel is
+  gedeeld over meerdere klanten. Deel een Windsor.ai-data-sheet dus nooit met een
+  klant.
+
 ## Known pitfalls in de Website-tab
 
 - **Windsor's REST-endpoint negeert `accounts` én `limit`** (geverifieerd). Elke
@@ -172,6 +235,96 @@ topbar — anders dan de ROAS-tab, die een eigen maandperiode heeft.
   events. De landingspagina-tabel toont dat als *per sessie* (kan boven 1 uitkomen),
   het apparaatblok toont betrokkenheid in plaats van een ratio. Maak daar geen
   percentage van.
+
+## SEO-tab (DataForSEO)
+
+Zoekvolume, concurrentie, CPC, twaalfmaandstrend en de organische positie van het
+merk-domein per keyword (`#page-seo`, nav `data-page="seo"`, `api/seo.js`).
+Geport van `TEMPLATE_seo-dashboard.html` in Drive (7.3 AI-agents-skills/dashboards,
+handover ernaast) — daar een los artifact op de DataForSEO **MCP**, hier
+multi-tenant en server-side op de **REST**-API met Basic auth.
+
+- **Twee endpoints die duizend keer in prijs schelen, dus twee knoppen.**
+  `keywords_data/google_ads/search_volume/live` is één batch-call voor de hele
+  lijst (verwaarloosbaar); `serp/google/organic/live/advanced` is één call **per
+  keyword** (~€0,002). Vraag volumes nooit per keyword op, en zet de rank-check
+  nooit in het laadpad van de tab.
+- **REST ≠ MCP in de responsvorm.** `monthly_searches` is in REST een array van
+  `{year, month, search_volume}`; de MCP geeft `{"YYYY-MM": n}`. `normMonthly()`
+  zet dat om naar `[{month:'YYYY-MM', volume}]`. De handover in Drive beschrijft
+  de MCP-vorm — dat verschil is echt.
+- **Een live-call bevat precies één taak**, ook al is de body een array. Posities
+  gaan daarom via een worker pool (`RANK_CONCURRENCY = 6`) met een deadline van
+  45 s; wat daarna zou starten komt terug als `skipped` en wordt **niet** gecached.
+  Google Ads-live staat maar 12 requests per minuut toe.
+- **Geen periode.** Zoekvolume is een maandcijfer en een positie een momentopname,
+  dus de topbar-periode geldt hier niet (anders dan de Website-tab).
+- **Isolatie.** Domein, markt, taal en de startlijst komen uit de Config-tab
+  (`SEO domein`, `SEO markt`, `SEO taal`, `SEO keywords`). Keywords zijn de enige
+  waarde die het request wél mag aanleveren — dat zijn zoektermen, geen
+  resource-ids — en ze worden gesaneerd en begrensd (100 voor volumes, 25 voor
+  posities). Het DataForSEO-saldo is gedeeld over alle klanten.
+- **Dagcache op twee plekken**, altijd met `clientId` én de keywordlijst in de
+  sleutel: een Map in de functie (verdwijnt met een koude instantie) en
+  `localStorage` in de browser (de echte rem op de kosten). De template
+  waarschuwt expliciet voor een cache-prefix die tussen klanten botst.
+- **Ontbrekende data is onbekend, nooit nul.** Een keyword zonder Google-data
+  krijgt toch een rij (`volume: null`); de grafiek tekent alleen maanden die élk
+  keyword heeft, want `charts.js` kent geen gaten en zou een ontbrekende maand als
+  nul tekenen. Zonder `SEO domein` blijven volumes gewoon werken, alleen de
+  rank-check valt weg.
+- **Positie matcht ook subdomeinen** (`shop.merk.be` hoort bij `merk.be`) en telt
+  alleen `type === "organic"` — een local pack is geen organische positie.
+
+## GEO-tab (AI-zichtbaarheid)
+
+Hoe de vijf AI-engines over het merk praten (`#page-geo`, nav `data-page="geo"`,
+`api/geo.js` + `api/_geodata.js`). Geport van `TEMPLATE_geo-dashboard.html` in
+Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
+
+- **De baseline is een bestand, geen parser.** De `geo-visibility-audit`-skill
+  levert een markdown-rapport voor mensen. Twee echte audits (mayday en Just
+  Jane, beide 28-07-2026) hebben verschillende koppen, andere tabelkolommen
+  (`Runs` vs `Prompts`, `Top competitor by SoV` vs `Top concurrent`), een andere
+  taal en bij Just Jane een extra baseline-tabel vóór de scorecard. Een parser
+  daarop faalt niet luid — hij geeft een verkeerd getal. Daarom leest de tab
+  **`geo-dashboard.json`** uit de Drive-map van de klant. Schema en een ingevuld
+  voorbeeld: `agents/GEO_Dashboard_Schema.md` + `agents/geo-dashboard.example.json`.
+- **Geen audit = geen cijfers.** Zonder bestand toont de tab wat er moet gebeuren
+  en waar gezocht is. Nooit nullen, nooit demo-data: een klant ziet het verschil
+  niet.
+- **Bestand vinden:** klantmap → `GEO/` → `00_AI-CONTEXT/`, elk bestand dat
+  matcht op `geo-dashboard*.json`, nieuwste wint. De map komt uit
+  `CLIENTS[clientId].driveFolderId`, nooit uit het request.
+- **Percentages zijn 0–100 in dat bestand, geen fracties** (velden heten `*Pct`).
+  Een validator die soms `0,15` en soms `15` accepteert is een fout die je pas
+  in het dashboard ziet.
+- **De promptmatrix kent vier toestanden**, niet drie: 0 niet genoemd, 1 genoemd,
+  2 genoemd-maar-fout, en **weggelaten = niet gemeten**. Die vierde staat niet in
+  de HTML-template maar is nodig: bij Just Jane is Gemini op 7 van de 20 prompts
+  gemeten. Zonder onderscheid telt 'niet gemeten' als 'niet genoemd' en zakt de
+  mention rate structureel. De UI telt de vier apart onder de tabel.
+- **Readiness telt `unknown` apart van `fail`.** Zolang een site niet bereikbaar
+  is valt er niets te controleren; dat is geen gezakte check.
+- **Alleen de Sources-tab is live.** DataForSEO LLM-mentions: welke domeinen,
+  merken en pagina's voeden AI-antwoorden in deze markt. Dat is marktdata en zegt
+  niets over déze klant — daarom mag die wél elke dag veranderen, terwijl de
+  baseline een meting met een datum blijft.
+- **Sources-kosten: ~$0,10 per pull** (per call, niet per rij) en tot 120 s
+  looptijd — vandaar `maxDuration: 120`, een knop en een dagcache. Het keyword
+  staat vast in het auditbestand; het request mag alleen het platform wisselen,
+  anders kan een klant willekeurige betaalde queries afvuren op het gedeelde
+  saldo.
+- **Responsvorm geverifieerd** (live call, 20-09-2026):
+  `tasks[0].result[0].items[0].total.sources_domain[]` met `{key, mentions,
+  ai_search_volume}`. DataForSEO heeft de endpoints hernoemd
+  (`top_domains` → `top_mentioned_domains`) en noemt dat blok daar
+  `aggregated_metrics`; `geo.js` probeert de nieuwe naam en valt bij een 404
+  terug op de oude, en leest beide sleutels.
+- **Databasegrenzen:** de Belgische database kent alleen platform `google`
+  (AI Overviews/AI Mode) en vereist een taal; de ChatGPT-database bestaat enkel
+  voor VS/EN. De UI waarschuwt vóór de call bij die combinatie in plaats van een
+  leeg resultaat te tonen.
 
 ## The two AI agents (know which prompt serves which consumer)
 
@@ -221,9 +374,15 @@ syntax shows literally — the chat prompt tells the model to avoid `**`/`#`/etc
 ## Env vars
 
 `AUTH_SECRET` (required, no fallback), `ANTHROPIC_API_KEY`, `CLIENTS` (JSON, holds
-client passwords + per-client keys — mark Sensitive in Vercel),
-`GOOGLE_SERVICE_ACCOUNT_KEY` (JSON, mark Sensitive). Optional prompt overrides:
-`AGENT_SYSTEM_PROMPT`, `ANALYSIS_SYSTEM_PROMPT`.
+client passwords + per-client keys — mark Sensitive in Vercel; per klant optioneel
+`dataSheetId` voor de Windsor-datasheet, zie 'Datasheet-eerst'),
+`GOOGLE_SERVICE_ACCOUNT_KEY` (JSON, mark Sensitive), `DATAFORSEO_LOGIN` +
+`DATAFORSEO_PASSWORD` (van app.dataforseo.com/api-access — één gedeeld account
+voor alle klanten; per klant te overschrijven met `dataforseo_login` /
+`dataforseo_password` in `CLIENTS`. Zonder deze twee blijven de SEO-tab en de
+Sources-sub-tab van GEO leeg met een uitleg; de rest van het dashboard — inclusief
+de GEO-baseline, die uit Drive komt — merkt er niets van). Optional prompt
+overrides: `AGENT_SYSTEM_PROMPT`, `ANALYSIS_SYSTEM_PROMPT`.
 
 ## Deploy
 

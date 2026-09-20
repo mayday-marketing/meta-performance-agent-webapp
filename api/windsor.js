@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { getClientConfig } = require('./_config');
 const { activeChannels, pendingChannels, matchGa4Channel, ga4GroupOf } = require('./_channels');
+const { getWebsiteSheetData } = require('./_sheetdata');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -633,7 +634,7 @@ module.exports = async (req, res) => {
           return { from: d.toISOString().slice(0, 10), to, capped: true };
         }
 
-        async function buildRange(from, to, detail, timeout) {
+        async function buildRange(from, to, detail, timeout, sheet) {
           const params = { date_from: from, date_to: to };
           const pw = pageWindow(from, to);
           const pageParams = { date_from: pw.from, date_to: pw.to };
@@ -641,37 +642,55 @@ module.exports = async (req, res) => {
           const ga4 = (f, label, t, p) => (hasGa4 ? windsorScoped('googleanalytics4', f, p || params, t || timeout, label) : Promise.resolve(EMPTY));
           const gsc = (f, label, t, p) => (hasGsc ? windsorScoped('searchconsole', f, p || params, t || timeout, label) : Promise.resolve(EMPTY));
 
+          // Wat de datasheet al levert, halen we niet nog eens op. Een tab die de
+          // periode niet dekt of ontbreekt telt hier niet mee; die gaten worden
+          // hieronder gewoon live opgehaald. Zo werkt de tab ook voor een klant
+          // zonder datasheet precies zoals voorheen.
+          const sd = sheet || {};
+          const useTotals   = !!sd.totals;
+          const useChannels = !!sd.channels;
+          const useLanding  = detail && !!sd.landingPages;
+          const useSearch   = !!sd.search;
+          const useQueries  = detail && !!sd.queries;
+          const useSources  = !!sd.sources;
+          const skip = Promise.resolve(EMPTY);
+
+          // Bronnen zitten in core en niet bij de add-ons: de tabel toont een
+          // verschil met de vorige periode, en daarvoor moet ook de
+          // vergelijkingsperiode (detail=false) deze uitsplitsing hebben.
           const core = [
-            ga4(GA4_TOTALS, 'web-ga4-totals'),
-            ga4(GA4_CHANNELS, 'web-ga4-channels'),
-            gsc(GSC_TOTALS, 'web-gsc-totals'),
+            useTotals ? skip : ga4(GA4_TOTALS, 'web-ga4-totals'),
+            useChannels ? skip : ga4(GA4_CHANNELS, 'web-ga4-channels'),
+            useSearch ? skip : gsc(GSC_TOTALS, 'web-gsc-totals'),
+            useSources ? skip : ga4(GA4_SOURCES, 'web-ga4-sources', ADDON_MS),
           ];
           // Add-ons: krappere timeout en niet-fataal, zodat één trage breakdown de
           // kerncijfers niet meesleurt (zelfde afweging als getDashboard).
           const extras = detail ? [
-            ga4(GA4_DAILY, 'web-ga4-daily', ADDON_MS),
-            ga4(GA4_SOURCES, 'web-ga4-sources', ADDON_MS),
-            ga4(GA4_LANDING, 'web-ga4-landing', ADDON_MS, pageParams),
+            useTotals ? skip : ga4(GA4_DAILY, 'web-ga4-daily', ADDON_MS),
+            useLanding ? skip : ga4(GA4_LANDING, 'web-ga4-landing', ADDON_MS, pageParams),
             ga4(GA4_DEVICES, 'web-ga4-devices', ADDON_MS),
             ga4(GA4_COUNTRIES, 'web-ga4-countries', ADDON_MS),
             ga4(GA4_RETURNING, 'web-ga4-returning', ADDON_MS),
             hasGa4 ? fetchFunnel(params, ADDON_MS) : Promise.resolve({ data: EMPTY, degraded: false }),
-            gsc(GSC_QUERIES, 'web-gsc-queries', ADDON_MS, pageParams),
+            useQueries ? skip : gsc(GSC_QUERIES, 'web-gsc-queries', ADDON_MS, pageParams),
             gsc(GSC_PAGES, 'web-gsc-pages', ADDON_MS, pageParams),
           ] : [];
-          const goalCall = (hasGa4 && goalFields)
+          // De doelkolom zit al in de sheet-tabs; dan is deze losse call overbodig.
+          const goalCall = (!useTotals && hasGa4 && goalFields)
             ? ga4(goalFields, 'web-ga4-goal', ADDON_MS)
             : Promise.resolve(EMPTY);
 
-          const [totalsRaw, channelsRaw, gscTotalsRaw, goalRaw, ...rest] =
+          const [totalsRaw, channelsRaw, gscTotalsRaw, sourcesRaw, goalRaw, ...rest] =
             await Promise.all([...core, goalCall, ...extras]);
-          const [dailyRaw, sourcesRaw, landingRaw, devicesRaw, countriesRaw, returningRaw, funnelRes, queriesRaw, gscPagesRaw] = rest;
+          const [dailyRaw, landingRaw, devicesRaw, countriesRaw, returningRaw, funnelRes, queriesRaw, gscPagesRaw] = rest;
 
           const errors = {};
           if (errOf(totalsRaw)) errors.ga4Totals = errOf(totalsRaw);
           if (errOf(channelsRaw)) errors.ga4Channels = errOf(channelsRaw);
           if (errOf(gscTotalsRaw)) errors.gscTotals = errOf(gscTotalsRaw);
           if (errOf(goalRaw)) errors.ga4Goal = errOf(goalRaw);
+          if (errOf(sourcesRaw)) errors.ga4Sources = errOf(sourcesRaw);
           // Add-ons falen niet-fataal, maar stil falen mag niet: een lege tabel
           // moet te herleiden zijn tot een timeout i.p.v. op 'geen data' lijken.
           if (detail) {
@@ -681,13 +700,15 @@ module.exports = async (req, res) => {
             }
           }
 
-          const ga4Available = hasGa4 && !errors.ga4Totals;
-          const gscAvailable = hasGsc && !errors.gscTotals;
+          const ga4Available = useTotals || (hasGa4 && !errors.ga4Totals);
+          const gscAvailable = useSearch || (hasGsc && !errors.gscTotals);
           // Het doelveld bestaat alleen als het event in deze property een key event
           // is. Lukt het niet, dan valt de tab terug op 'conversions' (álle key
           // events samen) — met een vlag, want dat is een ander cijfer.
           const goalKey = goalEvent ? `conversions_${goalEvent}` : null;
-          const goalAvailable = !!(goalKey && !errors.ga4Goal && rowsOf(goalRaw).some(r => r[goalKey] != null));
+          const goalAvailable = useTotals
+            ? (sd.totals.goalConversions != null)
+            : !!(goalKey && !errors.ga4Goal && rowsOf(goalRaw).some(r => r[goalKey] != null));
 
           // --- Doelconversies per dag en per kanaal ----------------------------
           const goalByDate = {}, goalByChannel = {};
@@ -736,7 +757,7 @@ module.exports = async (req, res) => {
             ? Object.values(goalByDate).reduce((s, v) => s + v, 0)
             : null;
 
-          const totals = ga4Available ? {
+          const totalsLive = ga4Available ? {
             available: true,
             sessions: t.sessions,
             users: t.users,
@@ -768,6 +789,8 @@ module.exports = async (req, res) => {
             conversionRate: null, goalConversions: null, goalConversionRate: null,
             revenue: null, transactions: null, aov: null, revenuePerSession: null,
           };
+          // De sheet wint als hij de periode dekt; anders het live opgehaalde blok.
+          const totals = useTotals ? sd.totals : totalsLive;
 
           // --- Kanaalgroepen ----------------------------------------------------
           const chMap = new Map();
@@ -782,13 +805,14 @@ module.exports = async (req, res) => {
             c.transactions += num(r.transactions);
             chMap.set(name, c);
           }
-          const channels = Array.from(chMap.values()).map(c => ({
+          const channelsLive = Array.from(chMap.values()).map(c => ({
             ...c,
             goalConversions: goalAvailable ? (goalByChannel[c.channel] || 0) : null,
             engagementRate: div(c.engagedSessions, c.sessions),
             conversionRate: div(goalAvailable ? (goalByChannel[c.channel] || 0) : c.conversions, c.sessions),
             revenuePerSession: div(c.revenue, c.sessions),
           })).sort((a, b) => b.sessions - a.sessions);
+          const channels = useChannels ? sd.channels : channelsLive;
 
           // --- Search Console: totalen + dagreeks --------------------------------
           let sClicks = 0, sImpr = 0, sPosWeighted = 0;
@@ -806,7 +830,7 @@ module.exports = async (req, res) => {
           // een nul die als meting leest.
           const gscRows = rowsOf(gscTotalsRaw).length;
           if (gscAvailable && !gscRows) errors.gscEmpty = 'Search Console leverde geen rijen — controleer de property in de Config-tab.';
-          const search = (gscAvailable && gscRows) ? {
+          const searchLive = (gscAvailable && gscRows) ? {
             available: true,
             clicks: sClicks,
             impressions: sImpr,
@@ -816,6 +840,24 @@ module.exports = async (req, res) => {
             ctr: div(sClicks, sImpr),
             position: div(sPosWeighted, sImpr),
           } : { available: false, clicks: null, impressions: null, ctr: null, position: null };
+          const search = useSearch ? sd.search : searchLive;
+
+          // Bronnen worden voor élke periode berekend (ook de vergelijking), zodat
+          // de tabel per cijfer een verschil kan tonen.
+          const sourcesTable = useSources ? sd.sources : (() => {
+            const m = new Map();
+            for (const r of rowsOf(sourcesRaw)) {
+              const k = String(r.session_source_medium || '(onbekend)');
+              const c = m.get(k) || { source: k, sessions: 0, engagedSessions: 0, conversions: 0, revenue: 0 };
+              c.sessions += num(r.sessions);
+              c.engagedSessions += num(r.engaged_sessions);
+              c.conversions += num(r.conversions);
+              c.revenue += num(r.purchase_revenue);
+              m.set(k, c);
+            }
+            return Array.from(m.values()).sort((a, b) => b.sessions - a.sessions).slice(0, 60)
+              .map(c => ({ source: c.source, sessions: c.sessions, engagementRate: div(c.engagedSessions, c.sessions), conversions: c.conversions, revenue: c.revenue }));
+          })();
 
           const out = {
             window: { startDate: from, endDate: to },
@@ -828,10 +870,27 @@ module.exports = async (req, res) => {
             totals,
             channels,
             search,
-            daily: Array.from(daily.values()).sort((a, b) => a.date.localeCompare(b.date)),
-            searchDaily: Array.from(searchDaily.values())
-              .map(d => ({ date: d.date, clicks: d.clicks, impressions: d.impressions, position: div(d.posWeighted, d.impressions) }))
-              .sort((a, b) => a.date.localeCompare(b.date)),
+            sources: sourcesTable,
+            daily: useTotals
+              ? (sd.daily || [])
+              : Array.from(daily.values()).sort((a, b) => a.date.localeCompare(b.date)),
+            searchDaily: useSearch
+              ? (sd.searchDaily || [])
+              : Array.from(searchDaily.values())
+                  .map(d => ({ date: d.date, clicks: d.clicks, impressions: d.impressions, position: div(d.posWeighted, d.impressions) }))
+                  .sort((a, b) => a.date.localeCompare(b.date)),
+            // Per blok: kwam dit uit de datasheet of live uit Windsor? De voetnoot
+            // in de UI toont dat, zodat een afwijkend cijfer te herleiden is.
+            origin: {
+              totals: useTotals ? 'sheet' : 'api',
+              channels: useChannels ? 'sheet' : 'api',
+              landingPages: useLanding ? 'sheet' : 'api',
+              sources: useSources ? 'sheet' : 'api',
+              search: useSearch ? 'sheet' : 'api',
+              queries: useQueries ? 'sheet' : 'api',
+            },
+            sheetCoverage: sd.coverage || null,
+            sheetWarnings: sd.warnings && sd.warnings.length ? sd.warnings : null,
             errors,
           };
           if (!detail) return out;
@@ -858,13 +917,12 @@ module.exports = async (req, res) => {
           };
           const bySessions = (a, b) => b.sessions - a.sessions;
 
-          out.sources = group(rowsOf(sourcesRaw), r => String(r.session_source_medium || '(onbekend)'), addSession)
-            .sort(bySessions).slice(0, 15)
-            .map(c => ({ source: c.key, sessions: c.sessions, engagementRate: div(c.engagedSessions, c.sessions), conversions: c.conversions, revenue: c.revenue }));
-
-          out.landingPages = group(rowsOf(landingRaw), r => String(r.landing_page || '(onbekend)'), addSession)
-            .sort(bySessions).slice(0, 15)
+          out.landingPages = useLanding ? sd.landingPages : group(rowsOf(landingRaw), r => String(r.landing_page || '(onbekend)'), addSession)
+            .sort(bySessions).slice(0, 200)
             .map(c => ({ page: c.key, sessions: c.sessions, engagementRate: div(c.engagedSessions, c.sessions), conversions: c.conversions, conversionRate: div(c.conversions, c.sessions), revenue: c.revenue }));
+          // pageLevelWindow geldt alleen voor de live variant: de sheet dekt de
+          // hele periode, anders was hij hierboven afgekeurd.
+          if (useLanding) out.pageLevelWindow = null;
 
           out.devices = group(rowsOf(devicesRaw), r => String(r.devicecategory || '(onbekend)'), addSession)
             .sort(bySessions)
@@ -932,10 +990,10 @@ module.exports = async (req, res) => {
             ctr: div(q.clicks, q.impressions),
             position: div(q.posWeighted, q.impressions),
           }));
-          out.queries = [...queries].sort((a, b) => b.clicks - a.clicks).slice(0, 15);
+          out.queries = useQueries ? sd.queries.top : [...queries].sort((a, b) => b.clicks - a.clicks).slice(0, 15);
           // Quick wins: net buiten de eerste pagina (positie 8–20) met genoeg
           // vertoningen om iets te winnen. Dit is de lijst waar SEO-werk begint.
-          out.quickWins = queries
+          out.quickWins = useQueries ? sd.queries.quickWins : queries
             .filter(q => q.position != null && q.position >= 8 && q.position <= 20 && q.impressions >= 50)
             .sort((a, b) => b.impressions - a.impressions)
             .slice(0, 10);
@@ -961,8 +1019,11 @@ module.exports = async (req, res) => {
           // 'spotto' (2.852 kliks) daar als niet-merkgebonden. Met de merknaam als
           // token klopt het wél, en de regel is uitlegbaar aan de klant.
           const split = { branded: { clicks: 0, impressions: 0 }, nonbranded: { clicks: 0, impressions: 0 } };
+          // Rekenen over de volledige lijst, niet over de getoonde top 15 — en dus
+          // over de sheetlijst zodra die gebruikt wordt.
+          const brandedSource = useQueries ? (sd.queries.all || []) : queries;
           if (brandTokens.length) {
-            for (const q of queries) {
+            for (const q of brandedSource) {
               const hay = q.query.toLowerCase();
               const bucket = brandTokens.some(t => hay.includes(t)) ? split.branded : split.nonbranded;
               bucket.clicks += q.clicks;
@@ -988,14 +1049,28 @@ module.exports = async (req, res) => {
         // 35s i.p.v. krapper: een koude Search-Console-call duurt bij Windsor ~28s
         // (warm ~1s, hij cachet per periode). Met een krappe timeout zou de
         // vergelijking bij het eerste bezoek structureel wegvallen.
-        const compare = (from, to) => ((from && to)
-          ? buildRange(from, to, false, 35000).catch(e => ({ __error: e.message }))
+        const compare = (from, to, sheet) => ((from && to)
+          ? buildRange(from, to, false, 35000, sheet).catch(e => ({ __error: e.message }))
           : Promise.resolve(null));
 
+        // Datasheet eerst. De module cachet de ruwe tabrijen per klant, dus de
+        // twee vergelijkingsperiodes kosten geen extra leesactie — ze filteren
+        // dezelfde rijen op een ander datumbereik. Faalt het lezen, dan is `null`
+        // gewoon 'geen sheet' en haalt buildRange alles live op.
+        const loadSheet = async (from, to) => {
+          try { return await getWebsiteSheetData(clientId, from, to); }
+          catch (e) { console.error('[windsor] datasheet lezen mislukt:', e.message); return null; }
+        };
+        const sheetCur = await loadSheet(startDate, endDate);
+        const [sheetPrev, sheetYoy] = await Promise.all([
+          (prevFrom && prevTo) ? loadSheet(prevFrom, prevTo) : Promise.resolve(null),
+          (yoyFrom && yoyTo) ? loadSheet(yoyFrom, yoyTo) : Promise.resolve(null),
+        ]);
+
         const [current, previous, yearAgo] = await Promise.all([
-          buildRange(startDate, endDate, true, 45000),
-          compare(prevFrom, prevTo),
-          compare(yoyFrom, yoyTo),
+          buildRange(startDate, endDate, true, 45000, sheetCur),
+          compare(prevFrom, prevTo, sheetPrev),
+          compare(yoyFrom, yoyTo, sheetYoy),
         ]);
 
         // Websitetype bepaalt welk funnelblok de UI toont. Staat het niet in de
@@ -1009,6 +1084,13 @@ module.exports = async (req, res) => {
           yearAgoPeriod: (yoyFrom && yoyTo) ? { startDate: yoyFrom, endDate: yoyTo } : null,
           hasGa4,
           hasGsc,
+          // Heeft deze klant een datasheet, en werd die ook echt gebruikt?
+          dataSheet: {
+            configured: !!(sheetCur && sheetCur.sheetId),
+            used: !!(sheetCur && sheetCur.available),
+            tabs: sheetCur ? sheetCur.tabs : null,
+            warnings: sheetCur && sheetCur.warnings.length ? sheetCur.warnings : null,
+          },
           website: {
             type,
             typeSource: webCfg.type ? 'config' : 'afgeleid',

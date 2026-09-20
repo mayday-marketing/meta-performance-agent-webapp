@@ -78,6 +78,28 @@
     websiteError: null,
     websiteKey: null,                 // klant+periode waarvoor de tab geladen is (lazy refresh)
     websiteCompare: "prev",           // 'prev' (vorige periode) | 'yoy' (vorig jaar)
+    websiteLandingQuery: "",          // zoekterm in de landingspagina-tabel (alleen deze sessie)
+    // SEO-tab — eigen keywordlijst, géén periode (zoekvolume is een maandcijfer).
+    seo: null,                        // volumes-respons: { items, keywords, cost, ... }
+    seoLoading: false,
+    seoError: null,
+    seoSettings: null,                // domein, markt, taal, limieten uit api/seo.js
+    seoKeywords: null,                // effectieve lijst; null = nog niet bekend (volgt de Config-tab)
+    seoRanks: null,                   // ranks-respons: { ranks, domain, cost, ... }
+    seoRanksLoading: false,
+    seoRanksError: null,
+    seoSort: { key: "volume", dir: "desc" },
+    // GEO-tab — AI-zichtbaarheid. De baseline is een audit met een eigen datum,
+    // dus geen periode uit de topbar. Alleen de Sources-laag is live.
+    geo: null,                        // gevalideerde baseline uit geo-dashboard.json
+    geoLoading: false,
+    geoError: null,
+    geoMeta: null,                    // bestandsnaam, waarschuwingen, waar gezocht is
+    geoTab: "overzicht",              // overzicht | prompts | sources | website | acties
+    geoSources: null,                 // live DataForSEO-mentions
+    geoSourcesLoading: false,
+    geoSourcesError: null,
+    geoSourcesPlatform: null,         // null = volg het auditbestand
   };
 
   /* ---------- Session persistence ---------- */
@@ -186,6 +208,9 @@
       const msg = data?.error || `Fout ${res.status}`;
       const err = new Error(msg);
       err.status = res.status;
+      // Body meegeven: een 400 draagt soms bruikbare context (de SEO-tab haalt er
+      // de instellingen uit om te kunnen uitleggen wát er ontbreekt).
+      err.data = data;
       throw err;
     }
     return data;
@@ -301,6 +326,28 @@
     state.websiteKey = null;
     state.websiteError = null;
     state.websiteLoading = false;
+    state.websiteLandingQuery = "";
+    // SEO-state wissen: de keywordlijst van klant A hoort niet in de tab van klant B.
+    // De lijst zelf staat per klant in localStorage en wordt bij het inloggen opnieuw
+    // geladen (zie seoFetch).
+    state.seo = null;
+    state.seoError = null;
+    state.seoLoading = false;
+    state.seoSettings = null;
+    state.seoKeywords = null;
+    state.seoRanks = null;
+    state.seoRanksError = null;
+    state.seoRanksLoading = false;
+    // GEO-state wissen: een auditbestand hoort bij één klant.
+    state.geo = null;
+    state.geoError = null;
+    state.geoLoading = false;
+    state.geoMeta = null;
+    state.geoTab = "overzicht";
+    state.geoSources = null;
+    state.geoSourcesError = null;
+    state.geoSourcesLoading = false;
+    state.geoSourcesPlatform = null;
     state.chatMessages = [];
     dashboardInited = false;
     $("#brand-input").value = "";
@@ -456,6 +503,8 @@
       analysis:    { title: "Analysis",    crumbs: ["Dashboard", "Analysis"] },
       email:       { title: "E-mail",      crumbs: ["Dashboard", "E-mail"] },
       website:     { title: "Website",     crumbs: ["Dashboard", "Website"] },
+      seo:         { title: "SEO",         crumbs: ["Dashboard", "SEO"] },
+      geo:         { title: "GEO",         crumbs: ["Dashboard", "GEO"] },
       roas:        { title: "ROAS",        crumbs: ["Dashboard", "ROAS"] },
       methodology: { title: "Methodology", crumbs: ["Dashboard", "Methodology"] },
     };
@@ -472,6 +521,11 @@
     // Website volgt de dashboardperiode en wordt lui geladen (en opnieuw na een
     // periodewissel, zie bindPeriodToggle/bindDateFilter).
     if (page === "website" && typeof websiteFetch === "function") websiteFetch();
+    // SEO heeft een eigen keywordlijst en géén periode: zoekvolume is een
+    // maandcijfer. Lui laden, en daarna alleen op verzoek verversen.
+    if (page === "seo" && typeof seoFetch === "function") seoFetch();
+    // GEO leest een auditbestand uit Drive; ook lui, en ook zonder periode.
+    if (page === "geo" && typeof geoFetch === "function") geoFetch();
   }
 
   // Spring vanuit de Analyse naar een specifieke advertentie in de Library: filter op
@@ -3898,6 +3952,40 @@
     };
   }
 
+  /* ---------- Kanaalgroepering voor de donut ----------
+     GA4 kent een dozijn channel groups; die vatten we samen tot zeven groepen
+     die een mens in één oogopslag leest. De volgorde ligt vast, en daarmee de
+     kleur: 'organisch' is altijd slice 1, ook als het een keer het kleinste
+     stukje is. Kleur volgt het kanaal, niet zijn grootte. */
+
+  const WEB_GROUPS = [
+    { key: "organic",  label: "Organisch",  re: /^organic/i },
+    { key: "paid",     label: "Betaald",    re: /^(paid|display|cross-network)/i },
+    { key: "direct",   label: "Direct",     re: /^direct/i },
+    { key: "referral", label: "Verwijzing", re: /^referral/i },
+    { key: "email",    label: "E-mail",     re: /^(email|e-mail|mobile push)/i },
+    { key: "ai",       label: "AI",         re: /ai\s*assistant|^ai\b|generative/i },
+    { key: "other",    label: "Overig",     re: null },   // rest, incl. 'Unassigned'
+  ];
+
+  function webGroupOf(channelName) {
+    const n = String(channelName || "");
+    // AI vóór de rest: GA4 noemt het 'AI Assistant', wat anders onder 'Overig' valt.
+    const ai = WEB_GROUPS.find(g => g.key === "ai");
+    if (ai.re.test(n)) return "ai";
+    for (const g of WEB_GROUPS) {
+      if (g.re && g.key !== "ai" && g.re.test(n)) return g.key;
+    }
+    return "other";
+  }
+
+  function donutSvg(spec) {
+    if (!window.Charts || !Charts.donut) return "";
+    const d = document.createElement("div");
+    Charts.donut(d, spec);
+    return d.innerHTML;
+  }
+
   /* ---------- Render ---------- */
 
   function renderWebsite() {
@@ -3987,7 +4075,13 @@
       card({
         label: "Sessies", cvar: "--kpi-1",
         value: webFmt.int(cur.sessions), cur: cur.sessions, prev: prev && prev.sessions,
-        sub: cur.users == null ? "geen GA4-data" : `${webFmt.int(cur.users)} gebruikers · ${webFmt.pct0(cur.newUserShare)} nieuw`,
+        // Uit de datasheet is 'unieke gebruikers' niet te herleiden (zie de
+        // voetnoot); dan tonen we nieuwe gebruikers, die wél optelbaar zijn.
+        sub: cur.users != null
+          ? `${webFmt.int(cur.users)} gebruikers · ${webFmt.pct0(cur.newUserShare)} nieuw`
+          : cur.newUsers != null
+          ? `${webFmt.int(cur.newUsers)} nieuwe gebruikers`
+          : "geen GA4-data",
       }),
       card({
         label: "Betrokken sessies", cvar: "--kpi-2",
@@ -4067,23 +4161,24 @@
 
     const rows = cur.map(c => {
       const p = prevMap.get(c.channel);
-      const d = webFmt.delta(c.sessions, p ? p.sessions : null);
+      // Zelfde vorm als bij Bronnen: het verschil staat naast het cijfer waar het
+      // over gaat, niet in een losse kolom aan het eind van de rij.
+      const isNew = prevMap.size > 0 && !p && c.sessions > 0;
       return `<tr>
-        <td><strong>${escapeHtml(c.channel)}</strong></td>
-        <td class="right">${webFmt.int(c.sessions)}</td>
+        <td><strong>${escapeHtml(c.channel)}</strong>${isNew ? ` <span class="cell-tag">nieuw</span>` : ""}</td>
+        <td class="right">${webFmt.int(c.sessions)}${isNew ? "" : webCellDelta(c.sessions, p && p.sessions)}</td>
         <td class="right">${webFmt.pct0(totalSessions ? c.sessions / totalSessions : null)}</td>
         <td class="right">${webFmt.pct0(c.engagementRate)}</td>
         <td class="right">${webFmt.int(goal.rowOf(c))}</td>
         <td class="right"><strong>${webFmt.pct2(c.conversionRate)}</strong></td>
         ${isShop ? `<td class="right">${webFmt.eur(c.revenue)}</td>` : ""}
-        <td class="right">${d == null ? "—" : `<span class="${d >= 0 ? "delta up" : "delta down"}" style="display:inline;">${d >= 0 ? "↑" : "↓"} ${(Math.abs(d) * 100).toFixed(0)}%</span>`}</td>
       </tr>`;
     }).join("");
 
     return `<section class="panel" style="margin-bottom:16px;">
       <div class="panel-header"><div>
         <h2 class="panel-title">Kanalen</h2>
-        <div class="panel-sub">GA4-kanaalgroepen · conversie gemeten als ${escapeHtml(goal.label.toLowerCase())}</div>
+        <div class="panel-sub">GA4-kanaalgroepen · conversie gemeten als ${escapeHtml(goal.label.toLowerCase())}${prevMap.size ? ` · verschil in sessies ${escapeHtml(webCompareLabel())}` : ""}</div>
       </div></div>
       <div class="lib-table"><table>
         <thead><tr>
@@ -4094,10 +4189,10 @@
           <th class="right">${escapeHtml(goal.label)}</th>
           <th class="right">Conversieratio</th>
           ${isShop ? `<th class="right">Omzet</th>` : ""}
-          <th class="right">Sessies ${escapeHtml(webCompareLabel())}</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
+      ${renderWebsiteDonut(cur, goal)}
       <p class="muted" style="font-size:11px; margin:12px 0 0;">
         Advertentiekosten en ROAS staan bewust niet in deze tabel: die vraag beantwoordt de ROAS-tab,
         op dezelfde GA4-omzet. Eén cijfer, één plek.
@@ -4105,21 +4200,103 @@
     </section>`;
   }
 
+  // Deel-van-geheel over zeven kanaalgroepen. De legenda draagt de cijfers, want
+  // met zeven segmenten zijn twee schijfjes van 8% en 6% met het oog niet uit
+  // elkaar te houden — de ring toont de verhouding, de legenda de waarde.
+  // Let op: krijgt de kanalenlijst zelf mee, niet het periodeobject — in
+  // renderWebsiteChannels heet die lijst `cur`.
+  // Kanalen optellen tot de zeven groepen. Wordt voor de huidige én de
+  // vergelijkingsperiode gedraaid, zodat de legenda hetzelfde verschil kan tonen
+  // als de tabellen.
+  function webGroupTotals(channels, goal) {
+    const totals = new Map(WEB_GROUPS.map(g => [g.key, { sessions: 0, conversions: 0, channels: [] }]));
+    for (const c of (channels || [])) {
+      const g = totals.get(webGroupOf(c.channel));
+      g.sessions += c.sessions || 0;
+      const conv = goal ? goal.rowOf(c) : null;
+      if (conv != null) g.conversions += conv;
+      if (c.sessions > 0) g.channels.push(c.channel);
+    }
+    return totals;
+  }
+
+  function renderWebsiteDonut(channels, goal) {
+    const rows = channels || [];
+    if (!rows.length) return "";
+
+    const totals = webGroupTotals(rows, goal);
+    const base = webBase();
+    const prevTotals = (base && base.channels) ? webGroupTotals(base.channels, goal) : null;
+    const total = WEB_GROUPS.reduce((s, g) => s + totals.get(g.key).sessions, 0);
+    if (!total) return "";
+
+    // Vaste volgorde = vaste kleur; lege groepen blijven in de legenda staan zodat
+    // de kleurtoewijzing niet verschuift zodra een kanaal wegvalt.
+    const slices = WEB_GROUPS.map((g, i) => ({
+      label: g.label, value: totals.get(g.key).sessions, color: Charts.sliceColor(i),
+    }));
+
+    const legend = WEB_GROUPS.map((g, i) => {
+      const t = totals.get(g.key);
+      const share = total ? t.sessions / total : 0;
+      // Verschil naast het sessiecijfer, in dezelfde vorm als in de tabellen.
+      const prev = prevTotals ? prevTotals.get(g.key).sessions : null;
+      const delta = t.sessions > 0 ? webCellDelta(t.sessions, prev) : "";
+      return `<div class="web-donut-item${t.sessions ? "" : " off"}" title="${escapeHtml(t.channels.join(", ") || "geen verkeer in deze periode")}">
+        <span class="swatch" style="background:${Charts.sliceColor(i)}"></span>
+        <span class="name">${escapeHtml(g.label)}</span>
+        <span class="val">${webFmt.pct0(share)}</span>
+        <span class="sub">${webFmt.int(t.sessions)} sessies${delta} · ${webFmt.int(t.conversions)} ${escapeHtml(goal.label.toLowerCase())}</span>
+      </div>`;
+    }).join("");
+
+    return `<div class="web-donut">
+      <div class="chart">${donutSvg({
+        size: 200, thickness: 32, slices,
+        centerValue: webFmt.int(total), centerLabel: "SESSIES",
+      })}</div>
+      <div class="legend">${legend}</div>
+    </div>`;
+  }
+
+  // Verschil naast één cijfer in een tabelcel. Bewust klein en zonder decimalen:
+  // het staat naast de waarde, niet in plaats ervan.
+  function webCellDelta(cur, prev, invert) {
+    const d = webFmt.delta(cur, prev);
+    if (d == null) return "";
+    const good = invert ? d < 0 : d >= 0;
+    return `<span class="cell-delta ${good ? "up" : "down"}">${d >= 0 ? "↑" : "↓"}${(Math.abs(d) * 100).toFixed(0)}%</span>`;
+  }
+
   function renderWebsiteSources() {
     const rows = state.website?.current?.sources || [];
     if (!rows.length) return "";
     const isShop = state.website.website.type === "webshop";
-    const body = rows.map(s => `<tr>
-      <td>${escapeHtml(s.source)}</td>
-      <td class="right">${webFmt.int(s.sessions)}</td>
-      <td class="right">${webFmt.pct0(s.engagementRate)}</td>
-      <td class="right">${webFmt.int(s.conversions)}</td>
-      ${isShop ? `<td class="right">${webFmt.eur(s.revenue)}</td>` : ""}
-    </tr>`).join("");
+    const base = webBase();
+    const prevMap = new Map(((base && base.sources) || []).map(s => [s.source, s]));
+    const hasCompare = prevMap.size > 0;
+    const shown = rows.slice(0, 15);
+
+    const body = shown.map(s => {
+      const p = prevMap.get(s.source);
+      // Een bron die vorige periode niet bestond krijgt géén '+100%', maar 'nieuw'.
+      // Een deling door nul zou hier anders een nietszeggend cijfer opleveren.
+      const isNew = hasCompare && !p && s.sessions > 0;
+      const cell = (val, formatted, prev) =>
+        `<td class="right">${formatted}${isNew ? "" : webCellDelta(val, prev)}</td>`;
+      return `<tr>
+        <td>${escapeHtml(s.source)}${isNew ? ` <span class="cell-tag">nieuw</span>` : ""}</td>
+        ${cell(s.sessions, webFmt.int(s.sessions), p && p.sessions)}
+        ${cell(s.engagementRate, webFmt.pct0(s.engagementRate), p && p.engagementRate)}
+        ${cell(s.conversions, webFmt.int(s.conversions), p && p.conversions)}
+        ${isShop ? cell(s.revenue, webFmt.eur(s.revenue), p && p.revenue) : ""}
+      </tr>`;
+    }).join("");
+
     return `<section class="panel" style="margin-bottom:16px;">
       <div class="panel-header"><div>
         <h2 class="panel-title">Bronnen</h2>
-        <div class="panel-sub">Top ${rows.length} op sessies · bron / medium zoals GA4 het registreert</div>
+        <div class="panel-sub">Top ${shown.length} op sessies · bron / medium zoals GA4 het registreert${hasCompare ? ` · verschil ${escapeHtml(webCompareLabel())}` : ""}</div>
       </div></div>
       <div class="lib-table"><table>
         <thead><tr>
@@ -4130,10 +4307,53 @@
       </table></div>
       <p class="muted" style="font-size:11px; margin:12px 0 0;">
         Key events is hier het GA4-totaal over álle doelen — een uitsplitsing per doel bestaat op
-        bronniveau niet zonder extra configuratie.
+        bronniveau niet zonder extra configuratie.${hasCompare ? "" : " Er is geen vergelijkingsperiode geladen, dus er staan geen verschillen bij."}
       </p>
     </section>`;
   }
+
+  // Rijen van de landingspagina-tabel, los van de rest zodat de zoekbalk alleen
+  // dit stuk hertekent. Een volledige re-render zou het invoerveld vervangen en
+  // daarmee de focus en de cursorpositie kwijtraken bij elke aanslag.
+  const WEB_LANDING_LIMIT = 15;
+
+  function webLandingRows() {
+    const w = state.website;
+    const all = w?.current?.landingPages || [];
+    const q = (state.websiteLandingQuery || "").trim().toLowerCase();
+    const isShop = w.website.type === "webshop";
+    const hits = q ? all.filter(p => String(p.page).toLowerCase().includes(q)) : all;
+    const shown = hits.slice(0, WEB_LANDING_LIMIT);
+
+    if (!shown.length) {
+      return `<tr><td colspan="${isShop ? 6 : 5}" class="muted" style="padding:18px 0;">Geen pagina met “${escapeHtml(q)}” in de top ${all.length}.</td></tr>`;
+    }
+    return shown.map(p => `<tr>
+      <td class="row-caption" title="${escapeHtml(p.page)}">${escapeHtml(p.page)}</td>
+      <td class="right">${webFmt.int(p.sessions)}</td>
+      <td class="right">${webFmt.pct0(p.engagementRate)}</td>
+      <td class="right">${webFmt.int(p.conversions)}</td>
+      <td class="right"><strong>${webFmt.ratio(p.conversionRate)}</strong></td>
+      ${isShop ? `<td class="right">${webFmt.eur(p.revenue)}</td>` : ""}
+    </tr>`).join("");
+  }
+
+  function webLandingCount() {
+    const all = state.website?.current?.landingPages || [];
+    const q = (state.websiteLandingQuery || "").trim().toLowerCase();
+    const hits = q ? all.filter(p => String(p.page).toLowerCase().includes(q)) : all;
+    return q
+      ? `${Math.min(hits.length, WEB_LANDING_LIMIT)} van ${hits.length} treffers`
+      : `top ${Math.min(all.length, WEB_LANDING_LIMIT)} van ${all.length} pagina's`;
+  }
+
+  window.__webLandingSearch = (v) => {
+    state.websiteLandingQuery = v;
+    const body = $("#web-landing-rows");
+    const count = $("#web-landing-count");
+    if (body) body.innerHTML = webLandingRows();
+    if (count) count.textContent = webLandingCount();
+  };
 
   function renderWebsiteLanding() {
     const w = state.website;
@@ -4142,26 +4362,26 @@
     const goal = webGoal();
     const isShop = w.website.type === "webshop";
     const win = w.current.pageLevelWindow;
-    const body = rows.map(p => `<tr>
-      <td class="row-caption" title="${escapeHtml(p.page)}">${escapeHtml(p.page)}</td>
-      <td class="right">${webFmt.int(p.sessions)}</td>
-      <td class="right">${webFmt.pct0(p.engagementRate)}</td>
-      <td class="right">${webFmt.int(p.conversions)}</td>
-      <td class="right"><strong>${webFmt.ratio(p.conversionRate)}</strong></td>
-      ${isShop ? `<td class="right">${webFmt.eur(p.revenue)}</td>` : ""}
-    </tr>`).join("");
+    const body = webLandingRows();
 
     return `<section class="panel" style="margin-bottom:16px;">
-      <div class="panel-header"><div>
-        <h2 class="panel-title">Landingspagina's</h2>
-        <div class="panel-sub">Waar bezoekers binnenkomen — top ${rows.length} op sessies</div>
-      </div></div>
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Landingspagina's</h2>
+          <div class="panel-sub">Waar bezoekers binnenkomen · <span id="web-landing-count">${escapeHtml(webLandingCount())}</span></div>
+        </div>
+        <label class="web-search">
+          <span class="ico">⌕</span>
+          <input type="search" placeholder="Zoek een pad, bv. /nl/te-huur" value="${escapeHtml(state.websiteLandingQuery || "")}"
+            oninput="window.__webLandingSearch(this.value)" autocomplete="off">
+        </label>
+      </div>
       <div class="lib-table"><table>
         <thead><tr>
           <th>Pagina</th><th class="right">Sessies</th><th class="right">Betrokken</th>
           <th class="right">Key events</th><th class="right">Per sessie</th>${isShop ? `<th class="right">Omzet</th>` : ""}
         </tr></thead>
-        <tbody>${body}</tbody>
+        <tbody id="web-landing-rows">${body}</tbody>
       </table></div>
       <p class="muted" style="font-size:11px; margin:12px 0 0;">
         <strong>Per sessie</strong> is het aantal key events per sessie, niet een conversieratio: GA4 telt hier álle
@@ -4396,12 +4616,43 @@
     add("Search Console — pagina's", e.gscPages);
     if (w.previousError) add("Vergelijkingsperiode", w.previousError);
     if (w.yearAgoError) add("Vorig jaar", w.yearAgoError);
+    for (const m of (w.dataSheet && w.dataSheet.warnings) || []) add("Datasheet", m);
 
     const errHtml = msgs.length
       ? `<div style="margin-top:10px; font-size:11px; color:#c0392b;">${msgs.map(m => escapeHtml(m)).join("<br>")}</div>`
       : "";
 
     const goal = webGoal();
+
+    // Waar kwam elk blok vandaan? De datasheet is de snelle route, Windsor de
+    // live route. Een verschil met GA4's eigen interface is meestal hiermee te
+    // verklaren, dus het hoort zichtbaar te zijn.
+    const origin = w.current.origin || {};
+    const labels = { totals: "kerncijfers", channels: "kanalen", landingPages: "landingspagina's", search: "organisch zoeken", queries: "zoekopdrachten" };
+    const fromSheet = Object.keys(labels).filter(k => origin[k] === "sheet");
+    const fromApi = Object.keys(labels).filter(k => origin[k] === "api");
+    const ds = w.dataSheet || {};
+    const originLine = !ds.configured
+      ? `<li><strong>Bron:</strong> alles live uit Windsor. Voor deze klant staat geen datasheet ingesteld.</li>`
+      : `<li><strong>Bron:</strong> ${fromSheet.length ? `${escapeHtml(fromSheet.map(k => labels[k]).join(", "))} uit de dagelijkse datasheet` : "niets uit de datasheet"}${fromApi.length ? `, ${escapeHtml(fromApi.map(k => labels[k]).join(", "))} live uit Windsor` : ""}. De sheet wordt alleen gebruikt als hij de hele periode dekt zonder ontbrekende dagen.</li>`;
+
+    // Per blok dat terugviel op de API: waaróm de sheet afviel.
+    const cov = w.current.sheetCoverage || {};
+    const tabLabels = {
+      ga4Daily: "kerncijfers", ga4Channel: "kanalen", ga4Landing: "landingspagina's",
+      gscDaily: "organisch zoeken", gscQuery: "zoekopdrachten",
+    };
+    const covMsgs = Object.entries(cov)
+      .filter(([, v]) => v && !v.ok && v.reason)
+      .map(([k, v]) => `${tabLabels[k] || k} (${v.reason})`);
+    const covLine = covMsgs.length
+      ? `<li><strong>Datasheet niet gebruikt voor:</strong> ${escapeHtml(covMsgs.join(" · "))}. Die blokken komen live uit Windsor, dus de cijfers kloppen — het duurt alleen langer.</li>`
+      : "";
+
+    const sheetNotes = ds.used
+      ? `<li><strong>Uit een dagtabel is 'unieke gebruikers' niet te berekenen.</strong> Iemand die vijf dagen langskomt zou vijf keer meetellen. Daarom staan er nieuwe gebruikers, die wél optelbaar zijn: je bent maar één keer nieuw. Sessies liggen om dezelfde reden ongeveer een procent hoger dan in GA4 zelf, want een sessie over middernacht telt in twee dagen.</li>`
+      : "";
+
     return `<section class="panel">
       <div class="panel-header"><div>
         <h2 class="panel-title">Hoe deze cijfers berekend zijn</h2>
@@ -4416,9 +4667,1114 @@
         <li><strong>Organisch zoeken</strong> komt uit Search Console, niet uit GA4. CTR en positie zijn opnieuw berekend uit kliks en vertoningen; een gemiddelde van gemiddelden zou hier niet kloppen. Google geeft alleen zoekopdrachten vrij boven een privacydrempel, dus de querytabellen tellen niet op tot het totaal.</li>
         <li><strong>Betaald verkeer</strong> staat hier als kanaal, maar zonder kosten of ROAS. Die staan in de ROAS-tab, op dezelfde GA4-omzet.</li>
         <li>GA4-property en Search Console-site komen uit de <strong>Config-tab</strong> van de klantsheet. Ontbreekt er één, dan blijft de rest gewoon werken.</li>
+        ${originLine}
+        ${covLine}
+        ${sheetNotes}
       </ul>
       ${errHtml}
     </section>`;
+  }
+
+  /* ==========================================================
+     SEO-tab — zoekvolume, concurrentie, CPC en positie per keyword
+     ==========================================================
+     Bron: DataForSEO via api/seo.js. Twee aparte knoppen, omdat de twee calls
+     een factor duizend in prijs schelen: volumes zijn één batch-call voor de
+     hele lijst, een rank-check kost ~€0,002 per keyword.
+
+     Géén periode uit de topbar: zoekvolume is een maandcijfer van Google Ads en
+     een positie is een momentopname. Een dagfilter zou hier niets betekenen.
+
+     Domein, markt, taal en de standaard-keywordlijst komen uit de Config-tab
+     (server-side). De klant mag keywords toevoegen; die lijst staat per klant in
+     localStorage, nooit gedeeld — precies de cache-botsing waar de handover van
+     de template voor waarschuwt.
+     ========================================================== */
+
+  const SEO_MAX_CHART_SERIES = 6;
+
+  const seoLsKey = (what) => `spa.seo.${what}.${state.session?.clientId || "?"}`;
+
+  // Zelfde dagafbakening als de server (Europe/Brussels), anders vervalt de ene
+  // cache om middernacht UTC en de andere twee uur later.
+  const seoToday = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Brussels" });
+
+  const seoSameList = (a, b) =>
+    Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
+    [...a].sort().join("\n") === [...b].sort().join("\n");
+
+  function seoReadLs(what) {
+    try { return JSON.parse(localStorage.getItem(seoLsKey(what)) || "null"); } catch { return null; }
+  }
+  function seoWriteLs(what, value) {
+    try { localStorage.setItem(seoLsKey(what), JSON.stringify(value)); } catch {}
+  }
+
+  // Dagcache in de browser. Dit is de echte rem op de kosten: de servercache leeft
+  // maar zolang een serverless-instantie warm blijft.
+  function seoCacheGet(what, keywords) {
+    const c = seoReadLs(what);
+    if (!c || c.day !== seoToday()) return null;
+    if (!seoSameList(c.keywords, keywords)) return null;
+    return c.payload;
+  }
+  function seoCacheSet(what, keywords, payload) {
+    seoWriteLs(what, { day: seoToday(), keywords, payload });
+  }
+
+  /* ---------- Fetch ---------- */
+
+  function seoFetch(force) {
+    if (!state.session) return;
+    if (state.seoLoading) return;
+
+    // Eigen keywordlijst van deze klant, indien de gebruiker er ooit een aanpaste.
+    // Anders null → de server gebruikt de lijst uit de Config-tab.
+    if (state.seoKeywords == null) {
+      const stored = seoReadLs("kws");
+      if (Array.isArray(stored) && stored.length) state.seoKeywords = stored;
+    }
+    const list = state.seoKeywords;
+
+    if (!force && state.seo && (list == null || seoSameList(state.seo.keywords, list))) { renderSeo(); return; }
+
+    if (!force && list) {
+      const cached = seoCacheGet("vol", list);
+      if (cached) {
+        state.seo = cached;
+        state.seoSettings = cached.settings || state.seoSettings;
+        const cachedRanks = seoCacheGet("rank", list);
+        if (cachedRanks) state.seoRanks = cachedRanks;
+        renderSeo();
+        return;
+      }
+    }
+
+    state.seoLoading = true;
+    state.seoError = null;
+    renderSeo();
+
+    apiPost("/api/seo", {
+      action: "volumes",
+      clientId: state.session.clientId,
+      token: state.session.token,
+      ...(list ? { keywords: list } : {}),
+      ...(force ? { force: true } : {}),
+    })
+      .then((res) => {
+        state.seoLoading = false;
+        state.seo = res;
+        state.seoSettings = res.settings || null;
+        // Eerste keer: de lijst komt uit de Config-tab. Die nemen we over in de
+        // state, maar bewaren we niet — anders bevriest een latere wijziging in
+        // de sheet achter een oude kopie in de browser.
+        if (state.seoKeywords == null) state.seoKeywords = res.keywords || [];
+        if (!seoSameList(state.seoRanks?.keywords, state.seoKeywords)) state.seoRanks = null;
+        seoCacheSet("vol", state.seoKeywords, res);
+        renderSeo();
+      })
+      .catch((err) => {
+        state.seoLoading = false;
+        // Ook een mislukte call vertelt ons hoe de klant geconfigureerd staat —
+        // daarmee kan de tab uitleggen wát er ontbreekt in plaats van alleen dat
+        // het misging.
+        if (err.data?.settings) state.seoSettings = err.data.settings;
+        state.seoError = err.message || "Onbekende fout bij laden van de SEO-data.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderSeo();
+      });
+  }
+
+  function seoRankFetch(force) {
+    if (!state.session || state.seoRanksLoading) return;
+    const list = state.seoKeywords;
+    if (!list || !list.length) return;
+
+    if (!force) {
+      const cached = seoCacheGet("rank", list);
+      if (cached) { state.seoRanks = cached; renderSeo(); return; }
+    }
+
+    state.seoRanksLoading = true;
+    state.seoRanksError = null;
+    renderSeo();
+
+    apiPost("/api/seo", {
+      action: "ranks",
+      clientId: state.session.clientId,
+      token: state.session.token,
+      keywords: list,
+      ...(force ? { force: true } : {}),
+    })
+      .then((res) => {
+        state.seoRanksLoading = false;
+        state.seoRanks = res;
+        if (res.settings) state.seoSettings = res.settings;
+        // Een gedeeltelijke run niet in de dagcache: dan blijft een halve meting
+        // tot morgen staan en denkt iedereen dat het klopt.
+        if (!res.skipped) seoCacheSet("rank", list, res);
+        renderSeo();
+      })
+      .catch((err) => {
+        state.seoRanksLoading = false;
+        if (err.data?.settings) state.seoSettings = err.data.settings;
+        state.seoRanksError = err.message || "Rank-check mislukt.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderSeo();
+      });
+  }
+
+  /* ---------- Keywordlijst bewerken ---------- */
+
+  function seoSetKeywords(list) {
+    state.seoKeywords = list;
+    seoWriteLs("kws", list);
+    // De geladen cijfers slaan nu op een andere lijst — weggooien, niet mengen.
+    state.seo = null;
+    state.seoRanks = null;
+    state.seoError = null;
+    state.seoRanksError = null;
+  }
+
+  window.__seoAddKw = (input) => {
+    const raw = String(input?.value || "").trim().toLowerCase();
+    if (!raw) return;
+    input.value = "";
+    const max = state.seoSettings?.maxVolumeKeywords || 100;
+    const list = [...(state.seoKeywords || [])];
+    if (raw.length > 80 || list.includes(raw) || list.length >= max) { renderSeo(); return; }
+    list.push(raw);
+    seoSetKeywords(list);
+    seoFetch();
+  };
+  window.__seoKwKey = (ev, input) => {
+    if (ev.key === "Enter") { ev.preventDefault(); window.__seoAddKw(input); }
+  };
+  window.__seoRemoveKw = (i) => {
+    const list = [...(state.seoKeywords || [])];
+    if (i < 0 || i >= list.length) return;
+    list.splice(i, 1);
+    seoSetKeywords(list);
+    if (list.length) seoFetch(); else renderSeo();
+  };
+  window.__seoResetKw = () => {
+    // Terug naar de lijst uit de Config-tab: eigen lijst weg, dan opnieuw halen.
+    state.seoKeywords = null;
+    try { localStorage.removeItem(seoLsKey("kws")); } catch {}
+    state.seo = null;
+    state.seoRanks = null;
+    seoFetch(true);
+  };
+  window.__seoRefresh = () => seoFetch(true);
+  window.__seoRank = () => seoRankFetch(true);
+  window.__seoSort = (key) => {
+    const s = state.seoSort;
+    state.seoSort = { key, dir: s.key === key && s.dir === "desc" ? "asc" : "desc" };
+    renderSeo();
+  };
+
+  /* ---------- Formatters + afgeleiden ---------- */
+
+  const seoFmt = {
+    int: (n) => (n == null || !isFinite(n)) ? "—" : Math.round(n).toLocaleString("nl-NL"),
+    eur: (n) => (n == null || !isFinite(n)) ? "—" : "€" + n.toFixed(2).replace(".", ","),
+    pos: (n) => (n == null || !isFinite(n)) ? "—" : "#" + Math.round(n),
+  };
+
+  // Trend = gemiddelde van de laatste drie maanden tegen de drie daarvoor. Met
+  // minder dan zes maanden historiek zeggen we niets: een half jaar seizoen is
+  // geen trend.
+  function seoTrend(monthly) {
+    const ms = (monthly || []).filter(m => m && m.volume != null);
+    if (ms.length < 6) return null;
+    const last3 = ms.slice(-3).reduce((s, m) => s + m.volume, 0) / 3;
+    const prev3 = ms.slice(-6, -3).reduce((s, m) => s + m.volume, 0) / 3;
+    if (!prev3) return null;
+    return Math.round((last3 - prev3) / prev3 * 100);
+  }
+
+  function seoTrendHtml(pct) {
+    if (pct == null) return `<span class="muted">—</span>`;
+    // Stijgende vraag is goed nieuws, dalende slecht — los van de positie.
+    const cls = pct > 10 ? "up" : pct < -10 ? "down" : "flat";
+    const arrow = pct > 10 ? "▲" : pct < -10 ? "▼" : "●";
+    return `<span class="seo-trend ${cls}">${arrow} ${pct >= 0 ? "+" : ""}${pct}%</span>`;
+  }
+
+  function seoRankOf(keyword) {
+    const r = state.seoRanks?.ranks?.[keyword];
+    return r || null;
+  }
+
+  function seoRankHtml(keyword) {
+    const r = seoRankOf(keyword);
+    if (!r) return `<span class="muted">?</span>`;
+    if (r.skipped) return `<span class="muted" title="Niet gecontroleerd: tijdsbudget van de run was op">overgeslagen</span>`;
+    if (r.error) return `<span class="muted" title="${escapeHtml(r.error)}">fout</span>`;
+    if (r.pos == null) return `<span class="muted" title="Niet in de top ${state.seoRanks?.depth || 20}">—</span>`;
+    const cls = r.pos <= 3 ? "good" : r.pos <= 10 ? "mid" : "low";
+    const title = r.url ? `${r.url}` : "";
+    return `<span class="seo-pos ${cls}"${title ? ` title="${escapeHtml(title)}"` : ""}>#${r.pos}</span>`;
+  }
+
+  /* ---------- Render ---------- */
+
+  function renderSeo() {
+    const root = $("#seo-content");
+    if (!root) return;
+
+    const s = state.seoSettings;
+
+    // Geen koppeling: dat is geen fout maar een ontbrekende instelling, en de
+    // sleutels staan in de env var — niet iets wat de klant zelf oplost.
+    if (s && !s.hasCredentials) {
+      root.innerHTML = renderAnalysisEmpty(`
+        <p class="muted" style="margin:0 0 10px;">Deze tab draait op DataForSEO. Voor deze omgeving is nog geen koppeling ingesteld.</p>
+        <p class="muted" style="margin:0; font-size:12px;">Zet <strong>DATAFORSEO_LOGIN</strong> en <strong>DATAFORSEO_PASSWORD</strong> in de omgevingsvariabelen (of per klant <em>dataforseo_login</em> / <em>dataforseo_password</em> in <strong>CLIENTS</strong>).</p>`);
+      return;
+    }
+
+    const bar = renderSeoBar();
+
+    // Lege keywordlijst is een normale begintoestand: de balk hierboven toont al
+    // het invoerveld en verwijst naar de Config-tab. Geen rode foutmelding.
+    const noKeywords = !!state.seoError && !(state.seoKeywords || []).length && /keywords/i.test(state.seoError);
+    if (noKeywords) {
+      root.innerHTML = bar + renderAnalysisEmpty(
+        `<p class="muted" style="margin:0;">Nog geen keywords om te meten. Vul ze hierboven aan, of zet een startlijst in de Config-tab bij <strong>SEO keywords</strong>.</p>`);
+      return;
+    }
+
+    if (state.seoError && !state.seo) {
+      root.innerHTML = bar + renderAnalysisEmpty(
+        `<p style="color:#c0392b; margin:0;">${escapeHtml(state.seoError)}</p>
+         <button class="btn primary" style="margin-top:14px;" onclick="window.__seoRefresh()">Opnieuw proberen</button>`);
+      return;
+    }
+    if (state.seoLoading && !state.seo) {
+      root.innerHTML = bar + renderAnalysisEmpty(
+        `<p class="muted" style="margin:0;">Zoekvolumes ophalen bij DataForSEO…</p>`);
+      return;
+    }
+    if (!state.seo) { root.innerHTML = bar; return; }
+
+    root.innerHTML = bar
+      + renderSeoKpis()
+      + renderSeoChart()
+      + renderSeoTable()
+      + renderSeoNotes();
+  }
+
+  function renderSeoBar() {
+    const s = state.seoSettings;
+    const list = state.seoKeywords || [];
+    const max = s?.maxVolumeKeywords || 100;
+    const maxRank = s?.maxRankKeywords || 25;
+
+    const chips = list.map((k, i) => `<span class="seo-chip">${escapeHtml(k)}
+      <button type="button" aria-label="Verwijder ${escapeHtml(k)}" onclick="window.__seoRemoveKw(${i})">✕</button></span>`).join("");
+
+    const settingsLine = s
+      ? `Domein ${s.domain ? `<strong>${escapeHtml(s.domain)}</strong>` : `<em>niet ingesteld</em>`}
+         · markt <strong>${escapeHtml(s.location)}</strong>${s.locationSource === "default" ? " <span class=\"muted\">(standaard)</span>" : ""}
+         · taal <strong>${escapeHtml(String(s.language).toUpperCase())}</strong>${s.languageSource === "default" ? " <span class=\"muted\">(standaard)</span>" : ""}`
+      : "Instellingen laden…";
+
+    // Waar kwamen de cijfers vandaan en wat kostte de laatste run? Kosten zijn
+    // hier zichtbaar omdat ze per rank-check echt oplopen.
+    const bits = [];
+    if (state.seo) bits.push(state.seo.fromCache ? "volumes uit de cache van vandaag" : "volumes zojuist opgehaald");
+    if (state.seoRanks) {
+      bits.push(state.seoRanks.fromCache
+        ? "posities uit de cache van vandaag"
+        : `posities zojuist gemeten${state.seoRanks.cost ? ` (${seoFmt.eur(state.seoRanks.cost)})` : ""}`);
+    }
+    if (state.seoRanks?.skipped) bits.push(`${state.seoRanks.skipped} keyword(s) overgeslagen — tijdsbudget op`);
+    const statusLine = bits.length ? `<div class="muted" style="font-size:11px; margin-top:8px;">${escapeHtml(bits.join(" · "))}</div>` : "";
+
+    const rankDisabled = !s?.canRank || !list.length || state.seoRanksLoading;
+    const rankTitle = !s?.hasCredentials
+      ? "Geen DataForSEO-koppeling ingesteld"
+      : !s?.domain
+        ? "Zet 'SEO domein' in de Config-tab van de klantsheet"
+        : `Kost ongeveer €0,002 per keyword · maximaal ${maxRank} per run`;
+
+    const errLine = state.seoRanksError
+      ? `<div style="font-size:11px; color:#c0392b; margin-top:8px;">${escapeHtml(state.seoRanksError)}</div>`
+      : "";
+
+    return `<section class="panel" style="padding:14px 18px; margin-bottom:16px;">
+      <div class="roas-bar">
+        <div>
+          <div class="info-label">Keywords</div>
+          <div class="muted" style="font-size:12px; margin-top:4px;">${settingsLine}</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <button class="btn tiny" onclick="window.__seoRefresh()"${state.seoLoading ? " disabled" : ""}>↻ Volumes</button>
+          <button class="btn tiny" onclick="window.__seoRank()"${rankDisabled ? " disabled" : ""} title="${escapeHtml(rankTitle)}">${state.seoRanksLoading ? "Posities meten…" : "◎ Rank-check"}</button>
+          <button class="btn tiny" onclick="window.__seoResetKw()" title="Terug naar de lijst uit de Config-tab">Reset</button>
+        </div>
+      </div>
+      <div id="seo-chips" class="seo-chips">${chips || `<span class="muted" style="font-size:12px;">Nog geen keywords. Zet ze in de Config-tab bij <strong>SEO keywords</strong>, of voeg ze hieronder toe.</span>`}</div>
+      <label class="web-search" style="margin-top:8px; max-width:340px;">
+        <span class="ico">+</span>
+        <input type="text" placeholder="Keyword toevoegen… (Enter)" autocomplete="off"
+          onkeydown="window.__seoKwKey(event, this)"${list.length >= max ? " disabled" : ""}>
+      </label>
+      <div class="muted" style="font-size:11px; margin-top:8px;">
+        Volumes zijn één goedkope batch-call voor de hele lijst. De rank-check is één SERP-call
+        per keyword (~€0,002 per stuk) en zit daarom achter een eigen knop. Beide worden per dag
+        gecached; verversen doet een echte call.
+        <strong>De periodekiezer bovenaan geldt hier niet</strong> — zoekvolume is een maandcijfer
+        en een positie is een momentopname.
+      </div>
+      ${statusLine}
+      ${errLine}
+    </section>`;
+  }
+
+  function renderSeoKpis() {
+    const items = state.seo?.items || [];
+    const withVol = items.filter(i => i.volume != null);
+    const total = withVol.reduce((s, i) => s + i.volume, 0);
+    const cpcs = items.filter(i => i.cpc != null);
+    const avgCpc = cpcs.length ? cpcs.reduce((s, i) => s + i.cpc, 0) / cpcs.length : null;
+
+    // Totaaltrend over alle keywords samen, op dezelfde meetlat als per rij.
+    // Alleen maanden die élk keyword-met-data heeft: een maand waarin er één
+    // ontbreekt zou anders als een daling meetellen.
+    const withHist = items.filter(i => (i.monthly || []).some(m => m.volume != null));
+    const valOf = (it, m) => {
+      const hit = (it.monthly || []).find(x => x.month === m);
+      return hit && hit.volume != null ? hit.volume : null;
+    };
+    const months = [...new Set(withHist.flatMap(i => i.monthly.map(m => m.month)))]
+      .sort()
+      .filter(m => withHist.every(it => valOf(it, m) != null));
+    let totalTrend = null;
+    if (months.length >= 6) {
+      const sumM = (m) => withHist.reduce((s, i) => s + valOf(i, m), 0);
+      const last3 = months.slice(-3).reduce((s, m) => s + sumM(m), 0) / 3;
+      const prev3 = months.slice(-6, -3).reduce((s, m) => s + sumM(m), 0) / 3;
+      if (prev3) totalTrend = Math.round((last3 - prev3) / prev3 * 100);
+    }
+
+    const ranks = state.seoRanks?.ranks || null;
+    const rankedCount = ranks ? Object.values(ranks).filter(r => r && r.pos != null).length : null;
+    const checked = ranks ? Object.keys(ranks).length : 0;
+
+    const card = (label, value, sub, extra) => `<div class="kpi-card">
+      <div class="label"><span class="dot"></span>${escapeHtml(label)}</div>
+      <div class="value" style="font-size:30px;">${value}</div>
+      ${extra || ""}
+      ${sub ? `<div class="muted" style="font-size:11px;">${sub}</div>` : ""}
+    </div>`;
+
+    return `<div class="kpi-grid" style="margin-bottom:16px;">
+      ${card("Zoekvolume per maand", seoFmt.int(total), `som over ${withVol.length} keyword${withVol.length === 1 ? "" : "s"} met data`, totalTrend != null ? `<div style="margin-top:2px;">${seoTrendHtml(totalTrend)} <span class="muted" style="font-size:11px;">vs vorige 3 maanden</span></div>` : "")}
+      ${card("Keywords", String((state.seoKeywords || []).length), "eigen lijst, per klant gescheiden")}
+      ${card("Gemiddelde CPC", seoFmt.eur(avgCpc), "wat adverteerders per klik betalen — indicatie van commerciële waarde")}
+      ${card("In de top " + (state.seoRanks?.depth || 20), rankedCount == null ? "—" : `${rankedCount}/${checked}`, rankedCount == null ? "nog geen rank-check gedaan" : `organisch, ${escapeHtml(state.seoRanks.domain || "")}`)}
+    </div>`;
+  }
+
+  function renderSeoChart() {
+    const items = (state.seo?.items || []).filter(i => (i.monthly || []).some(m => m.volume != null));
+    if (!items.length || !window.Charts) return "";
+
+    // Alleen maanden die élk getekend keyword heeft. Charts.render kent geen
+    // gaten — een ontbrekende maand zou als nul getekend worden, en dat is een
+    // dal dat er niet is. De doorsnede is in de praktijk het volledige
+    // twaalfmaandsvenster: DataForSEO levert voor elk keyword dezelfde reeks.
+    const valueOf = (it, m) => {
+      const hit = (it.monthly || []).find(x => x.month === m);
+      return hit && hit.volume != null ? hit.volume : null;
+    };
+    const months = [...new Set(items.flatMap(i => i.monthly.map(m => m.month)))]
+      .sort()
+      .filter(m => items.every(it => valueOf(it, m) != null));
+    if (months.length < 3) return "";
+
+    const byVol = [...items].sort((a, b) => (b.volume || 0) - (a.volume || 0));
+    const top = byVol.slice(0, SEO_MAX_CHART_SERIES);
+    const rest = byVol.slice(SEO_MAX_CHART_SERIES);
+
+    const series = top.map((it, idx) => ({
+      label: it.keyword,
+      values: months.map(m => valueOf(it, m)),
+      kind: "line",
+      axis: "left",
+      color: Charts.seriesColor(idx),
+    }));
+    if (rest.length) {
+      series.push({
+        label: `overige (${rest.length})`,
+        values: months.map(m => rest.reduce((s, it) => s + valueOf(it, m), 0)),
+        kind: "line",
+        axis: "left",
+        color: Charts.seriesColor(SEO_MAX_CHART_SERIES),
+      });
+    }
+
+    const spec = {
+      width: 980, height: 260,
+      x: months.map(m => { const [y, mm] = m.split("-"); return `${Number(mm)}/${y.slice(2)}`; }),
+      series,
+      leftFormat: Charts.fmt.k,
+      maxXLabels: 12,
+    };
+
+    // Eigen legenda in plaats van Charts.legend(): die zet het label ongeëscapet
+    // in innerHTML, en een keyword is door de gebruiker ingetypte tekst.
+    const legend = series.map(s =>
+      `<span class="item"><span class="swatch" style="background:${s.color}"></span>${escapeHtml(s.label)}</span>`
+    ).join("");
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Zoekvolume per maand</h2>
+        <div class="panel-sub">Twaalf maanden Google Ads-data · waar de vraag piekt en zakt</div>
+      </div></div>
+      ${chartSvg(spec)}
+      <div class="chart-legend" style="margin-top:10px;">${legend}</div>
+    </section>`;
+  }
+
+  function renderSeoTable() {
+    const items = state.seo?.items || [];
+    if (!items.length) return "";
+
+    const rankVal = (kw) => {
+      const r = seoRankOf(kw);
+      // Niet-gerankt en niet-gemeten horen onderaan, niet bovenaan als '0'.
+      return (r && r.pos != null) ? r.pos : Number.POSITIVE_INFINITY;
+    };
+    const val = (it) => {
+      switch (state.seoSort.key) {
+        case "keyword": return it.keyword;
+        case "competition": return it.competitionIndex == null ? -1 : it.competitionIndex;
+        case "cpc": return it.cpc == null ? -1 : it.cpc;
+        case "trend": { const t = seoTrend(it.monthly); return t == null ? -Infinity : t; }
+        case "pos": return rankVal(it.keyword);
+        default: return it.volume == null ? -1 : it.volume;
+      }
+    };
+    const dir = state.seoSort.dir === "asc" ? 1 : -1;
+    const sorted = [...items].sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (typeof x === "string") return dir * x.localeCompare(y, "nl");
+      // Positie oplopend is 'beter' — omgekeerd aan de rest, dus Infinity blijft
+      // in beide richtingen achteraan staan.
+      if (state.seoSort.key === "pos") {
+        if (x === y) return 0;
+        if (!isFinite(x)) return 1;
+        if (!isFinite(y)) return -1;
+        return -dir * (x - y);
+      }
+      return dir * (x - y);
+    });
+
+    const arrow = (key) => state.seoSort.key === key ? (state.seoSort.dir === "desc" ? " ↓" : " ↑") : "";
+    const th = (key, label, cls) =>
+      `<th class="${cls || ""}" style="cursor:pointer;" onclick="window.__seoSort('${key}')">${escapeHtml(label)}${arrow(key)}</th>`;
+
+    const compLabel = { HIGH: "hoog", MEDIUM: "midden", LOW: "laag" };
+    const rows = sorted.map(it => {
+      const comp = it.competition
+        ? `<span class="seo-comp ${escapeHtml(it.competition.toLowerCase())}">${escapeHtml(compLabel[it.competition] || it.competition)}</span>`
+        : `<span class="muted">—</span>`;
+      return `<tr>
+        <td class="row-caption" title="${escapeHtml(it.keyword)}">${escapeHtml(it.keyword)}</td>
+        <td class="right">${seoFmt.int(it.volume)}</td>
+        <td>${comp}</td>
+        <td class="right">${seoFmt.eur(it.cpc)}</td>
+        <td class="right">${seoTrendHtml(seoTrend(it.monthly))}</td>
+        <td class="right">${seoRankHtml(it.keyword)}</td>
+      </tr>`;
+    }).join("");
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Per keyword</h2>
+        <div class="panel-sub">Volume, concurrentie, CPC, trend en de positie van het merk-domein</div>
+      </div></div>
+      <div class="lib-table"><table>
+        <thead><tr>
+          ${th("keyword", "Keyword")}
+          ${th("volume", "Volume/mnd", "right")}
+          ${th("competition", "Concurrentie")}
+          ${th("cpc", "CPC", "right")}
+          ${th("trend", "Trend 3m", "right")}
+          ${th("pos", "Positie", "right")}
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </section>`;
+  }
+
+  function renderSeoNotes() {
+    const s = state.seoSettings;
+    const depth = state.seoRanks?.depth || 20;
+    const missing = [];
+    if (s && !s.domain) missing.push(`<li><strong>Geen merk-domein.</strong> Zet <em>SEO domein</em> in de Config-tab van de klantsheet; zonder dat veld kan de rank-check niet bepalen welk resultaat van deze klant is.</li>`);
+    if (s && s.locationSource === "default") missing.push(`<li><strong>Markt staat op de standaard (${escapeHtml(s.location)}).</strong> Zet <em>SEO markt</em> in de Config-tab als de klant elders verkoopt — volumes en posities verschillen per land.</li>`);
+
+    return `<section class="panel">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Hoe deze cijfers berekend zijn</h2>
+        <div class="panel-sub">Zodat de tab navolgbaar blijft</div>
+      </div></div>
+      <ul class="roas-notes">
+        <li><strong>Zoekvolume</strong> is Google Ads' gemiddelde aantal zoekopdrachten per maand in de ingestelde markt en taal, niet het verkeer naar de site. Google rondt die cijfers af en clustert varianten van dezelfde term.</li>
+        <li><strong>Concurrentie en CPC</strong> komen ook uit Google Ads en gaan over <em>adverteerders</em>, niet over hoe moeilijk het is organisch te ranken. Een hoge CPC zegt vooral dat de term commercieel iets waard is.</li>
+        <li><strong>Trend 3m</strong> vergelijkt het gemiddelde van de laatste drie maanden met de drie daarvoor. Met minder dan zes maanden historiek staat er een streepje: een half jaar is geen trend.</li>
+        <li><strong>Positie</strong> is de organische plek van het merk-domein in de top ${depth}, gemeten op het moment dat je op Rank-check klikt. Subdomeinen tellen mee. Staat het domein er niet bij, dan zie je een streepje — dat is 'niet in de top ${depth}', niet 'geen ranking'.</li>
+        <li><strong>Geen periode.</strong> Zoekvolume is een maandcijfer en een positie is een momentopname, dus de periodekiezer bovenaan geldt hier niet. Voor kliks en vertoningen uit Search Console: zie de Website-tab.</li>
+        <li><strong>Kosten.</strong> Volumes zijn één batch-call voor de hele lijst en verwaarloosbaar. Een rank-check kost ongeveer €0,002 per keyword per run. Beide worden per dag gecached, per klant en per keywordlijst.</li>
+        ${missing.join("")}
+      </ul>
+    </section>`;
+  }
+
+  /* ==========================================================
+     GEO-tab — AI-zichtbaarheid (hoe LLM's over het merk praten)
+     ==========================================================
+     Geport van TEMPLATE_geo-dashboard.html uit Drive. Vijf sub-tabs, twee
+     bronnen:
+
+       Overzicht / Prompts / Website / Acties → de GEMETEN baseline uit
+         geo-dashboard.json in de Drive-map van de klant (api/geo.js action
+         'baseline'). Statisch: een audit heeft een datum en een methode, en
+         verandert niet omdat iemand de pagina opent.
+       Sources → live bij DataForSEO: welke domeinen en pagina's voeden
+         AI-antwoorden in deze markt. Marktdata, geen uitspraak over de klant.
+
+     Geen periode uit de topbar: een audit is een momentopname met een eigen
+     datum. Zonder auditbestand staat er een uitleg, nooit nullen of demo-data
+     ("geen audit = geen cijfers", zie agents/GEO_Dashboard_Schema.md).
+     ========================================================== */
+
+  const GEO_TABS = [
+    { key: "overzicht", label: "Overzicht" },
+    { key: "prompts", label: "Prompts" },
+    { key: "sources", label: "Sources · live" },
+    { key: "website", label: "Website" },
+    { key: "acties", label: "Acties" },
+  ];
+
+  /* ---------- Fetch ---------- */
+
+  function geoFetch(force) {
+    if (!state.session || state.geoLoading) return;
+    if (!force && (state.geo || state.geoMeta)) { renderGeo(); return; }
+
+    state.geoLoading = true;
+    state.geoError = null;
+    renderGeo();
+
+    apiPost("/api/geo", {
+      action: "baseline",
+      clientId: state.session.clientId,
+      token: state.session.token,
+      ...(force ? { force: true } : {}),
+    })
+      .then((res) => {
+        state.geoLoading = false;
+        state.geo = res.baseline || null;
+        state.geoMeta = {
+          reason: res.reason || null,
+          searched: res.searched || [],
+          warnings: res.warnings || [],
+          file: res.file || null,
+          otherFiles: res.otherFiles || 0,
+          hasSources: !!res.hasSources,
+        };
+        renderGeo();
+      })
+      .catch((err) => {
+        state.geoLoading = false;
+        state.geoError = err.message || "Onbekende fout bij laden van de GEO-baseline.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderGeo();
+      });
+  }
+
+  function geoSourcesFetch(force) {
+    if (!state.session || state.geoSourcesLoading) return;
+    state.geoSourcesLoading = true;
+    state.geoSourcesError = null;
+    renderGeo();
+
+    apiPost("/api/geo", {
+      action: "sources",
+      clientId: state.session.clientId,
+      token: state.session.token,
+      ...(state.geoSourcesPlatform ? { platform: state.geoSourcesPlatform } : {}),
+      ...(force ? { force: true } : {}),
+    })
+      .then((res) => {
+        state.geoSourcesLoading = false;
+        state.geoSources = res;
+        renderGeo();
+      })
+      .catch((err) => {
+        state.geoSourcesLoading = false;
+        state.geoSourcesError = err.message || "Ophalen van de bronnen mislukt.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderGeo();
+      });
+  }
+
+  window.__geoTab = (k) => { state.geoTab = k; renderGeo(); };
+  window.__geoRefresh = () => geoFetch(true);
+  window.__geoSources = (force) => geoSourcesFetch(force === true);
+  window.__geoPlatform = (p) => {
+    state.geoSourcesPlatform = p;
+    state.geoSources = null;   // ander platform = andere dataset, niet mengen
+    renderGeo();
+  };
+
+  /* ---------- Formatters ---------- */
+
+  const geoFmt = {
+    pct: (n) => (n == null || !isFinite(n)) ? "—" : (Number.isInteger(n) ? n : n.toFixed(1).replace(".", ",")) + "%",
+    int: (n) => (n == null || !isFinite(n)) ? "—" : Math.round(n).toLocaleString("nl-NL"),
+    date: (iso) => {
+      if (!iso) return "—";
+      const [y, m, d] = iso.split("-").map(Number);
+      const mm = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+      return `${d} ${mm[m - 1]} ${y}`;
+    },
+  };
+
+  // Horizontale balk. Bewust geen charts.js: dat tekent reeksen over een x-as,
+  // en dit zijn losse waarden naast elkaar. Een balk vanaf nul met het cijfer
+  // ernaast leest bovendien beter bij vijf engines dan een assenstelsel.
+  function geoBar(label, value, max, display, title) {
+    const w = (max > 0 && value != null) ? Math.max(1, Math.round((value / max) * 100)) : 0;
+    return `<div class="geo-bar"${title ? ` title="${escapeHtml(title)}"` : ""}>
+      <div class="lbl">${escapeHtml(label)}</div>
+      <div class="track"><div class="fill" style="width:${w}%"></div></div>
+      <div class="val">${escapeHtml(display)}</div>
+    </div>`;
+  }
+
+  /* ---------- Render ---------- */
+
+  function renderGeo() {
+    const root = $("#geo-content");
+    if (!root) return;
+
+    if (state.geoLoading && !state.geo) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">Auditbestand ophalen uit Drive…</p>`);
+      return;
+    }
+    if (state.geoError) {
+      root.innerHTML = renderAnalysisEmpty(
+        `<p style="color:#c0392b; margin:0;">${escapeHtml(state.geoError)}</p>
+         <button class="btn primary" style="margin-top:14px;" onclick="window.__geoRefresh()">Opnieuw proberen</button>`);
+      return;
+    }
+    if (!state.geo) { root.innerHTML = renderGeoMissing(); return; }
+
+    root.innerHTML = renderGeoBar() + renderGeoTabs() + renderGeoPane();
+  }
+
+  // Geen bestand = geen cijfers. Dit scherm legt uit wat er moet gebeuren en
+  // wáár gekeken is; het toont nooit voorbeeld- of demo-data, want een klant
+  // kan het verschil niet zien.
+  function renderGeoMissing() {
+    const m = state.geoMeta || {};
+    const where = (m.searched || []).length
+      ? `<p class="muted" style="margin:10px 0 0; font-size:12px;">Gezocht in: ${escapeHtml(m.searched.join(" · "))}.</p>`
+      : "";
+    return renderAnalysisEmpty(`
+      <p class="muted" style="margin:0 0 10px;">Nog geen GEO-audit voor deze klant.</p>
+      <p class="muted" style="margin:0; font-size:12px;">
+        Deze tab toont een <em>gemeten</em> nulmeting: hoe de vijf AI-engines over het merk praten.
+        Draai de <strong>geo-visibility-audit</strong> en zet het resultaat als
+        <strong>geo-dashboard.json</strong> in de Drive-map van de klant
+        (of in de submap <em>GEO</em>). Het schema staat in
+        <em>agents/GEO_Dashboard_Schema.md</em>, met een ingevuld voorbeeld ernaast.
+      </p>
+      ${m.reason ? `<p class="muted" style="margin:10px 0 0; font-size:12px;">Reden: ${escapeHtml(m.reason)}</p>` : ""}
+      ${where}
+      <button class="btn primary" style="margin-top:14px;" onclick="window.__geoRefresh()">Opnieuw zoeken</button>`);
+  }
+
+  function renderGeoBar() {
+    const g = state.geo, m = state.geoMeta || {};
+    const bits = [];
+    if (g.promptCount) bits.push(`${g.promptCount} prompts`);
+    if (g.engines.length) bits.push(`${g.engines.length} engines`);
+    if (m.file) bits.push(`bron: ${m.file.name}`);
+    if (m.otherFiles) bits.push(`${m.otherFiles} ouder${m.otherFiles === 1 ? "" : "e"} bestand${m.otherFiles === 1 ? "" : "en"} genegeerd`);
+
+    const warn = (m.warnings || []).length
+      ? `<div style="font-size:11px; color:#b45309; margin-top:8px;">${m.warnings.map(w => escapeHtml(w)).join("<br>")}</div>`
+      : "";
+
+    return `<section class="panel" style="padding:14px 18px; margin-bottom:16px;">
+      <div class="roas-bar">
+        <div>
+          <div class="info-label">Nulmeting</div>
+          <div style="font-family:var(--font-serif); font-size:20px; color:var(--text); margin-top:2px;">
+            ${escapeHtml(geoFmt.date(g.auditDate))}${g.label ? ` · ${escapeHtml(g.label)}` : ""}
+          </div>
+          <div class="muted" style="font-size:11px; margin-top:2px;">${escapeHtml(bits.join(" · "))}</div>
+        </div>
+        <button class="btn tiny" onclick="window.__geoRefresh()">↻ Opnieuw inlezen</button>
+      </div>
+      ${g.passNote ? `<div class="muted" style="font-size:11px; margin-top:8px;">${escapeHtml(g.passNote)}</div>` : ""}
+      ${warn}
+    </section>`;
+  }
+
+  function renderGeoTabs() {
+    return `<div class="geo-tabs">${GEO_TABS.map(t =>
+      `<button class="${t.key === state.geoTab ? "on" : ""}" onclick="window.__geoTab('${t.key}')">${escapeHtml(t.label)}</button>`
+    ).join("")}</div>`;
+  }
+
+  function renderGeoPane() {
+    switch (state.geoTab) {
+      case "prompts": return renderGeoPrompts();
+      case "sources": return renderGeoSources();
+      case "website": return renderGeoWebsite();
+      case "acties": return renderGeoActions();
+      default: return renderGeoOverview();
+    }
+  }
+
+  /* ---------- 1. Overzicht ---------- */
+
+  function renderGeoOverview() {
+    const g = state.geo;
+    const out = [];
+
+    if (g.status) {
+      out.push(`<div class="geo-callout ${escapeHtml(g.status.level)}">
+        ${g.status.title ? `<strong>${escapeHtml(g.status.title)}.</strong> ` : ""}${escapeHtml(g.status.text || "")}
+      </div>`);
+    }
+
+    if (g.kpis.length) {
+      const prev = g.previous?.kpis || [];
+      out.push(`<div class="kpi-grid" style="margin-bottom:16px;">${g.kpis.map(k => {
+        const was = prev.find(p => p.label === k.label);
+        return `<div class="kpi-card">
+          <div class="label"><span class="dot"></span>${escapeHtml(k.label)}</div>
+          <div class="value" style="font-size:30px;">${escapeHtml(k.value)}</div>
+          ${k.delta ? `<div class="geo-delta ${escapeHtml(k.tone)}">${escapeHtml(k.delta)}</div>` : ""}
+          ${was ? `<div class="muted" style="font-size:11px;">was ${escapeHtml(was.value)} op ${escapeHtml(geoFmt.date(g.previous.auditDate))}</div>` : ""}
+          ${k.sub ? `<div class="muted" style="font-size:11px;">${escapeHtml(k.sub)}</div>` : ""}
+        </div>`;
+      }).join("")}</div>`);
+    }
+
+    if (g.engines.length) {
+      const measured = g.engines.filter(e => e.mentionRatePct != null);
+      const max = Math.max(100, ...measured.map(e => e.mentionRatePct));
+      out.push(`<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Mention rate per engine</h2>
+          <div class="panel-sub">Op hoeveel van de prompts het merk genoemd wordt</div>
+        </div></div>
+        ${measured.length
+          ? measured.map(e => geoBar(e.name, e.mentionRatePct, max, geoFmt.pct(e.mentionRatePct),
+              [e.runs != null ? `${e.runs} runs` : "", e.note || ""].filter(Boolean).join(" · "))).join("")
+          : `<p class="muted" style="margin:0; font-size:12px;">Geen mention rate per engine in dit auditbestand.</p>`}
+        <div class="lib-table" style="margin-top:14px;"><table>
+          <thead><tr>
+            <th>Engine</th><th class="right">Runs</th><th class="right">Mention rate</th>
+            <th class="right">Share of voice</th><th class="right">Descriptor</th>
+            <th>Top concurrent</th><th>Meest geciteerd brontype</th>
+          </tr></thead>
+          <tbody>${g.engines.map(e => `<tr>
+            <td class="row-caption">${escapeHtml(e.name)}</td>
+            <td class="right">${geoFmt.int(e.runs)}</td>
+            <td class="right">${geoFmt.pct(e.mentionRatePct)}</td>
+            <td class="right">${geoFmt.pct(e.shareOfVoicePct)}</td>
+            <td class="right">${geoFmt.pct(e.descriptorAccuracyPct)}</td>
+            <td>${escapeHtml(e.topCompetitor || "—")}</td>
+            <td class="row-caption" title="${escapeHtml(e.sourceType || "")}">${escapeHtml(e.sourceType || "—")}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+        <div class="muted" style="font-size:11px; margin-top:10px;">
+          Een leeg vak bij Descriptor betekent <em>niets te beoordelen</em>: zonder mentions is er geen beschrijving om juist of fout te noemen. Dat is niet hetzelfde als 0%.
+        </div>
+      </section>`);
+    }
+
+    const cols = [];
+    if (g.byType.length) {
+      const max = Math.max(100, ...g.byType.map(t => t.ratePct || 0));
+      cols.push(`<section class="panel">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Per prompt-type</h2>
+          <div class="panel-sub">Waar in de koopreis het merk wel en niet opduikt</div>
+        </div></div>
+        ${g.byType.map(t => geoBar(t.type, t.ratePct, max, geoFmt.pct(t.ratePct), t.note || "")).join("")}
+      </section>`);
+    }
+    if (g.competitors.length) {
+      const max = Math.max(1, ...g.competitors.map(c => c.engines || 0));
+      cols.push(`<section class="panel">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Wie de plek inneemt</h2>
+          <div class="panel-sub">Op hoeveel engines dit merk de top-mention is</div>
+        </div></div>
+        ${g.competitors.map(c => geoBar(c.name, c.engines, max, `${c.engines ?? "—"}×`, c.note || "")).join("")}
+      </section>`);
+    }
+    if (cols.length) out.push(`<div class="geo-grid2" style="margin-bottom:16px;">${cols.join("")}</div>`);
+
+    if (g.phases.length) {
+      out.push(`<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Waar het merk staat</h2>
+          <div class="panel-sub">Elke fase heeft een poort; die haal je voordat de volgende zin heeft</div>
+        </div></div>
+        <div class="geo-phases">${g.phases.map(p => `<div class="geo-phase${p.here ? " here" : ""}">
+          <div class="n">${escapeHtml(p.n || "")}</div>
+          <div class="t">${escapeHtml(p.title)}</div>
+          <div class="g">${escapeHtml(p.gate || "")}</div>
+        </div>`).join("")}</div>
+      </section>`);
+    }
+
+    if (g.method) {
+      out.push(`<section class="panel">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Hoe dit gemeten is</h2>
+          <div class="panel-sub">Zodat een her-meting vergelijkbaar blijft</div>
+        </div></div>
+        <p class="muted" style="margin:0; font-size:13px; line-height:1.7;">${escapeHtml(g.method)}</p>
+        <div class="muted" style="font-size:11px; margin-top:10px;">
+          Een her-audit is alleen vergelijkbaar met dezelfde promptset én hetzelfde aantal passes. Een 1-pass nulmeting naast een 3-pass hermeting leggen is geen trend.
+        </div>
+      </section>`);
+    }
+
+    return out.join("");
+  }
+
+  /* ---------- 2. Prompts ---------- */
+
+  function renderGeoPrompts() {
+    const g = state.geo;
+    if (!g.prompts.length) {
+      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen promptmatrix in dit auditbestand. Voeg een <em>prompts</em>-blok toe (zie het schema).</p>`);
+    }
+    const engines = g.engines.length ? g.engines.map(e => e.name) : [...new Set(g.prompts.flatMap(p => Object.keys(p.cells)))];
+
+    const cell = (v) => {
+      if (v === 1) return `<td class="c geo-cell yes" title="genoemd">✓</td>`;
+      if (v === 2) return `<td class="c geo-cell warn" title="genoemd maar fout beschreven">⚠</td>`;
+      if (v === 0) return `<td class="c geo-cell no" title="niet genoemd">–</td>`;
+      return `<td class="c geo-cell unk" title="niet gemeten">·</td>`;
+    };
+
+    const rows = g.prompts.map(p => `<tr>
+      <td class="right">${p.n}</td>
+      <td class="row-caption" title="${escapeHtml(p.text)}">${escapeHtml(p.text)}</td>
+      <td><span class="geo-tag">${escapeHtml(p.type || "—")}</span></td>
+      ${engines.map(e => cell(p.cells[e])).join("")}
+    </tr>`).join("");
+
+    // Tel per toestand, zodat 'niet gemeten' zichtbaar blijft in plaats van in
+    // de nullen te verdwijnen.
+    const flat = g.prompts.flatMap(p => engines.map(e => p.cells[e]));
+    const n = (v) => flat.filter(x => x === v).length;
+    const unmeasured = flat.filter(x => x !== 0 && x !== 1 && x !== 2).length;
+
+    return `<section class="panel">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">${g.prompts.length} buyer prompts × ${engines.length} engines</h2>
+        <div class="panel-sub">De vragen die kopers stellen, en of het merk in het antwoord zit</div>
+      </div></div>
+      <div class="lib-table"><table>
+        <thead><tr>
+          <th class="right">#</th><th>Prompt</th><th>Type</th>
+          ${engines.map(e => `<th class="c">${escapeHtml(e)}</th>`).join("")}
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="geo-legend">
+        <span><b class="geo-cell yes">✓</b> genoemd — ${n(1)}</span>
+        <span><b class="geo-cell warn">⚠</b> genoemd maar fout beschreven — ${n(2)}</span>
+        <span><b class="geo-cell no">–</b> niet genoemd — ${n(0)}</span>
+        <span><b class="geo-cell unk">·</b> niet gemeten — ${unmeasured}</span>
+      </div>
+      <div class="muted" style="font-size:11px; margin-top:8px;">
+        'Niet gemeten' is bewust een eigen toestand: bij een deelmeting (niet elke engine draaide elke prompt)
+        zou het anders als 'niet genoemd' meetellen en de mention rate structureel te laag maken.
+      </div>
+    </section>`;
+  }
+
+  /* ---------- 3. Sources (live) ---------- */
+
+  function renderGeoSources() {
+    const g = state.geo;
+    const m = state.geoMeta || {};
+    if (!m.hasSources) {
+      return renderAnalysisEmpty(`
+        <p class="muted" style="margin:0 0 10px;">Deze sub-tab haalt live op bij DataForSEO; er is geen koppeling ingesteld.</p>
+        <p class="muted" style="margin:0; font-size:12px;">Zet <strong>DATAFORSEO_LOGIN</strong> en <strong>DATAFORSEO_PASSWORD</strong> in de omgevingsvariabelen.</p>`);
+    }
+    if (!g.sources || !g.sources.keyword) {
+      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen <em>sources</em>-blok in het auditbestand. Zet daar een keyword, platform, markt en taal.</p>`);
+    }
+
+    const s = state.geoSources;
+    const plat = state.geoSourcesPlatform || g.sources.platform;
+    const platBtn = (k, label) => `<button class="btn tiny ${plat === k ? "primary" : ""}" onclick="window.__geoPlatform('${k}')">${escapeHtml(label)}</button>`;
+
+    // De BE-database kent alleen platform 'google'; de ChatGPT-database bestaat
+    // enkel voor VS/EN. Die combinatie levert stilzwijgend niets op, dus zeggen
+    // we het vóór de call in plaats van erna.
+    const loc = (g.sources.location || "").toLowerCase();
+    const mismatch = plat === "chat_gpt" && loc && loc !== "united states"
+      ? `<div class="geo-callout warn" style="margin-top:12px;">De ChatGPT-database bestaat alleen voor de Verenigde Staten en het Engels. Met markt <strong>${escapeHtml(g.sources.location)}</strong> komt er niets terug — kies Google AI, of zet de markt in het auditbestand op United States.</div>`
+      : "";
+
+    const head = `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Welke bronnen voeden AI-antwoorden</h2>
+        <div class="panel-sub">Live bij DataForSEO · marktdata voor "${escapeHtml(g.sources.keyword)}", niet over dit merk</div>
+      </div></div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        ${platBtn("chat_gpt", "ChatGPT")}
+        ${platBtn("google", "Google AI")}
+        <button class="btn tiny" onclick="window.__geoSources(true)"${state.geoSourcesLoading ? " disabled" : ""}>
+          ${state.geoSourcesLoading ? "Ophalen…" : "◎ Ophalen"}
+        </button>
+        <span class="muted" style="font-size:11px;">markt ${escapeHtml(g.sources.location || "—")} · taal ${escapeHtml((g.sources.language || "—").toUpperCase())}</span>
+      </div>
+      <div class="muted" style="font-size:11px; margin-top:8px;">
+        Eén pull kost ongeveer $0,10 op het gedeelde DataForSEO-saldo en mag tot twee minuten duren — daarom een knop en een dagcache.
+        Het keyword staat vast in het auditbestand.
+      </div>
+      ${mismatch}
+      ${state.geoSourcesError ? `<div style="font-size:11px; color:#c0392b; margin-top:8px;">${escapeHtml(state.geoSourcesError)}</div>` : ""}
+      ${s ? `<div class="muted" style="font-size:11px; margin-top:8px;">${escapeHtml(
+          s.fromCache ? "uit de cache van vandaag" : `zojuist opgehaald${s.cost ? ` ($${s.cost})` : ""}`
+        )}${s.totals?.mentions != null ? ` · ${escapeHtml(geoFmt.int(s.totals.mentions))} mentions in de dataset` : ""}</div>` : ""}
+    </section>`;
+
+    if (!s) return head;
+
+    const blocks = [];
+
+    if (s.domains?.length) {
+      const max = Math.max(...s.domains.map(d => d.mentions), 1);
+      blocks.push(`<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Meest geciteerde domeinen</h2>
+          <div class="panel-sub">Je digital-PR-targetlijst: hier wordt de markt beslist</div>
+        </div></div>
+        ${s.domains.map(d => geoBar(d.key, d.mentions, max, geoFmt.int(d.mentions),
+          d.aiSearchVolume != null ? `AI-zoekvolume ${geoFmt.int(d.aiSearchVolume)}` : "")).join("")}
+      </section>`);
+    } else if (s.errors?.domains) {
+      blocks.push(`<section class="panel" style="margin-bottom:16px;"><p class="muted" style="margin:0; font-size:12px;">Domeinen ophalen mislukt: ${escapeHtml(s.errors.domains)}</p></section>`);
+    }
+
+    if (s.totals?.brands?.length) {
+      const max = Math.max(...s.totals.brands.map(b => b.mentions), 1);
+      blocks.push(`<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Merken die AI noemt</h2>
+          <div class="panel-sub">Wie in deze markt als entiteit bestaat voor de modellen</div>
+        </div></div>
+        ${s.totals.brands.map(b => geoBar(b.key, b.mentions, max, geoFmt.int(b.mentions))).join("")}
+      </section>`);
+    }
+
+    if (s.pages?.length) {
+      blocks.push(`<section class="panel">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Meest gebruikte pagina's</h2>
+          <div class="panel-sub">Welk paginatype AI citeert — het formaat om na te bouwen</div>
+        </div></div>
+        <div class="lib-table"><table>
+          <thead><tr><th>URL</th><th class="right">Mentions</th><th class="right">AI-volume</th></tr></thead>
+          <tbody>${s.pages.map(p => `<tr>
+            <td class="row-caption" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</td>
+            <td class="right">${geoFmt.int(p.mentions)}</td>
+            <td class="right">${geoFmt.int(p.aiSearchVolume)}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+      </section>`);
+    } else if (s.errors?.pages) {
+      blocks.push(`<section class="panel"><p class="muted" style="margin:0; font-size:12px;">Pagina's ophalen mislukt: ${escapeHtml(s.errors.pages)}</p></section>`);
+    }
+
+    if (!blocks.length) {
+      blocks.push(renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen data voor deze combinatie. Probeer het andere platform, of een breder keyword in het auditbestand.</p>`));
+    }
+
+    return head + blocks.join("");
+  }
+
+  /* ---------- 4. Website (readiness) ---------- */
+
+  function renderGeoWebsite() {
+    const g = state.geo;
+    if (!g.readiness.length) {
+      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen readiness-checks in dit auditbestand. Voeg een <em>readiness</em>-blok toe (zie het schema).</p>`);
+    }
+    const pass = g.readiness.filter(c => c.status === "pass").length;
+    const fail = g.readiness.filter(c => c.status === "fail").length;
+    const unk = g.readiness.filter(c => c.status === "unknown").length;
+    const icon = { pass: "✓", fail: "✕", unknown: "?" };
+
+    return `<div class="kpi-grid" style="grid-template-columns:repeat(2,1fr); margin-bottom:16px;">
+      <div class="kpi-card">
+        <div class="label"><span class="dot"></span>Readiness-score</div>
+        <div class="value" style="font-size:30px;">${pass}/${g.readiness.length}</div>
+        <div class="muted" style="font-size:11px;">${fail} gezakt · ${unk} onmeetbaar</div>
+      </div>
+      <div class="kpi-card">
+        <div class="label"><span class="dot"></span>Onmeetbaar</div>
+        <div class="value" style="font-size:30px;">${unk}</div>
+        <div class="muted" style="font-size:11px;">Apart geteld: onmeetbaar is geen gezakte check. Zolang een site niet bereikbaar is valt er niets te controleren.</div>
+      </div>
+    </div>
+    <section class="panel">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">GEO/AEO readiness</h2>
+        <div class="panel-sub">Kan een AI-crawler het merk überhaupt lezen</div>
+      </div></div>
+      <div class="geo-checks">${g.readiness.map(c => `<div class="geo-check">
+        <div class="dot ${escapeHtml(c.status)}">${icon[c.status]}</div>
+        <div style="flex:1;">${escapeHtml(c.check)}</div>
+        <div class="why">${escapeHtml(c.note || "")}</div>
+      </div>`).join("")}</div>
+      <div class="muted" style="font-size:11px; margin-top:12px;">
+        Status op auditdatum ${escapeHtml(geoFmt.date(g.auditDate))}. Deze checks worden niet live herhaald — ze horen bij de meting waar de rest van deze tab op slaat.
+      </div>
+    </section>`;
+  }
+
+  /* ---------- 5. Acties ---------- */
+
+  function renderGeoActions() {
+    const g = state.geo;
+    if (!g.actions.length) {
+      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen acties in dit auditbestand. Voeg een <em>actions</em>-blok toe (zie het schema).</p>`);
+    }
+    return `<div class="geo-actions">${g.actions.map(a => `<div class="geo-action${/^p2/i.test(a.priority || "") ? " p2" : ""}">
+      <div class="meta">
+        ${a.priority ? `<span>${escapeHtml(a.priority)}</span>` : ""}
+        ${a.effort ? `<span>effort ${escapeHtml(a.effort)}</span>` : ""}
+        ${a.skill ? `<span>${escapeHtml(a.skill)}</span>` : ""}
+      </div>
+      <h3>${escapeHtml(a.title)}</h3>
+      ${a.text ? `<p>${escapeHtml(a.text)}</p>` : ""}
+      ${a.done ? `<div class="done">✓ Klaar als: ${escapeHtml(a.done)}</div>` : ""}
+    </div>`).join("")}</div>`;
   }
 
   /* ---------- Chat panel (mock, stap 6) ---------- */
@@ -4554,9 +5910,17 @@
   function openTweaks() { $("#tweaks-panel").classList.add("on"); }
   function closeTweaks() { $("#tweaks-panel").classList.remove("on"); }
   function persist(edits) { window.parent.postMessage({ type: "__edit_mode_set_keys", edits }, "*"); }
-  function setAccent(v) { document.documentElement.setAttribute("data-accent", v); $$("[data-tweak-accent]").forEach(b => b.classList.toggle("on", b.dataset.tweakAccent === v)); if (dashboardInited && state.overview) renderOverview(); }
+  // Grafieken bakken hun kleuren in de SVG op het moment van tekenen, dus na een
+  // thema- of accentwissel moeten de pagina's met grafieken opnieuw getekend
+  // worden — anders blijft de donut in de oude kleuren staan.
+  function repaintCharts() {
+    if (!dashboardInited) return;
+    if (state.overview) renderOverview();
+    if (state.website && typeof renderWebsite === "function") renderWebsite();
+  }
+  function setAccent(v) { document.documentElement.setAttribute("data-accent", v); $$("[data-tweak-accent]").forEach(b => b.classList.toggle("on", b.dataset.tweakAccent === v)); repaintCharts(); }
   function setDensity(v) { document.documentElement.setAttribute("data-density", v); $$("[data-tweak-density]").forEach(b => b.classList.toggle("on", b.dataset.tweakDensity === v)); }
-  function setTheme(v) { document.documentElement.setAttribute("data-theme", v); $$("[data-tweak-theme]").forEach(b => b.classList.toggle("on", b.dataset.tweakTheme === v)); if (dashboardInited && state.overview) renderOverview(); }
+  function setTheme(v) { document.documentElement.setAttribute("data-theme", v); $$("[data-tweak-theme]").forEach(b => b.classList.toggle("on", b.dataset.tweakTheme === v)); repaintCharts(); }
 
   /* ---------- Boot ---------- */
 

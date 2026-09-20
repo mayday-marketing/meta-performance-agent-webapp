@@ -157,6 +157,71 @@
     return series; // so caller can build a matching legend
   }
 
+  /* ---------- Donut (deel-van-geheel) ----------
+     spec = {
+       size, thickness,
+       slices: [{ label, value, color? }],   // vaste volgorde = vaste kleur
+       centerValue, centerLabel,
+       format: fn(v)->string
+     }
+     De kleur volgt het item, niet zijn grootte: slice i krijgt altijd --slice-(i+1),
+     ook als de volgorde in de data verandert. Tussen de segmenten zit een gaatje
+     van ~2px in de oppervlaktekleur, zodat aangrenzende tinten niet in elkaar
+     overlopen — dat is ook het 'tweede signaal' naast kleur voor wie kleuren
+     moeilijk onderscheidt. De legenda met cijfers hoort ernaast en staat in de
+     tekstkleur, niet in de slice-kleur. */
+  function sliceColor(i) {
+    return cssVar("--slice-" + ((i % 7) + 1), seriesColor(i));
+  }
+
+  function annularSector(cx, cy, rOuter, rInner, a0, a1) {
+    const p = (r, a) => `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`;
+    const large = (a1 - a0) > Math.PI ? 1 : 0;
+    return `M${p(rOuter, a0)} A${rOuter},${rOuter} 0 ${large} 1 ${p(rOuter, a1)}`
+         + ` L${p(rInner, a1)} A${rInner},${rInner} 0 ${large} 0 ${p(rInner, a0)} Z`;
+  }
+
+  function donut(el, spec) {
+    const size = spec.size || 220;
+    const th = spec.thickness || 34;
+    const cx = size / 2, cy = size / 2;
+    const rOuter = size / 2 - 1;
+    const rInner = Math.max(4, rOuter - th);
+    const rMid = (rOuter + rInner) / 2;
+
+    const slices = (spec.slices || []).filter(s => (s.value || 0) > 0);
+    const total = slices.reduce((a, b) => a + (b.value || 0), 0);
+    const parts = [];
+
+    if (!total) {
+      parts.push(`<circle cx="${cx}" cy="${cy}" r="${rMid.toFixed(1)}" fill="none" stroke="${softColor()}" stroke-opacity="0.25" stroke-width="${th}"/>`);
+    } else {
+      const gap = Math.min(0.07, 2 / rMid);   // ~2px hart-op-hart
+      let a = -Math.PI / 2;
+      slices.forEach((s, i) => {
+        const sweep = (s.value / total) * Math.PI * 2;
+        // Een segment dat smaller is dan het gaatje zou verdwijnen; dat tekenen
+        // we dan zonder marge, anders valt een klein kanaal stilletjes weg.
+        const g = (slices.length > 1 && sweep > gap * 2.5) ? gap / 2 : 0;
+        const a0 = a + g, a1 = a + sweep - g;
+        if (a1 > a0) {
+          parts.push(`<path d="${annularSector(cx, cy, rOuter, rInner, a0, a1)}" fill="${s.color || sliceColor(i)}"/>`);
+        }
+        a += sweep;
+      });
+    }
+
+    if (spec.centerValue != null) {
+      parts.push(`<text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="20" font-weight="600" fill="currentColor">${spec.centerValue}</text>`);
+    }
+    if (spec.centerLabel) {
+      parts.push(`<text x="${cx}" y="${cy + 15}" text-anchor="middle" font-size="10" letter-spacing="0.08em" fill="${softColor()}">${spec.centerLabel}</text>`);
+    }
+
+    el.innerHTML = `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="display:block;">${parts.join("")}</svg>`;
+    return slices;
+  }
+
   /* ---------- Legend ---------- */
   function legend(el, series) {
     if (!el) return;
@@ -188,5 +253,5 @@
     </svg>`;
   }
 
-  window.Charts = { render, legend, sparkline, seriesColor, cssVar, fmt };
+  window.Charts = { render, donut, legend, sparkline, seriesColor, sliceColor, cssVar, fmt };
 })();

@@ -26,6 +26,18 @@
   --kpi-3: #351f69;
   --kpi-4: #1f9b8a;
   --heat: 255, 104, 59;
+  /* Donut-slices — categorische identiteit, bewust NIET aan het merkaccent
+     gekoppeld: een kanaalgroep moet in elk thema dezelfde kleur houden, anders
+     verspringt 'organisch' van teal naar zand als iemand het thema wisselt.
+     Vaste volgorde, nooit op rangorde: kleur volgt het kanaal, niet zijn grootte.
+     Gevalideerd op lichtheid, chroma, kleurenblindheid en contrast (7 slots). */
+  --slice-1: #2a78d6;
+  --slice-2: #eb6834;
+  --slice-3: #1baf7a;
+  --slice-4: #eda100;
+  --slice-5: #e87ba4;
+  --slice-6: #008300;
+  --slice-7: #4a3aa7;
   --btn-primary: #400745;
   --border: rgba(52, 7, 69, 0.12);
   --border-strong: rgba(52, 7, 69, 0.22);
@@ -100,7 +112,16 @@
   --accent-soft: rgba(214, 64, 107, 0.12);
 }
 
+/* Donkere stappen van dezelfde zeven tinten, apart gekozen en gevalideerd tegen
+   het donkere oppervlak — geen automatische omkering van de lichte waarden. */
 :root[data-theme="dark"] {
+  --slice-1: #3987e5;
+  --slice-2: #d95926;
+  --slice-3: #199e70;
+  --slice-4: #c98500;
+  --slice-5: #d55181;
+  --slice-6: #008300;
+  --slice-7: #9085e9;
   --background: #1a0e21;
   --surface: #261734;
   --surface-strong: #2f1f3f;
@@ -1556,3 +1577,208 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 900px) {
   .web-mini-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- Website: donut, verschilcellen en zoekbalk ---------- */
+
+/* Deel-van-geheel: ring links, legenda met de cijfers rechts. Met zeven
+   segmenten is de ring de verhouding en de legenda de waarde. */
+.web-donut {
+  display: flex; gap: 28px; align-items: center; flex-wrap: wrap;
+  margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border);
+}
+.web-donut .chart { flex: 0 0 auto; color: var(--text); }
+.web-donut .legend {
+  flex: 1 1 320px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 20px;
+}
+.web-donut-item {
+  display: grid; grid-template-columns: 10px auto 1fr; grid-template-rows: auto auto;
+  column-gap: 8px; align-items: baseline; font-size: 13px;
+}
+.web-donut-item .swatch { width: 10px; height: 10px; border-radius: 3px; grid-row: 1; }
+.web-donut-item .name { grid-row: 1; color: var(--text); }
+.web-donut-item .val { grid-row: 1; text-align: right; font-weight: 600; color: var(--text); }
+.web-donut-item .sub { grid-row: 2; grid-column: 2 / -1; font-size: 11px; color: var(--text-soft); }
+.web-donut-item.off { opacity: 0.45; }
+
+/* Verschil naast een waarde in een tabelcel. */
+.cell-delta { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600; }
+.cell-delta.up { color: var(--good); }
+.cell-delta.down { color: var(--bad); }
+.cell-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; font-weight: 600; background: var(--surface-strong); color: var(--text-muted);
+}
+
+/* Zoekbalk in een paneelkop. */
+.web-search {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); padding: 0 10px; height: 34px; min-width: 240px;
+}
+.web-search .ico { color: var(--text-soft); font-size: 14px; }
+.web-search input {
+  border: none; outline: none; background: transparent; color: var(--text);
+  font: inherit; font-size: 13px; width: 100%; padding: 0;
+}
+.web-search input::placeholder { color: var(--text-soft); }
+.web-search:focus-within { border-color: var(--accent); }
+
+/* ========== SEO-tab ==========
+   Keyword-chips, concurrentiebadge, positie en trend. De kleuren volgen de
+   bestaande tokens, zodat het accent per klant ook hier doorwerkt. */
+
+.seo-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+.seo-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--accent-soft, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 6px 3px 11px; font-size: 12px; color: var(--text);
+}
+.seo-chip button {
+  all: unset; cursor: pointer; color: var(--text-soft);
+  font-size: 12px; line-height: 1;
+  width: 18px; height: 18px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.seo-chip button:hover { color: #c0392b; background: rgba(192, 57, 43, 0.12); }
+.seo-chip button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Concurrentie komt uit Google Ads en gaat over adverteerders, niet over
+   organische moeilijkheid — daarom neutrale tinten en geen goed/slecht-kleur. */
+.seo-comp {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  border: 1px solid var(--border); color: var(--text-muted);
+}
+.seo-comp.low { background: rgba(31, 155, 138, 0.12); color: #17786a; border-color: transparent; }
+.seo-comp.medium { background: rgba(224, 149, 42, 0.14); color: #9a6413; border-color: transparent; }
+.seo-comp.high { background: rgba(192, 57, 43, 0.12); color: #a5352a; border-color: transparent; }
+
+.seo-pos { font-weight: 700; font-variant-numeric: tabular-nums; }
+.seo-pos.good { color: #1f9b8a; }
+.seo-pos.mid { color: #b57614; }
+.seo-pos.low { color: var(--text-muted); }
+
+/* Stijgende vraag is goed nieuws, dalende slecht — los van de positie. */
+.seo-trend { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12px; }
+.seo-trend.up { color: #1f9b8a; }
+.seo-trend.down { color: #c0392b; }
+.seo-trend.flat { color: var(--text-muted); }
+
+/* ========== GEO-tab ==========
+   Sub-tabs, statusbanner, horizontale balken, promptmatrix, readiness-checks,
+   fasenstrip en actiekaarten. Kleuren volgen de bestaande tokens. */
+
+.geo-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); margin-bottom: 16px;
+}
+.geo-tabs button {
+  appearance: none; border: none; background: none; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted);
+  padding: 9px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.geo-tabs button.on { color: var(--accent-text, var(--accent)); border-bottom-color: var(--accent); }
+.geo-tabs button:hover { color: var(--text); }
+.geo-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.geo-callout {
+  border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;
+  font-size: 13px; line-height: 1.6; border-left: 3px solid var(--text-muted);
+  background: rgba(0, 0, 0, 0.03); color: var(--text);
+}
+.geo-callout.blocked { border-left-color: #c0392b; background: rgba(192, 57, 43, 0.08); }
+.geo-callout.warn { border-left-color: #b45309; background: rgba(224, 149, 42, 0.10); }
+.geo-callout.ok { border-left-color: #1f9b8a; background: rgba(31, 155, 138, 0.10); }
+
+.geo-delta { font-size: 12px; font-weight: 600; margin-top: 2px; }
+.geo-delta.bad { color: #c0392b; }
+.geo-delta.good { color: #1f9b8a; }
+.geo-delta.neutral { color: var(--text-muted); }
+
+/* Horizontale balk vanaf nul: losse waarden naast elkaar, geen tijdreeks. */
+.geo-bar { display: flex; align-items: center; gap: 10px; margin: 7px 0; font-size: 13px; }
+.geo-bar .lbl {
+  min-width: 170px; max-width: 260px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; color: var(--text);
+}
+.geo-bar .track {
+  flex: 1; height: 14px; border-radius: 7px; overflow: hidden;
+  background: var(--accent-soft, rgba(0, 0, 0, 0.05));
+}
+.geo-bar .fill { height: 100%; border-radius: 7px; background: var(--accent); }
+.geo-bar .val {
+  min-width: 52px; text-align: right; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+
+.geo-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap, 16px); }
+@media (max-width: 900px) { .geo-grid2 { grid-template-columns: 1fr; } }
+
+/* Promptmatrix */
+.geo-cell { text-align: center; font-weight: 700; }
+.geo-cell.yes { color: #1f9b8a; }
+.geo-cell.warn { color: #b45309; }
+.geo-cell.no { color: var(--text-soft); font-weight: 400; }
+.geo-cell.unk { color: var(--border); }
+th.c, td.c { text-align: center; }
+.geo-tag {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  background: var(--accent-soft, rgba(0, 0, 0, 0.05)); color: var(--text);
+}
+.geo-legend {
+  display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px;
+  font-size: 12px; color: var(--text-muted);
+}
+.geo-legend b { margin-right: 4px; }
+
+/* Readiness */
+.geo-checks { display: flex; flex-direction: column; }
+.geo-check {
+  display: flex; gap: 12px; align-items: center; font-size: 13px;
+  padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+.geo-check:last-child { border-bottom: none; }
+.geo-check .dot {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #fff;
+}
+.geo-check .dot.pass { background: #1f9b8a; }
+.geo-check .dot.fail { background: #c0392b; }
+.geo-check .dot.unknown { background: var(--text-soft); }
+.geo-check .why { color: var(--text-muted); font-size: 12px; text-align: right; }
+
+/* Fasenstrip */
+.geo-phases { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+@media (max-width: 900px) { .geo-phases { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 520px) { .geo-phases { grid-template-columns: repeat(2, 1fr); } }
+.geo-phase {
+  border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+  background: var(--accent-soft, rgba(0, 0, 0, 0.03));
+}
+.geo-phase.here { background: var(--accent); border-color: var(--accent); color: #fff; }
+.geo-phase .n { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.geo-phase .t { font-size: 13px; font-weight: 600; margin: 2px 0; }
+.geo-phase .g { font-size: 11px; line-height: 1.4; color: var(--text-muted); }
+.geo-phase.here .g { color: rgba(255, 255, 255, 0.85); }
+
+/* Actiekaarten */
+.geo-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap, 16px); }
+@media (max-width: 900px) { .geo-actions { grid-template-columns: 1fr; } }
+.geo-action {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: 12px; padding: 20px;
+}
+.geo-action.p2 { border-left-color: var(--text-soft); }
+.geo-action .meta { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.geo-action .meta span {
+  font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 999px;
+  background: var(--accent-soft, rgba(0, 0, 0, 0.05)); color: var(--text);
+}
+.geo-action h3 { margin: 0 0 6px; font-size: 15px; }
+.geo-action p { font-size: 13px; color: var(--text-muted); margin: 0 0 6px; line-height: 1.6; }
+.geo-action .done { font-size: 12px; color: #1f9b8a; font-weight: 500; }

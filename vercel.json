@@ -19,9 +19,19 @@
     },
     "api/windsor.js": {
       "maxDuration": 60
+    },
+    "api/seo.js": {
+      "maxDuration": 60
+    },
+    "api/geo.js": {
+      "maxDuration": 120,
+      "memory": 1024
     }
   },
   "rewrites": [
-    { "source": "/", "destination": "/index.html" }
+    {
+      "source": "/",
+      "destination": "/index.html"
+    }
   ]
 }
