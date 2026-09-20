@@ -47,6 +47,11 @@ async function getAccessToken() {
   return tokenData.access_token;
 }
 
+// Mapnamen vergelijken zonder leestekens: '01_MERK-STRATEGIE' en '01_MERKSTRATEGIE'
+// zijn dezelfde map. Zonder deze stap mist een klantmap met een koppelteken meer
+// of minder stilzwijgend zijn merkcontext.
+const normFolder = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 async function findFolderByPath(accessToken, rootId, segments) {
   let currentId = rootId;
   for (const seg of segments) {
@@ -55,8 +60,15 @@ async function findFolderByPath(accessToken, rootId, segments) {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     const data = await res.json();
-    if (!data.files?.length) return null;
-    currentId = data.files[0].id;
+    if (data.files?.length) { currentId = data.files[0].id; continue; }
+
+    // Geen letterlijke treffer: dan op genormaliseerde naam zoeken.
+    const all = await listFolders(accessToken, currentId);
+    const want = normFolder(seg);
+    const hit = all.find(f => normFolder(f.name) === want)
+             || all.find(f => normFolder(f.name).startsWith(want) || want.startsWith(normFolder(f.name)));
+    if (!hit) return null;
+    currentId = hit.id;
   }
   return currentId;
 }
@@ -68,6 +80,22 @@ async function listFiles(accessToken, folderId) {
   });
   const data = await res.json();
   return data.files || [];
+}
+
+// Contextmappen zijn per klant anders ingedeeld: bij de een liggen de bestanden
+// los in 00_AI-CONTEXT, bij de ander in submappen ('0.1_Merk-Brief/brief.md').
+// Daarom één niveau dieper kijken en de mapnaam vóór de bestandsnaam plakken —
+// het nummer waarop we matchen staat namelijk op de map, niet op het bestand.
+async function listFilesDeep(accessToken, folderId) {
+  const out = [];
+  for (const f of await listFiles(accessToken, folderId)) {
+    if (f.mimeType !== 'application/vnd.google-apps.folder') { out.push(f); continue; }
+    for (const kid of await listFiles(accessToken, f.id)) {
+      if (kid.mimeType === 'application/vnd.google-apps.folder') continue;
+      out.push({ ...kid, name: `${f.name}/${kid.name}` });
+    }
+  }
+  return out;
 }
 
 async function listFolders(accessToken, folderId) {
@@ -201,7 +229,7 @@ module.exports = async (req, res) => {
       const contextMap = { '0.1': 'Merk-Brief', '0.2': "Do's & Don'ts", '3.3': 'Content Pijlers', '1.3': 'Concurrentieanalyse' };
       for (const folderId of [ctxFolder, sFolder, mFolder]) {
         if (!folderId) continue;
-        const files = await listFiles(accessToken, folderId);
+        const files = await listFilesDeep(accessToken, folderId);
         for (const file of files) {
           for (const [key, label] of Object.entries(contextMap)) {
             if (file.name.includes(key) && !allData.contextFiles.find(c => c.label === label)) {
@@ -270,7 +298,7 @@ module.exports = async (req, res) => {
 
       for (const folderId of [contextFolder, stratFolder, merkFolder]) {
         if (!folderId) continue;
-        const files = await listFiles(accessToken, folderId);
+        const files = await listFilesDeep(accessToken, folderId);
         for (const file of files) {
           for (const [key, label] of Object.entries(contextMap)) {
             if (file.name.includes(key) && !contextFiles.find(c => c.label === label)) {
@@ -330,7 +358,7 @@ module.exports = async (req, res) => {
       };
       for (const folderId of [ctxFolder, sFolder, mFolder]) {
         if (!folderId) continue;
-        const files = await listFiles(accessToken, folderId);
+        const files = await listFilesDeep(accessToken, folderId);
         for (const file of files) {
           for (const [key, label] of Object.entries(contextMap)) {
             if (file.name.includes(key) && !contextFiles.find(c => c.label === label)) {
@@ -391,16 +419,16 @@ module.exports = async (req, res) => {
     const mFolder    = await findFolderByPath(accessToken, rootId, ['01_MERK-STRATEGIE']);
 
     if (ctxFolder) {
-      const f = await listFiles(accessToken, ctxFolder);
+      const f = await listFilesDeep(accessToken, ctxFolder);
       scanResult.contextFiles.merkBrief   = f.some(x => x.name.includes('0.1') || x.name.toLowerCase().includes('merk-brief'));
       scanResult.contextFiles.woordenlijst = f.some(x => x.name.includes('0.3'));
     }
     if (sFolder) {
-      const f = await listFiles(accessToken, sFolder);
+      const f = await listFilesDeep(accessToken, sFolder);
       scanResult.contextFiles.pillars     = f.some(x => x.name.includes('3.3') || x.name.toLowerCase().includes('content-pijlers'));
     }
     if (mFolder) {
-      const f = await listFiles(accessToken, mFolder);
+      const f = await listFilesDeep(accessToken, mFolder);
       scanResult.contextFiles.concurrentie = f.some(x => x.name.includes('1.3') || x.name.toLowerCase().includes('concurrentie'));
     }
 

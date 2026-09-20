@@ -31,6 +31,9 @@
 
 const { getAccessToken } = require('./_config');
 
+// Dit bestand leest Drive, niet Sheets — dus een eigen scope op het token.
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+
 // Waar we zoeken, in deze volgorde. De eerste map die bestaat wint; het bestand
 // mag ook los in de klantmap staan.
 const GEO_FOLDERS = ['GEO', '00_AI-CONTEXT'];
@@ -296,7 +299,7 @@ async function getGeoBaseline(clientId, driveFolderId, force) {
 
   let result;
   try {
-    const accessToken = await getAccessToken();
+    const accessToken = await getAccessToken(DRIVE_SCOPE);
     const { file, searched, count } = await findGeoFile(accessToken, driveFolderId);
     if (!file) {
       result = {

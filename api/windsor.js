@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { getClientConfig } = require('./_config');
 const { activeChannels, pendingChannels, matchGa4Channel, ga4GroupOf } = require('./_channels');
-const { getWebsiteSheetData } = require('./_sheetdata');
+const { getWebsiteSheetData, getConnectorRows } = require('./_sheetdata');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -78,11 +78,15 @@ module.exports = async (req, res) => {
   }
 
   const client = clients[clientId.toLowerCase()];
-  if (!client?.windsor_api_key) {
+  const apiKey = client?.windsor_api_key || null;
+
+  // Zonder API-sleutel is de datasheet de enige bron. Dat is een geldige toestand
+  // (demo- en archiefklanten), maar alleen als er ook écht een datasheet is —
+  // anders is er niets om uit te lezen en blijft de oude foutmelding staan.
+  const sheetOnly = !apiKey;
+  if (sheetOnly && !client?.dataSheetId) {
     return res.status(400).json({ error: 'Geen Windsor-koppeling voor deze klant.' });
   }
-
-  const apiKey = client.windsor_api_key;
 
   // Account-ids komen uit de Config-tab van de klantsheet (zie _config.js). De env var
   // CLIENTS.windsor_accounts blijft werken als fallback per connector, zodat klanten
@@ -134,6 +138,18 @@ module.exports = async (req, res) => {
     // niet-geconfigureerde connector alle klanten teruggeven (data-lek). Lege dataset.
     if (sharedMode && scopable && !wantRaw) return { data: [] };
     const scope = !!wantRaw && scopable;
+
+    // Sheet-only: de datasheet beantwoordt de vraag, of niemand doet het. Scoping
+    // op account-id is hier niet nodig — een datasheet hoort bij één klant, dus
+    // de fail-closed-regel hierboven is al gedekt door de sheet zelf.
+    if (sheetOnly) {
+      const rows = await getConnectorRows(clientId, connector, fieldsCsv, {
+        from: params?.date_from, to: params?.date_to,
+      }).catch(e => ({ __error: e.message }));
+      if (rows) return rows;
+      return { data: [], __error: `Geen tab in de datasheet voor ${connector}.` };
+    }
+
     let fields = fieldsCsv;
     if (scope) {
       // Vraag zowel account_id als account_name op — de configwaarde mag op één van beide matchen.
@@ -828,8 +844,11 @@ module.exports = async (req, res) => {
           // Nul rijen over een hele periode betekent in de praktijk een verkeerde
           // property in de Config-tab, niet 'nul kliks'. Dan liever '—' tonen dan
           // een nul die als meting leest.
+          // Alleen alarm slaan als die call ook écht gedaan is: komt het zoekblok
+          // uit de datasheet, dan is `gscTotalsRaw` leeg omdat we hem oversloegen,
+          // niet omdat Google niets teruggaf.
           const gscRows = rowsOf(gscTotalsRaw).length;
-          if (gscAvailable && !gscRows) errors.gscEmpty = 'Search Console leverde geen rijen — controleer de property in de Config-tab.';
+          if (gscAvailable && !useSearch && !gscRows) errors.gscEmpty = 'Search Console leverde geen rijen — controleer de property in de Config-tab.';
           const searchLive = (gscAvailable && gscRows) ? {
             available: true,
             clicks: sClicks,
@@ -1120,6 +1139,7 @@ module.exports = async (req, res) => {
         for (let i = 0; i < candidates.length; i++) {
           const c = candidates[i];
           if (i === candidates.length - 1) { conn = c; break; } // laatste kandidaat: aannemen (bespaart een probe)
+          if (sheetOnly) { conn = c; break; }   // geen sleutel → geen probe; de sheet beslist
           const probeField = c === 'klaviyo' ? 'campaign' : 'broadcasts__id';
           const probe = await safeCall(windsor(c, apiKey, { fields: probeField, date_from: endDate, date_to: endDate }, 20000), `email-probe-${c}`);
           if (!probe.__error || !/No .* account/i.test(probe.__error)) { conn = c; break; }

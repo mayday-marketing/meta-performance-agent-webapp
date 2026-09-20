@@ -466,4 +466,167 @@ async function getWebsiteSheetData(clientId, startDate, endDate) {
   return result;
 }
 
-module.exports = { getWebsiteSheetData, matchTabs, headerIndex, covers };
+/* ==========================================================
+   Connector-passthrough — de datasheet in plaats van de API
+   ==========================================================
+   Voor een klant zónder `windsor_api_key` is de datasheet de enige bron. Dat kan,
+   omdat Windsor zijn exporttabs de veldnamen van de connector als kop geeft
+   ('media_reel_avg_watch_time', 'action_values_omni_purchase') en getDashboard,
+   getRoas en getEmail die rijen vrijwel ongewijzigd doorgeven aan de frontend.
+   Eén doorgeeffunctie volstaat dus; geen tweede codepad per tab.
+
+   GA4 en Search Console zijn de uitzondering: die exporteert Windsor met leesbare
+   koppen ('Purchase revenue'), niet met veldnamen. Koppen én veldnamen worden
+   daarom genormaliseerd (kleine letters, leestekens weg) en waar dat niet volstaat
+   helpt FIELD_ALIASES.
+
+   WELKE TAB BIJ WELKE VRAAG. Een connector heeft vaak meerdere tabs (Meta Ads per
+   campagne én per advertentie; GA4 per dag, per kanaal en per landingspagina). De
+   verkeerde kiezen telt dubbel: de kanaal-tab bevat dezelfde omzet als de dag-tab,
+   maar uitgesplitst. Daarom valt een tab af zodra hij een dimensiekolom heeft die
+   niet gevraagd is — dat is precies het teken dat hij fijner is dan de vraag. Van
+   wat overblijft wint de tab die de meeste gevraagde velden dekt. */
+
+const CONNECTOR_TABS = {
+  instagram:        /instagram/i,
+  facebook_organic: /facebook\s*org/i,
+  facebook:         /meta\s*ads/i,
+  googleanalytics4: /analytic/i,
+  searchconsole:    /search\s*console/i,
+  google_ads:       /google\s*ads/i,
+  klaviyo:          /klaviyo/i,
+  mailerlite:       /mailerlite/i,
+  convertkit:       /convertkit/i,
+};
+
+// Velden waarvan de kop in de sheet anders heet dan het Windsor-veld.
+const FIELD_ALIASES = {
+  totalusers: ['totalusers', 'users'],
+  screenpageviews: ['views', 'screenpageviews'],
+  conversions: ['keyevents', 'conversions'],
+  userengagementduration: ['userengagementduration', 'userengagement'],
+  query: ['query', 'searchquery'],
+};
+
+// Kolommen die een tabel fijner maken dan een totaal, gegroepeerd per niveau.
+// Per niveau, niet per kolom: 'campaign_id' en 'campaign_name' zijn dezelfde
+// korrel, dus een tab met allebei is niet fijner dan een vraag om één van de
+// twee. Een tab valt af zodra hij een niveau heeft waar de vraag niets over zegt
+// — dát is het teken dat hij dezelfde cijfers verder uitsplitst en dus dubbel
+// zou tellen.
+const DIMENSION_LEVELS = {
+  source:   ['sessionsourcemedium', 'sessiondefaultchannelgroup'],
+  page:     ['landingpage', 'page'],
+  query:    ['query', 'searchquery'],
+  campaign: ['campaign', 'campaignname', 'campaignid'],
+  ad:       ['adid', 'adname'],
+  post:     ['mediaid', 'postid', 'videoid'],
+  product:  ['producttitle', 'sku'],
+  flow:     ['flowname', 'flowid'],
+};
+
+// Kolommen waarop we op periode filteren, in volgorde van voorkeur.
+const DATE_HEADERS = ['date', 'timestamp', 'postcreatedtime', 'createtime', 'sentat', 'month'];
+
+function headerCandidates(field) {
+  const n = normHeader(field);
+  const out = new Set([n]);
+  for (const a of (FIELD_ALIASES[n] || [])) out.add(a);
+  // 'conversions_purchase' → kop 'Key event count for purchase'.
+  const m = /^conversions(.+)$/.exec(n);
+  if (m) out.add(GOAL_PREFIX + m[1]);
+  return out;
+}
+
+// '2026-06-01T18:20:00+0200' en '2026-06' leveren allebei iets vergelijkbaars op.
+function dayOfCell(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (/^\d{4}-\d{2}$/.test(s)) return s + '-01';
+  return isoOf(s.slice(0, 10)) || isoOf(s);
+}
+
+function cellValue(v) {
+  if (v == null || v === '') return null;
+  const s = String(v).trim();
+  if (/^-?\d+(\.\d+)?$/.test(s)) {
+    const n = parseFloat(s);
+    if (isFinite(n)) return n;
+  }
+  return s;
+}
+
+/**
+ * Rijen voor één connector uit de datasheet, in de vorm die windsor.js van de API
+ * verwacht: { data: [ {veld: waarde} ] }. Geeft null terug als de sheet deze vraag
+ * niet kan beantwoorden — de aanroeper beslist dan wat er gebeurt.
+ */
+async function getConnectorRows(clientId, connector, fieldsCsv, { from, to } = {}) {
+  const pattern = CONNECTOR_TABS[connector];
+  if (!pattern) return null;
+
+  const sheetId = resolveDataSheetId(clientId);
+  if (!sheetId) return null;
+
+  let token, titles;
+  try {
+    token = await getAccessToken();
+    titles = await listTabs(clientId, sheetId, token);
+  } catch (e) {
+    return { __error: `Datasheet niet leesbaar: ${e.message}` };
+  }
+
+  const wanted = String(fieldsCsv || '').split(',').map(f => f.trim()).filter(Boolean);
+  const wantedHeaders = new Set();
+  for (const f of wanted) for (const h of headerCandidates(f)) wantedHeaders.add(h);
+
+  let best = null;
+  for (const title of titles) {
+    if (/^_windsor_staging/i.test(title) || !pattern.test(title)) continue;
+    let rows;
+    try { rows = await readTab(clientId, sheetId, title, token); }
+    catch { continue; }
+    if (!rows.length) continue;
+
+    const headers = rows[0].map(normHeader);
+    // Te fijn voor deze vraag → overslaan (zou dubbel tellen).
+    const tooFine = Object.values(DIMENSION_LEVELS).some(level =>
+      level.some(h => headers.includes(h)) && !level.some(h => wantedHeaders.has(h)));
+    if (tooFine) continue;
+
+    let score = 0;
+    const colOf = {};
+    for (const f of wanted) {
+      const cands = headerCandidates(f);
+      const i = headers.findIndex(h => cands.has(h));
+      if (i !== -1) { colOf[f] = i; score++; }
+    }
+    if (score < 2) continue;
+    if (!best || score > best.score) best = { title, rows, headers, colOf, score };
+  }
+
+  if (!best) return null;
+
+  const dateCol = DATE_HEADERS.map(h => best.headers.indexOf(h)).find(i => i !== -1);
+  const data = [];
+  let min = null, max = null;
+  for (const r of best.rows.slice(1)) {
+    if (dateCol != null) {
+      const d = dayOfCell(r[dateCol]);
+      if (d) {
+        if (min == null || d < min) min = d;
+        if (max == null || d > max) max = d;
+        if (from && d < from) continue;
+        if (to && d > to) continue;
+      }
+    }
+    const row = {};
+    for (const [field, i] of Object.entries(best.colOf)) row[field] = cellValue(r[i]);
+    data.push(row);
+  }
+
+  // Herkomst meesturen: de UI mag weten dat dit uit de sheet komt en tot wanneer
+  // die loopt. Onbekende sleutels in het antwoord raken de frontend niet.
+  return { data, __sheet: { tab: best.title, rows: data.length, min, max, dated: dateCol != null } };
+}
+
+module.exports = { getWebsiteSheetData, matchTabs, headerIndex, covers, getConnectorRows };

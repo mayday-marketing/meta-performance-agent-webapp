@@ -349,8 +349,11 @@ function parseConfigRows(rows) {
   return { config, warnings };
 }
 
-// Service-account JWT → access token (scope: alleen spreadsheets lezen/schrijven).
-async function getAccessToken() {
+// Service-account JWT → access token. De scope is een parameter omdat dezelfde
+// functie ook Drive-lezers bedient (_geodata.js): met alleen de spreadsheets-scope
+// geeft elke Drive-call een 403 'insufficient authentication scopes'.
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+async function getAccessToken(scope = SHEETS_SCOPE) {
   const keyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (!keyRaw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY niet ingesteld.');
 
@@ -359,7 +362,7 @@ async function getAccessToken() {
   const now = Math.floor(Date.now() / 1000);
   const claimSet = Buffer.from(JSON.stringify({
     iss: key.client_email,
-    scope: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+    scope,
     aud: 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now,
@@ -432,4 +435,4 @@ async function getClientConfig(clientId) {
 
 // getAccessToken wordt ook door _sheetdata.js gebruikt — één implementatie i.p.v.
 // een derde kopie van hetzelfde JWT-dansje.
-module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets, getAccessToken };
+module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets, getAccessToken, SHEETS_SCOPE };
