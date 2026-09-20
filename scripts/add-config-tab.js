@@ -24,6 +24,11 @@ const APPLY = process.argv.includes('--apply');
 const DEBUG = process.argv.includes('--debug');
 const onlyIdx = process.argv.indexOf('--only');
 const ONLY = onlyIdx !== -1 ? (process.argv[onlyIdx + 1] || '').toLowerCase() : null;
+// Ander env-bestand dan .env.local, bv. om productie te controleren:
+//   vercel env pull --environment=production .env.production.local
+//   node scripts/add-config-tab.js --env .env.production.local
+const envIdx = process.argv.indexOf('--env');
+const ENV_FILE = envIdx !== -1 ? process.argv[envIdx + 1] : null;
 
 /* ---------- .env.local inlezen (waarden worden nooit geprint) ----------
    Een .env-waarde kan er op drie manieren in staan:
@@ -199,14 +204,16 @@ function parseJsonValue(raw, key) {
 }
 
 function loadEnv() {
-  const file = path.join(__dirname, '..', '.env.local');
+  const file = ENV_FILE
+    ? path.resolve(process.cwd(), ENV_FILE)
+    : path.join(__dirname, '..', '.env.local');
   const raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
 
-  const clients = process.env.CLIENTS
+  const clients = (!ENV_FILE && process.env.CLIENTS)
     ? JSON.parse(process.env.CLIENTS)
     : (raw ? parseJsonValue(raw, 'CLIENTS') : null);
 
-  let saKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || null;
+  let saKey = (!ENV_FILE && process.env.GOOGLE_SERVICE_ACCOUNT_KEY) || null;
   if (!saKey && raw) saKey = JSON.stringify(parseJsonValue(raw, 'GOOGLE_SERVICE_ACCOUNT_KEY'));
 
   return { clients, saKey };
@@ -348,7 +355,10 @@ async function ensureConfigTab(sheetId, token) {
 
   for (const [id, cfg] of Object.entries(clients)) {
     if (ONLY && id.toLowerCase() !== ONLY) continue;
-    if (!cfg.sheetId) { console.log(`- ${id.padEnd(14)} geen sheetId in CLIENTS — overgeslagen`); continue; }
+    if (!cfg.sheetId) {
+      console.log(`- ${id.padEnd(14)} geen sheetId in CLIENTS — overgeslagen (velden: ${Object.keys(cfg).join(', ') || 'geen'})`);
+      continue;
+    }
     try {
       const r = await ensureConfigTab(cfg.sheetId, token);
       if (r.skipped) { skipped++; console.log(`- ${id.padEnd(14)} "${r.name}" heeft al een Config-tab — overgeslagen`); }
