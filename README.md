@@ -1,157 +1,179 @@
-# Just Jane — Performance Agent Web App
-**Versie:** 1.0 · April 2026 · Just Jane Marketing
+# mayday marketing — Meta Performance Agent
+
+Multi-tenant social-media-performancedashboard. Eén deployment bedient alle
+klanten: een klant logt in met een code + wachtwoord en ziet uitsluitend zijn
+eigen Instagram-, Meta Ads-, website-, SEO- en GEO-cijfers, plus een
+AI-analyse en een AI-chat.
+
+- **Nieuwe klant opzetten:** [docs/NIEUWE-KLANT.md](docs/NIEUWE-KLANT.md)
+- **Architectuur en valkuilen:** [CLAUDE.md](CLAUDE.md)
 
 ---
 
 ## Bestandsstructuur
 
+Geen build-stap, geen framework, geen `package.json`. Wat er staat is wat er
+draait.
+
 ```
-performance-agent-webapp/
-├── index.html                    ← Chat interface (Just Jane branding)
-├── api/
-│   ├── auth.js                   ← Login endpoint
-│   ├── chat.js                   ← Anthropic API proxy (streaming)
-│   └── sheets.js                 ← Google Sheets lezen & schrijven
-├── agents/
-│   ├── LEES_MIJ.txt
-│   └── Meta-Performance_Agent.md ← Zelf toevoegen (zie stap 1)
-├── .env.example                  ← Template voor omgevingsvariabelen
-├── .gitignore                    ← Beveiligt sleutels en agent
-├── vercel.json                   ← Deployment configuratie
-└── README.md                     ← Dit bestand
+meta-performance-agent-webapp/
+├── index.html                 ← dashboard (één pagina, tabs via de nav)
+├── app.js                     ← alle frontendlogica, één IIFE
+├── charts.js                  ← SVG-grafieken
+├── styles.css                 ← design tokens + componenten
+├── data.js                    ← statische fallbackdata
+├── fonts/inter-variable.woff2 ← zelf gehost
+├── api/                       ← Vercel serverless functions (CommonJS)
+│   ├── auth.js                ← login → HMAC-token
+│   ├── windsor.js             ← Windsor.ai: dashboard, ROAS, website, e-mail
+│   ├── sheets.js              ← Merkcontext lezen, analysehistoriek bijschrijven
+│   ├── drive.js               ← merkcontext + ruwe data uit Google Drive
+│   ├── analysis.js            ← analyse-agent (strikte JSON)
+│   ├── chat.js                ← chat-agent (single-shot, zonder tools)
+│   ├── seo.js                 ← DataForSEO: zoekvolumes + posities
+│   ├── geo.js                 ← AI-zichtbaarheid: baseline + live sources
+│   ├── metricool.js           ← alternatieve bron voor klanten op Metricool
+│   ├── _config.js             ← Config-tab per klant (gedeelde module)
+│   ├── _channels.js           ← registry van betaalde kanalen
+│   ├── _sheetdata.js          ← websitedata uit de Windsor-datasheet
+│   └── _geodata.js            ← geo-dashboard.json uit Drive
+├── agents/                    ← systeemprompts + schema's
+├── docs/NIEUWE-KLANT.md       ← klant-onboarding, stap voor stap
+├── evals/                     ← promptevals voor analyse en chat
+├── scripts/add-config-tab.js  ← Config-tab uitrollen naar klantsheets
+└── vercel.json                ← timeouts en geheugen per functie
 ```
+
+Bestanden in `api/` met een underscore-prefix zijn gedeelde modules, geen routes.
 
 ---
 
-## Installatie — stap voor stap
+## Omgevingsvariabelen
 
-### Stap 1 — Agent bestand toevoegen
+Allemaal in Vercel (Settings → Environment Variables), in élke omgeving.
 
-Kopieer `Meta-Performance_Agent.md` naar de `agents/` map.
-Dit bestand staat in `.gitignore` en gaat dus NIET naar GitHub.
+| Variabele | Verplicht | Waarvoor |
+|---|---|---|
+| `AUTH_SECRET` | ja | HMAC-sleutel voor de sessietokens. **Geen fallback** — ontbreekt hij, dan falen alle logins (bewust) |
+| `CLIENTS` | ja | JSON met per klant het wachtwoord, de sheet-, map- en connector-verwijzingen. Markeer als **Sensitive** |
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | ja | service-account-JSON voor Sheets + Drive. Markeer als **Sensitive** |
+| `ANTHROPIC_API_KEY` | ja | analyse + chat; per klant te overschrijven met `anthropic_api_key` in `CLIENTS` |
+| `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` | nee | SEO-tab en de Sources-sub-tab van GEO. Zonder deze twee blijven die leeg met uitleg; de rest merkt er niets van |
+| `LOGO_HOSTS` | nee | extra toegestane hosts voor klantlogo's |
+| `AGENT_SYSTEM_PROMPT` / `ANALYSIS_SYSTEM_PROMPT` | nee | prompt-overrides |
 
-### Stap 2 — .env bestand aanmaken
+De volledige veldenlijst van `CLIENTS` staat in
+[docs/NIEUWE-KLANT.md](docs/NIEUWE-KLANT.md#10--voeg-de-klant-toe-aan-clients-in-vercel).
 
-Kopieer `.env.example` naar `.env` en vul alle waarden in:
+---
 
-```bash
-cp .env.example .env
-```
+## Lokaal draaien
 
-Vul in `.env`:
-- `ANTHROPIC_API_KEY` — van console.anthropic.com
-- `AUTH_SECRET` — willekeurige lange string (gebruik een wachtwoordmanager)
-- `CLIENTS` — JSON met klantcodes, wachtwoorden en Sheet IDs
-- `GOOGLE_SERVICE_ACCOUNT_KEY` — inhoud van performance-agent-key.json
-
-**CLIENTS format:**
-```json
-{
-  "spotto": {
-    "password": "kies-een-sterk-wachtwoord",
-    "sheetId": "1abc...xyz",
-    "brandName": "Spotto"
-  },
-  "andereklant": {
-    "password": "ander-wachtwoord",
-    "sheetId": "1def...uvw",
-    "brandName": "Andere Klant"
-  }
-}
-```
-
-**sheetId** vind je in de URL van de Google Sheet:
-`https://docs.google.com/spreadsheets/d/[SHEET_ID]/edit`
-
-### Stap 3 — GitHub repository aanmaken
-
-1. Ga naar github.com → New repository
-2. Naam: `performance-agent-webapp`
-3. Visibility: **Private** (verplicht)
-4. Upload alle bestanden (ZONDER `.env` — staat in .gitignore)
+1. Haal de variabelen op uit Vercel:
 
 ```bash
-git init
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/jouw-account/performance-agent-webapp.git
-git push -u origin main
+vercel env pull .env.local
 ```
 
-### Stap 4 — Vercel deployment
+2. Start de dev-server (serveert de statische bestanden én `api/`):
 
-1. Ga naar vercel.com → New Project
-2. Importeer je GitHub repository
-3. Klik **Deploy** (instellingen hoef je niet te wijzigen)
+```bash
+vercel dev
+```
 
-### Stap 5 — Environment variables instellen in Vercel
+Er is geen installatiestap: geen `package.json`, geen dependencies.
 
-1. Ga in Vercel naar je project → **Settings** → **Environment Variables**
-2. Voeg toe (één voor één):
-   - `ANTHROPIC_API_KEY`
-   - `AUTH_SECRET`
-   - `CLIENTS`
-   - `GOOGLE_SERVICE_ACCOUNT_KEY`
-3. Klik **Save**
-4. Ga naar **Deployments** → klik op laatste deployment → **Redeploy**
+---
 
-### Stap 6 — Testen
+## Deployen
 
-1. Open de Vercel URL (bv. `https://performance-agent-webapp.vercel.app`)
-2. Log in met een klantcode en wachtwoord uit je CLIENTS config
-3. Upload een test PDF + CSV
-4. Type "start analyse" en bevestig elke stap met "continue"
+Vercel-project `mayday-marketings-projects/meta-performance-agent-webapp`,
+gekoppeld aan GitHub `mayday-marketing/meta-performance-agent-webapp`, branch
+`main`.
 
-### Stap 7 — Eigen domein (optioneel)
+```bash
+vercel --prod
+```
 
-1. Vercel → Settings → Domains
-2. Voeg toe: `agent.mayday.marketing`
-3. Volg de DNS-instructies bij je domeinbeheerder
+`vercel` deployt de **lokale werkmap**. Deploy je zonder te pushen, dan drijft
+GitHub `main` af van wat live staat — push daarna via GitHub Desktop. Een
+preview maak je met `vercel` zonder `--prod`; previews zitten achter Vercel SSO.
+
+Een gewijzigde env-variabele wordt pas actief na een nieuwe deploy of een
+redeploy.
 
 ---
 
 ## Nieuwe klant toevoegen
 
-1. Maak een Klant_Context Google Sheet aan (gebruik `Klant_Context_JustJane.xlsx` als template)
-2. Deel de Sheet met het service account:
-   `performance-agent@performance-agent-493301.iam.gserviceaccount.com` → Editor
-3. Voeg de klant toe aan de `CLIENTS` env var in Vercel
-4. Redeploy
+De volledige procedure staat in **[docs/NIEUWE-KLANT.md](docs/NIEUWE-KLANT.md)**:
+Drive-mappen, klantsheet, Config-tab, Windsor-account-id's, de `CLIENTS` env var,
+de GEO-baseline, deploy en de testronde — met een afvinkbare checklist.
+
+Verkort:
+
+1. Drive-klantmap volgens de mappenconventie, gedeeld met het service-account (Viewer)
+2. Klantsheet met de tabs `Merkcontext`, `Config` en `Analysehistoriek`, gedeeld met
+   hetzelfde service-account (Editor)
+3. Config-tab invullen — vooral de Windsor-account-id's: die zijn fail-closed, een
+   ontbrekend id geeft een lege tab
+4. Klant toevoegen aan de `CLIENTS` env var in Vercel
+5. Deployen en elke tab natrekken tegen de bron
 
 ---
 
-## Technische stack
+## Scripts en evals
 
-| Onderdeel | Tool |
-|---|---|
-| Frontend | HTML + Vanilla JS |
-| Backend | Vercel serverless functions (Node.js) |
-| AI | Anthropic API — claude-sonnet-4-20250514 |
-| Database | Google Sheets via REST API |
-| Auth | HMAC-signed tokens |
-| Hosting | Vercel (gratis tier) |
+De Config-tab uitrollen naar klantsheets (droogloop standaard, overschrijft nooit
+een bestaande tab):
 
----
+```bash
+node scripts/add-config-tab.js --apply --only <klantcode>
+```
 
-## Kosten
+Promptevals na een wijziging aan `agents/Analysis_Agent.md` of
+`agents/Chat_Agent.md` — zie [evals/README.md](evals/README.md):
 
-| Onderdeel | Kost |
-|---|---|
-| Vercel hosting | €0 |
-| Google Sheets API | €0 |
-| Anthropic API | ~€0,15–0,20 per analyse-run |
-| Domein (optioneel) | ~€12/jaar |
+```bash
+node evals/run.mjs
+```
+
+Er is geen test- of lintstap. Verifiëren doe je met `node --check <bestand>` en
+door de deployment te bedienen: inloggen, dashboard laden, de gewijzigde tab
+uitproberen.
 
 ---
 
 ## Veiligheid
 
-- `.env` bestand staat in `.gitignore` — gaat NOOIT naar GitHub
-- `Meta-Performance_Agent.md` staat in `.gitignore` — intellectueel eigendom afgeschermd
-- `GOOGLE_SERVICE_ACCOUNT_KEY` staat als env var in Vercel, nooit in code
-- Tokens verlopen automatisch na 10 uur
-- Alle API calls zijn server-side — API keys zijn nooit zichtbaar in de browser
+- **Isolatie per klant is de belangrijkste regel.** Elke per-klant-bron
+  (sheet-id, Drive-map, connector-account, cachesleutel) wordt server-side
+  afgeleid uit `CLIENTS[clientId]` ná `verifyToken` — nooit uit het request. De
+  gedeelde service-account en de gedeelde API-sleutels kunnen bij élke klant.
+- **Windsor-connectors zijn fail-closed:** een scopebare connector zonder
+  account-id levert een lege dataset in plaats van de data van alle klanten.
+- Tokens zijn HMAC-ondertekend, gebonden aan de klantcode en verlopen na 10 uur.
+- Alle API-aanroepen gaan server-side; sleutels bereiken de browser nooit.
+- Tekst uit API's en van de modellen wordt geëscaped vóór hij in `innerHTML`
+  belandt.
+- `.gitignore` dekt `.env*` en `.vercel`. De prompts in `agents/` staan **wel**
+  in de repo — die is privé.
+- Deel een Windsor-datasheet nooit met een klant: Windsor schrijft mislukte runs
+  inclusief `api_key=` naar de `Queries`-tab.
 
 ---
 
-*Just Jane Marketing · Vertrouwelijk · v1.0 · April 2026*
+## Kosten per maand, ruwweg
+
+| Onderdeel | Kost |
+|---|---|
+| Vercel hosting | €0 |
+| Google Sheets + Drive API | €0 |
+| Anthropic API | ~€0,15–0,30 per analyse-run |
+| DataForSEO — zoekvolumes | verwaarloosbaar (één batch-call) |
+| DataForSEO — rank-check | ~€0,002 per keyword per check |
+| DataForSEO — GEO sources | ~$0,10 per pull, dagcache |
+
+---
+
+*mayday marketing · vertrouwelijk*
