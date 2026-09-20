@@ -142,6 +142,21 @@
 }
 
 /* ==========================================================
+   Inter — zelf gehost
+   ==========================================================
+   Eén variabel bestand (latin, 47 kB) voor alle gewichten 100–900. Zelf hosten
+   i.p.v. via Google Fonts: dan doet de browser van de klant geen verzoek naar
+   een derde partij, wat in de EU een AVG-vraagstuk is.
+   ========================================================== */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/inter-variable.woff2") format("woff2-variations");
+}
+
+/* ==========================================================
    Base
    ========================================================== */
 * { box-sizing: border-box; }
