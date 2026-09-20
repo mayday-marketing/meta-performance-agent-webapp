@@ -227,7 +227,7 @@ async function getAccessToken(keyRaw) {
   const now = Math.floor(Date.now() / 1000);
   const claimSet = Buffer.from(JSON.stringify({
     iss: key.client_email,
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly',
     aud: 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now,
@@ -255,6 +255,56 @@ async function api(url, token, method, body) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error?.message || `HTTP ${res.status}`);
   return json;
+}
+
+/* ---------- Sheet zoeken in de Drive-map van de klant ----------
+   Elke klant heeft een eigen map (driveFolderId in CLIENTS), maar de sheet staat
+   niet overal op dezelfde plek. We lopen de mapboom af en verzamelen elk
+   spreadsheet-bestand. 06_PERFORMANTIE krijgt voorrang, want dat is de plek uit
+   de mapconventie (zie CLAUDE.md en Klant_Context_TEMPLATE.xlsx).
+
+   ISOLATIE: we starten altijd bij de driveFolderId van déze klant, dus we kunnen
+   per definitie niet in de map van een andere klant terechtkomen. */
+
+const GSHEET = 'application/vnd.google-apps.spreadsheet';
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const FOLDER = 'application/vnd.google-apps.folder';
+
+async function listChildren(folderId, token) {
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+  const url = `https://www.googleapis.com/drive/v3/files?q=${q}`
+            + `&fields=files(id,name,mimeType)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const res = await api(url, token);
+  return res.files || [];
+}
+
+// Doorzoekt de map tot MAX_DEPTH niveaus diep en geeft elk gevonden spreadsheet
+// terug met het pad waar het stond.
+async function findSheets(rootId, token, maxDepth = 4) {
+  const found = [];
+  const queue = [{ id: rootId, path: '', depth: 0 }];
+
+  while (queue.length) {
+    const node = queue.shift();
+    let children;
+    try { children = await listChildren(node.id, token); }
+    catch (e) { found.push({ error: `${node.path || '/'}: ${e.message}` }); continue; }
+
+    for (const f of children) {
+      const here = node.path ? `${node.path}/${f.name}` : f.name;
+      if (f.mimeType === FOLDER) {
+        if (node.depth < maxDepth) queue.push({ id: f.id, path: here, depth: node.depth + 1 });
+      } else if (f.mimeType === GSHEET || f.mimeType === XLSX) {
+        found.push({ id: f.id, name: f.name, path: here, office: f.mimeType === XLSX });
+      }
+    }
+  }
+
+  // 06_PERFORMANTIE eerst, daarna native Sheets vóór .xlsx, daarna op naam.
+  const score = (f) => (/06_PERFORMANTIE/i.test(f.path) ? 0 : 10)
+                     + (/klant.?context/i.test(f.name) ? 0 : 2)
+                     + (f.office ? 1 : 0);
+  return found.filter(f => !f.error).sort((a, b) => score(a) - score(b) || a.path.localeCompare(b.path));
 }
 
 /* ---------- Inhoud van de Config-tab ---------- */
@@ -352,15 +402,45 @@ async function ensureConfigTab(sheetId, token) {
   console.log(APPLY ? 'Modus: UITVOEREN\n' : 'Modus: DROOGLOOP (voeg --apply toe om echt te schrijven)\n');
 
   let created = 0, skipped = 0, failed = 0;
+  const discovered = {};   // clientId -> sheetId, om achteraf in CLIENTS te zetten
 
   for (const [id, cfg] of Object.entries(clients)) {
     if (ONLY && id.toLowerCase() !== ONLY) continue;
-    if (!cfg.sheetId) {
-      console.log(`- ${id.padEnd(14)} geen sheetId in CLIENTS — overgeslagen (velden: ${Object.keys(cfg).join(', ') || 'geen'})`);
-      continue;
+    let sheetId = cfg.sheetId || null;
+
+    // Geen sheetId in CLIENTS? Zoek de sheet in de Drive-map van déze klant.
+    if (!sheetId) {
+      if (!cfg.driveFolderId) {
+        console.log(`- ${id.padEnd(14)} geen sheetId én geen driveFolderId — overgeslagen`);
+        continue;
+      }
+      let hits;
+      try { hits = await findSheets(cfg.driveFolderId, token); }
+      catch (e) { failed++; console.log(`- ${id.padEnd(14)} FOUT bij zoeken in Drive: ${e.message}`); continue; }
+
+      if (!hits.length) {
+        console.log(`- ${id.padEnd(14)} geen spreadsheet gevonden in de Drive-map — overgeslagen`);
+        continue;
+      }
+
+      console.log(`- ${id.padEnd(14)} ${hits.length} spreadsheet(s) gevonden in Drive:`);
+      hits.forEach((h, i) => {
+        console.log(`    ${i === 0 ? '→' : ' '} ${h.office ? '[.xlsx]' : '[Sheet] '} ${h.path}`);
+        console.log(`       id: ${h.id}`);
+      });
+
+      const best = hits[0];
+      if (hits.length > 1 && APPLY) {
+        console.log(`    ! meerdere kandidaten — zet zelf de juiste sheetId in CLIENTS en draai opnieuw`);
+        skipped++;
+        continue;
+      }
+      sheetId = best.id;
+      discovered[id] = best.id;
     }
+
     try {
-      const r = await ensureConfigTab(cfg.sheetId, token);
+      const r = await ensureConfigTab(sheetId, token);
       if (r.skipped) { skipped++; console.log(`- ${id.padEnd(14)} "${r.name}" heeft al een Config-tab — overgeslagen`); }
       else if (r.dryRun) { console.log(`- ${id.padEnd(14)} "${r.name}" zou een Config-tab krijgen (tabs nu: ${r.titles.join(', ')})`); }
       else { created++; console.log(`- ${id.padEnd(14)} "${r.name}" ✓ Config-tab aangemaakt`); }
@@ -378,6 +458,14 @@ async function ensureConfigTab(sheetId, token) {
         hint = '  → sheetId bestaat niet of is niet gedeeld met de service-account';
       }
       console.log(`- ${id.padEnd(14)} FOUT: ${e.message}${hint}`);
+    }
+  }
+
+  if (Object.keys(discovered).length) {
+    console.log('\nGevonden sheetIds — zet deze in de CLIENTS env var (Vercel + .env.local),');
+    console.log('dan hoeft er nooit meer in Drive gezocht te worden:');
+    for (const [id, sid] of Object.entries(discovered)) {
+      console.log(`  "${id}": { …, "sheetId": "${sid}" }`);
     }
   }
 
