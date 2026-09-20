@@ -1504,3 +1504,55 @@ a { color: inherit; text-decoration: none; }
 #page-roas .lib-table table { min-width: 980px; }
 /* Bedragen en ratio's nooit over twee regels breken — dat leest als twee waarden. */
 #page-roas .lib-table td.right, #page-roas .lib-table th.right { white-space: nowrap; }
+
+/* ==========================================================
+   Website-tab (GA4 + Search Console)
+   ========================================================== */
+#page-website .lib-table table { min-width: 860px; }
+#page-website .lib-table tbody tr { cursor: default; }
+/* Aantallen en percentages nooit over twee regels breken. */
+#page-website .lib-table td.right, #page-website .lib-table th.right { white-space: nowrap; }
+/* Pagina-paden en zoekopdrachten kunnen lang zijn: afkappen i.p.v. de tabel oprekken. */
+#page-website .lib-table .row-caption {
+  max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.web-subhead {
+  font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: 700; color: var(--text-soft);
+  margin: 20px 0 10px;
+}
+
+/* Trechter: balkbreedte is relatief aan de grootste stap, zodat de uitval zichtbaar is. */
+.web-funnel { display: flex; flex-direction: column; gap: 14px; }
+.web-funnel-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 13px; color: var(--text); margin-bottom: 6px; gap: 12px;
+}
+.web-funnel-head .muted { font-size: 11px; }
+.web-funnel-bar {
+  position: relative; height: 10px; border-radius: 999px;
+  background: var(--surface-strong); overflow: hidden;
+}
+.web-funnel-bar .fill {
+  position: absolute; inset: 0 auto 0 0; border-radius: 999px;
+  background: var(--accent); transition: width 0.3s ease;
+}
+
+/* Merkgebonden vs. niet-merkgebonden zoekverkeer. */
+.web-brand-split {
+  display: flex; flex-wrap: wrap; gap: 18px; align-items: baseline;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-mute); font-size: 13px;
+}
+.web-brand-split .muted { font-size: 11px; margin-left: 6px; }
+
+/* Kleine tabellen naast elkaar (apparaat, nieuw/terugkerend, land). */
+.web-mini-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--grid-gap); }
+.web-mini table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+.web-mini td { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.web-mini tr:last-child td { border-bottom: none; }
+.web-mini td.right { text-align: right; white-space: nowrap; }
+@media (max-width: 900px) {
+  .web-mini-grid { grid-template-columns: 1fr; }
+}

@@ -115,9 +115,16 @@ module.exports = async (req, res) => {
     // ROAS-tab: omzetbron + betaalde kanalen (zie _channels.js).
     'googleanalytics4', 'tiktok', 'google_ads', 'bing', 'linkedin', 'pinterest',
     'snapchat', 'amazon_ads',
+    // Website-tab: organisch zoeken. account_id = de property ('sc-domain:merk.be'
+    // of 'https://www.merk.be/'), dus scoping werkt hier net als bij de rest.
+    'searchconsole',
   ]);
-  // Normaliseer voor vergelijking: string, act_-prefix weg, lowercase.
-  const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').toLowerCase();
+  // Normaliseer voor vergelijking: string, lowercase, en de voorvoegsels weg die
+  // een platform wel toont maar Windsor niet teruggeeft: 'act_' (Meta) en
+  // 'sc-domain:' (Search Console — Windsor geeft 'spotto.be', Google's UI toont
+  // 'sc-domain:spotto.be'; zonder deze strip matcht de config nooit en blijft de
+  // tab leeg).
+  const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').replace(/^sc-domain:/i, '').toLowerCase();
   async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
     const sharedMode = hasScopeConfig; // gedeeld Windsor-account (meerdere klanten)
     const wantRaw = scopedAccounts[connector];
@@ -520,6 +527,503 @@ module.exports = async (req, res) => {
         });
       }
 
+      // Website-tab — analytics-overzicht van de site zelf: GA4 (verkeer, gedrag,
+      // conversie) + Search Console (organisch zoeken). Bewust géén spend of ROAS:
+      // dat blijft in de ROAS-tab, anders ontstaan er twee waarheden over dezelfde
+      // euro's. Beide bronnen komen uit de Config-tab; een ontbrekende bron is
+      // ONBEKEND (null + vlag), nooit nul.
+      case 'getWebsite': {
+        if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
+
+        const hasGa4 = !!scopedAccounts.googleanalytics4;
+        const hasGsc = !!scopedAccounts.searchconsole;
+        const webCfg = (clientConfig && clientConfig.website) || {};
+        const goalEvent = webCfg.goalEvent || null;
+
+        // GA4 levert de datum als YYYYMMDD, Search Console als YYYY-MM-DD.
+        const isoDate = (v) => {
+          const d = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+          return d.length >= 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : String(v || '');
+        };
+        const num = (v) => {
+          if (v == null || v === '') return 0;
+          const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+          return isFinite(n) ? n : 0;
+        };
+        const rowsOf = (d) => (d && Array.isArray(d.data) ? d.data : []);
+        const errOf = (d) => (d && d.__error ? d.__error : null);
+        // Deling waarbij een ontbrekende teller/noemer '—' oplevert i.p.v. 0.
+        const div = (a, b) => (a != null && b) ? a / b : null;
+        const EMPTY = { data: [] };
+
+        // --- Veldsets. Alleen velden die in Windsor's GA4-/Search-Console-schema
+        //     staan (geverifieerd via get_fields). Ratio's halen we NIET op:
+        //     een gemiddelde over dagen optellen geeft onzin. We rekenen ze uit
+        //     de ruwe tellers (engaged/sessions, clicks/impressions).
+        // Totalen ZONDER datum: GA4 ontdubbelt gebruikers over de hele periode.
+        // Met 'date' erbij telt iemand die op drie dagen langskomt drie keer mee —
+        // dat gaf eerder meer nieuwe gebruikers dan gebruikers in totaal.
+        const GA4_TOTALS    = 'sessions,totalusers,newusers,engaged_sessions,screen_page_views,user_engagement_duration,conversions,purchase_revenue,transactions';
+        // Dagreeks: alléén optelbare maatstaven (sessies, events, omzet). Gebruikers
+        // staan hier bewust niet in — zie hierboven.
+        const GA4_DAILY     = 'date,sessions,engaged_sessions,screen_page_views,conversions,purchase_revenue,transactions';
+        const GA4_CHANNELS  = 'session_default_channel_group,sessions,engaged_sessions,newusers,conversions,purchase_revenue,transactions';
+        const GA4_SOURCES   = 'session_source_medium,sessions,engaged_sessions,conversions,purchase_revenue';
+        const GA4_LANDING   = 'landing_page,sessions,engaged_sessions,conversions,purchase_revenue';
+        const GA4_DEVICES   = 'devicecategory,sessions,engaged_sessions,conversions,purchase_revenue';
+        const GA4_COUNTRIES = 'country,sessions,conversions';
+        const GA4_RETURNING = 'new_vs_returning,sessions,conversions,purchase_revenue';
+        // E-commerce-funnel. item_view_events is item-scoped en combineert niet in
+        // elke property met de rest; daarom een minimale fallback (zie fetchFunnel).
+        const GA4_FUNNEL     = 'item_view_events,add_to_carts,checkouts,ecommerce_purchases,transactions,purchase_revenue,first_time_purchasers,total_purchasers';
+        const GA4_FUNNEL_MIN = 'add_to_carts,checkouts,ecommerce_purchases,transactions,purchase_revenue';
+        const GSC_TOTALS    = 'date,clicks,impressions,position';
+        const GSC_QUERIES   = 'query,clicks,impressions,position';
+        const GSC_PAGES     = 'pagepath,clicks,impressions,position';
+
+        // Het hoofddoel als apart, niet-fataal veld: conversions_<event> bestaat
+        // alleen als dat event in déze property een key event is. Zou het in de
+        // hoofdcall zitten, dan sloopt één verkeerde eventnaam de hele tab.
+        const goalFields = goalEvent
+          ? `date,session_default_channel_group,conversions_${goalEvent}`
+          : null;
+
+        // Tokens waarop een zoekopdracht als merkgebonden telt: de merknaam uit de
+        // Config-tab en het eerste label van de Search-Console-property
+        // ('sc-domain:spotto.be' → 'spotto'). Zonder allebei geen merkopsplitsing —
+        // een lege lijst zou alles als niet-merkgebonden bestempelen.
+        const brandTokens = (() => {
+          const out = new Set();
+          const add = (v) => {
+            const t = String(v || '').trim().toLowerCase();
+            if (t.length >= 3) out.add(t);
+          };
+          add(clientConfig && clientConfig.brandName);
+          const site = scopedAccounts.searchconsole || '';
+          const host = String(site).replace(/^sc-domain:/i, '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
+          const label = host.split('.')[0];
+          add(label);
+          if (label.includes('-')) add(label.replace(/-/g, ' '));
+          return Array.from(out);
+        })();
+
+        async function fetchFunnel(params, timeout) {
+          const full = await windsorScoped('googleanalytics4', GA4_FUNNEL, params, timeout, 'web-ga4-funnel');
+          if (!full || !full.__error) return { data: full, degraded: false };
+          const min = await windsorScoped('googleanalytics4', GA4_FUNNEL_MIN, params, timeout, 'web-ga4-funnel-min');
+          return { data: min, degraded: !min.__error, firstError: full.__error };
+        }
+
+        // Eén periode ophalen. detail=false (vergelijkingsperiodes) haalt alleen de
+        // totalen + kanalen op: die voeden de deltas, de detailtabellen niet.
+        // Pagina- en querydata zijn hoog-cardinaal: Windsor levert ze ongeaggregeerd
+        // en zónder accountfilter (de REST-endpoint negeert `accounts` en `limit` —
+        // geverifieerd), dus we downloaden élke rij van élke klant en filteren pas
+        // server-side. Voor een grote site is dat tienduizenden rijen per 10 dagen.
+        // Daarom hetzelfde interim-recept als de ad-level-cap in getDashboard: een
+        // korter venster voor die calls, en het echte venster mee terug naar de UI.
+        const PAGE_LEVEL_MAX_DAYS = 30;
+        const DAY_MS = 86400000;
+
+        function pageWindow(from, to) {
+          const days = Math.round((new Date(to) - new Date(from)) / DAY_MS) + 1;
+          if (days <= PAGE_LEVEL_MAX_DAYS) return { from, to, capped: false };
+          const d = new Date(to);
+          d.setDate(d.getDate() - (PAGE_LEVEL_MAX_DAYS - 1));
+          return { from: d.toISOString().slice(0, 10), to, capped: true };
+        }
+
+        async function buildRange(from, to, detail, timeout) {
+          const params = { date_from: from, date_to: to };
+          const pw = pageWindow(from, to);
+          const pageParams = { date_from: pw.from, date_to: pw.to };
+          const ADDON_MS = Math.min(timeout, 25000);
+          const ga4 = (f, label, t, p) => (hasGa4 ? windsorScoped('googleanalytics4', f, p || params, t || timeout, label) : Promise.resolve(EMPTY));
+          const gsc = (f, label, t, p) => (hasGsc ? windsorScoped('searchconsole', f, p || params, t || timeout, label) : Promise.resolve(EMPTY));
+
+          const core = [
+            ga4(GA4_TOTALS, 'web-ga4-totals'),
+            ga4(GA4_CHANNELS, 'web-ga4-channels'),
+            gsc(GSC_TOTALS, 'web-gsc-totals'),
+          ];
+          // Add-ons: krappere timeout en niet-fataal, zodat één trage breakdown de
+          // kerncijfers niet meesleurt (zelfde afweging als getDashboard).
+          const extras = detail ? [
+            ga4(GA4_DAILY, 'web-ga4-daily', ADDON_MS),
+            ga4(GA4_SOURCES, 'web-ga4-sources', ADDON_MS),
+            ga4(GA4_LANDING, 'web-ga4-landing', ADDON_MS, pageParams),
+            ga4(GA4_DEVICES, 'web-ga4-devices', ADDON_MS),
+            ga4(GA4_COUNTRIES, 'web-ga4-countries', ADDON_MS),
+            ga4(GA4_RETURNING, 'web-ga4-returning', ADDON_MS),
+            hasGa4 ? fetchFunnel(params, ADDON_MS) : Promise.resolve({ data: EMPTY, degraded: false }),
+            gsc(GSC_QUERIES, 'web-gsc-queries', ADDON_MS, pageParams),
+            gsc(GSC_PAGES, 'web-gsc-pages', ADDON_MS, pageParams),
+          ] : [];
+          const goalCall = (hasGa4 && goalFields)
+            ? ga4(goalFields, 'web-ga4-goal', ADDON_MS)
+            : Promise.resolve(EMPTY);
+
+          const [totalsRaw, channelsRaw, gscTotalsRaw, goalRaw, ...rest] =
+            await Promise.all([...core, goalCall, ...extras]);
+          const [dailyRaw, sourcesRaw, landingRaw, devicesRaw, countriesRaw, returningRaw, funnelRes, queriesRaw, gscPagesRaw] = rest;
+
+          const errors = {};
+          if (errOf(totalsRaw)) errors.ga4Totals = errOf(totalsRaw);
+          if (errOf(channelsRaw)) errors.ga4Channels = errOf(channelsRaw);
+          if (errOf(gscTotalsRaw)) errors.gscTotals = errOf(gscTotalsRaw);
+          if (errOf(goalRaw)) errors.ga4Goal = errOf(goalRaw);
+          // Add-ons falen niet-fataal, maar stil falen mag niet: een lege tabel
+          // moet te herleiden zijn tot een timeout i.p.v. op 'geen data' lijken.
+          if (detail) {
+            for (const [k, raw] of [['ga4Sources', sourcesRaw], ['ga4Landing', landingRaw],
+              ['ga4Devices', devicesRaw], ['ga4Countries', countriesRaw], ['ga4Returning', returningRaw]]) {
+              if (errOf(raw)) errors[k] = errOf(raw);
+            }
+          }
+
+          const ga4Available = hasGa4 && !errors.ga4Totals;
+          const gscAvailable = hasGsc && !errors.gscTotals;
+          // Het doelveld bestaat alleen als het event in deze property een key event
+          // is. Lukt het niet, dan valt de tab terug op 'conversions' (álle key
+          // events samen) — met een vlag, want dat is een ander cijfer.
+          const goalKey = goalEvent ? `conversions_${goalEvent}` : null;
+          const goalAvailable = !!(goalKey && !errors.ga4Goal && rowsOf(goalRaw).some(r => r[goalKey] != null));
+
+          // --- Doelconversies per dag en per kanaal ----------------------------
+          const goalByDate = {}, goalByChannel = {};
+          if (goalAvailable) {
+            for (const r of rowsOf(goalRaw)) {
+              const v = num(r[goalKey]);
+              const d = isoDate(r.date);
+              goalByDate[d] = (goalByDate[d] || 0) + v;
+              const ch = String(r.session_default_channel_group || '(onbekend)');
+              goalByChannel[ch] = (goalByChannel[ch] || 0) + v;
+            }
+          }
+
+          // --- Dagreeks (GA4) — alleen optelbare maatstaven ----------------------
+          const daily = new Map();
+          for (const r of rowsOf(detail ? dailyRaw : { data: [] })) {
+            const d = isoDate(r.date);
+            const cur = daily.get(d) || { date: d, sessions: 0, engagedSessions: 0, pageViews: 0, conversions: 0, revenue: 0, transactions: 0 };
+            cur.sessions += num(r.sessions);
+            cur.engagedSessions += num(r.engaged_sessions);
+            cur.pageViews += num(r.screen_page_views);
+            cur.conversions += num(r.conversions);
+            cur.revenue += num(r.purchase_revenue);
+            cur.transactions += num(r.transactions);
+            daily.set(d, cur);
+          }
+          for (const [d, v] of Object.entries(goalByDate)) {
+            const cur = daily.get(d);
+            if (cur) cur.goal = v;
+          }
+
+          // --- Totalen ----------------------------------------------------------
+          const t = { sessions: 0, users: 0, newUsers: 0, engagedSessions: 0, pageViews: 0, engagementTime: 0, conversions: 0, revenue: 0, transactions: 0 };
+          for (const r of rowsOf(totalsRaw)) {
+            t.sessions += num(r.sessions);
+            t.users += num(r.totalusers);
+            t.newUsers += num(r.newusers);
+            t.engagedSessions += num(r.engaged_sessions);
+            t.pageViews += num(r.screen_page_views);
+            t.engagementTime += num(r.user_engagement_duration);
+            t.conversions += num(r.conversions);
+            t.revenue += num(r.purchase_revenue);
+            t.transactions += num(r.transactions);
+          }
+          const goalTotal = goalAvailable
+            ? Object.values(goalByDate).reduce((s, v) => s + v, 0)
+            : null;
+
+          const totals = ga4Available ? {
+            available: true,
+            sessions: t.sessions,
+            users: t.users,
+            newUsers: t.newUsers,
+            // GA4 haalt 'gebruikers' en 'nieuwe gebruikers' uit verschillende
+            // aggregaties; bij lage volumes kan nieuw gróter zijn dan totaal
+            // (gemeten: 15 nieuw op 10 gebruikers). Dan is het aandeel onzin en
+            // geven we null i.p.v. een afgekapte 100%. De echte nieuw/terugkerend-
+            // verdeling staat in newVsReturning, op sessies — die is wél consistent.
+            newUserShare: (t.users > 0 && t.newUsers <= t.users) ? t.newUsers / t.users : null,
+            engagedSessions: t.engagedSessions,
+            pageViews: t.pageViews,
+            engagementRate: div(t.engagedSessions, t.sessions),
+            avgEngagementTime: div(t.engagementTime, t.sessions),
+            pagesPerSession: div(t.pageViews, t.sessions),
+            conversions: t.conversions,
+            conversionRate: div(t.conversions, t.sessions),
+            goalConversions: goalTotal,
+            goalConversionRate: goalAvailable ? div(goalTotal, t.sessions) : null,
+            revenue: t.revenue,
+            transactions: t.transactions,
+            aov: div(t.revenue, t.transactions),
+            revenuePerSession: div(t.revenue, t.sessions),
+          } : {
+            available: false,
+            sessions: null, users: null, newUsers: null, newUserShare: null,
+            engagedSessions: null, pageViews: null, engagementRate: null,
+            avgEngagementTime: null, pagesPerSession: null, conversions: null,
+            conversionRate: null, goalConversions: null, goalConversionRate: null,
+            revenue: null, transactions: null, aov: null, revenuePerSession: null,
+          };
+
+          // --- Kanaalgroepen ----------------------------------------------------
+          const chMap = new Map();
+          for (const r of rowsOf(channelsRaw)) {
+            const name = String(r.session_default_channel_group || '(onbekend)');
+            const c = chMap.get(name) || { channel: name, sessions: 0, engagedSessions: 0, newUsers: 0, conversions: 0, revenue: 0, transactions: 0 };
+            c.sessions += num(r.sessions);
+            c.engagedSessions += num(r.engaged_sessions);
+            c.newUsers += num(r.newusers);
+            c.conversions += num(r.conversions);
+            c.revenue += num(r.purchase_revenue);
+            c.transactions += num(r.transactions);
+            chMap.set(name, c);
+          }
+          const channels = Array.from(chMap.values()).map(c => ({
+            ...c,
+            goalConversions: goalAvailable ? (goalByChannel[c.channel] || 0) : null,
+            engagementRate: div(c.engagedSessions, c.sessions),
+            conversionRate: div(goalAvailable ? (goalByChannel[c.channel] || 0) : c.conversions, c.sessions),
+            revenuePerSession: div(c.revenue, c.sessions),
+          })).sort((a, b) => b.sessions - a.sessions);
+
+          // --- Search Console: totalen + dagreeks --------------------------------
+          let sClicks = 0, sImpr = 0, sPosWeighted = 0;
+          const searchDaily = new Map();
+          for (const r of rowsOf(gscTotalsRaw)) {
+            const clicks = num(r.clicks), impr = num(r.impressions), pos = num(r.position);
+            sClicks += clicks; sImpr += impr; sPosWeighted += pos * impr;
+            const d = isoDate(r.date);
+            const cur = searchDaily.get(d) || { date: d, clicks: 0, impressions: 0, posWeighted: 0 };
+            cur.clicks += clicks; cur.impressions += impr; cur.posWeighted += pos * impr;
+            searchDaily.set(d, cur);
+          }
+          // Nul rijen over een hele periode betekent in de praktijk een verkeerde
+          // property in de Config-tab, niet 'nul kliks'. Dan liever '—' tonen dan
+          // een nul die als meting leest.
+          const gscRows = rowsOf(gscTotalsRaw).length;
+          if (gscAvailable && !gscRows) errors.gscEmpty = 'Search Console leverde geen rijen — controleer de property in de Config-tab.';
+          const search = (gscAvailable && gscRows) ? {
+            available: true,
+            clicks: sClicks,
+            impressions: sImpr,
+            // CTR en positie zijn ratio's: optellen mag niet. CTR uit de tellers,
+            // positie gewogen naar impressies (anders telt een query met 3 vertoningen
+            // even zwaar als één met 30.000).
+            ctr: div(sClicks, sImpr),
+            position: div(sPosWeighted, sImpr),
+          } : { available: false, clicks: null, impressions: null, ctr: null, position: null };
+
+          const out = {
+            window: { startDate: from, endDate: to },
+            // Venster dat de pagina-/querytabellen écht dekken (kan korter zijn dan
+            // de selectie, zie PAGE_LEVEL_MAX_DAYS). null = gelijk aan de periode.
+            pageLevelWindow: (detail && pw.capped) ? { startDate: pw.from, endDate: pw.to, maxDays: PAGE_LEVEL_MAX_DAYS } : null,
+            ga4Available,
+            gscAvailable: gscAvailable && !!gscRows,
+            goalAvailable,
+            totals,
+            channels,
+            search,
+            daily: Array.from(daily.values()).sort((a, b) => a.date.localeCompare(b.date)),
+            searchDaily: Array.from(searchDaily.values())
+              .map(d => ({ date: d.date, clicks: d.clicks, impressions: d.impressions, position: div(d.posWeighted, d.impressions) }))
+              .sort((a, b) => a.date.localeCompare(b.date)),
+            errors,
+          };
+          if (!detail) return out;
+
+          // --- Detailtabellen (alleen huidige periode) ---------------------------
+          // Windsor levert normaal één rij per dimensiewaarde, maar dat is niet
+          // gegarandeerd. Daarom altijd optellen op de dimensie i.p.v. de rijen
+          // rechtstreeks tonen — anders staat dezelfde pagina twee keer in de lijst.
+          const group = (rows, keyOf, add) => {
+            const m = new Map();
+            for (const r of rows) {
+              const k = keyOf(r);
+              let cur = m.get(k);
+              if (!cur) { cur = { key: k, sessions: 0, engagedSessions: 0, conversions: 0, revenue: 0, views: 0, engagementTime: 0 }; m.set(k, cur); }
+              add(cur, r);
+            }
+            return Array.from(m.values());
+          };
+          const addSession = (cur, r) => {
+            cur.sessions += num(r.sessions);
+            cur.engagedSessions += num(r.engaged_sessions);
+            cur.conversions += num(r.conversions);
+            cur.revenue += num(r.purchase_revenue);
+          };
+          const bySessions = (a, b) => b.sessions - a.sessions;
+
+          out.sources = group(rowsOf(sourcesRaw), r => String(r.session_source_medium || '(onbekend)'), addSession)
+            .sort(bySessions).slice(0, 15)
+            .map(c => ({ source: c.key, sessions: c.sessions, engagementRate: div(c.engagedSessions, c.sessions), conversions: c.conversions, revenue: c.revenue }));
+
+          out.landingPages = group(rowsOf(landingRaw), r => String(r.landing_page || '(onbekend)'), addSession)
+            .sort(bySessions).slice(0, 15)
+            .map(c => ({ page: c.key, sessions: c.sessions, engagementRate: div(c.engagedSessions, c.sessions), conversions: c.conversions, conversionRate: div(c.conversions, c.sessions), revenue: c.revenue }));
+
+          out.devices = group(rowsOf(devicesRaw), r => String(r.devicecategory || '(onbekend)'), addSession)
+            .sort(bySessions)
+            .map(c => ({ device: c.key, sessions: c.sessions, engagementRate: div(c.engagedSessions, c.sessions), conversions: c.conversions, conversionRate: div(c.conversions, c.sessions), revenue: c.revenue }));
+
+          out.countries = group(rowsOf(countriesRaw), r => String(r.country || '(onbekend)'), addSession)
+            .sort(bySessions).slice(0, 8)
+            .map(c => ({ country: c.key, sessions: c.sessions, conversions: c.conversions }));
+
+          out.newVsReturning = group(rowsOf(returningRaw), r => String(r.new_vs_returning || '(onbekend)'), addSession)
+            .sort(bySessions)
+            .map(c => ({ group: c.key, sessions: c.sessions, conversions: c.conversions, revenue: c.revenue }));
+
+          // E-commerce-funnel. Ontbreekt de call, dan is de funnel ONBEKEND:
+          // nullen zouden 'niemand legt iets in de winkelmand' suggereren.
+          const funnelRaw = funnelRes && funnelRes.data;
+          const funnelErr = errOf(funnelRaw);
+          if (funnelErr) errors.ga4Funnel = funnelErr;
+          if (funnelRes && funnelRes.degraded) errors.ga4FunnelDegraded = funnelRes.firstError;
+          const f = { itemViews: 0, addToCarts: 0, checkouts: 0, purchases: 0, transactions: 0, revenue: 0, firstTimePurchasers: 0, purchasers: 0 };
+          let funnelRows = 0;
+          for (const r of rowsOf(funnelRaw)) {
+            funnelRows++;
+            f.itemViews += num(r.item_view_events);
+            f.addToCarts += num(r.add_to_carts);
+            f.checkouts += num(r.checkouts);
+            f.purchases += num(r.ecommerce_purchases);
+            f.transactions += num(r.transactions);
+            f.revenue += num(r.purchase_revenue);
+            f.firstTimePurchasers += num(r.first_time_purchasers);
+            f.purchasers += num(r.total_purchasers);
+          }
+          out.funnel = (!funnelErr && funnelRows) ? {
+            available: true,
+            itemViews: (funnelRes && funnelRes.degraded) ? null : f.itemViews,
+            addToCarts: f.addToCarts,
+            checkouts: f.checkouts,
+            purchases: f.purchases,
+            revenue: f.revenue,
+            firstTimePurchasers: (funnelRes && funnelRes.degraded) ? null : f.firstTimePurchasers,
+            purchasers: (funnelRes && funnelRes.degraded) ? null : f.purchasers,
+            cartRate: div(f.addToCarts, f.itemViews || null),
+            checkoutRate: div(f.checkouts, f.addToCarts || null),
+            purchaseRate: div(f.purchases, f.checkouts || null),
+            aov: div(f.revenue, f.transactions || null),
+          } : { available: false };
+
+          // --- Search Console: queries, pagina's, branded ------------------------
+          if (errOf(queriesRaw)) errors.gscQueries = errOf(queriesRaw);
+          if (errOf(gscPagesRaw)) errors.gscPages = errOf(gscPagesRaw);
+
+          const qMap = new Map();
+          for (const r of rowsOf(queriesRaw)) {
+            const q = String(r.query || '(onbekend)');
+            const cur = qMap.get(q) || { query: q, clicks: 0, impressions: 0, posWeighted: 0 };
+            cur.clicks += num(r.clicks);
+            cur.impressions += num(r.impressions);
+            cur.posWeighted += num(r.position) * num(r.impressions);
+            qMap.set(q, cur);
+          }
+          const queries = Array.from(qMap.values()).map(q => ({
+            query: q.query,
+            clicks: q.clicks,
+            impressions: q.impressions,
+            ctr: div(q.clicks, q.impressions),
+            position: div(q.posWeighted, q.impressions),
+          }));
+          out.queries = [...queries].sort((a, b) => b.clicks - a.clicks).slice(0, 15);
+          // Quick wins: net buiten de eerste pagina (positie 8–20) met genoeg
+          // vertoningen om iets te winnen. Dit is de lijst waar SEO-werk begint.
+          out.quickWins = queries
+            .filter(q => q.position != null && q.position >= 8 && q.position <= 20 && q.impressions >= 50)
+            .sort((a, b) => b.impressions - a.impressions)
+            .slice(0, 10);
+
+          const pMap = new Map();
+          for (const r of rowsOf(gscPagesRaw)) {
+            // Een lege pagepath is de homepage (Search Console geeft daar '' terug),
+            // niet een onbekende pagina.
+            const p = r.pagepath == null || r.pagepath === '' ? '/' : String(r.pagepath);
+            const cur = pMap.get(p) || { page: p, clicks: 0, impressions: 0, posWeighted: 0 };
+            cur.clicks += num(r.clicks);
+            cur.impressions += num(r.impressions);
+            cur.posWeighted += num(r.position) * num(r.impressions);
+            pMap.set(p, cur);
+          }
+          out.searchPages = Array.from(pMap.values())
+            .map(p => ({ page: p.page, clicks: p.clicks, impressions: p.impressions, ctr: div(p.clicks, p.impressions), position: div(p.posWeighted, p.impressions) }))
+            .sort((a, b) => b.clicks - a.clicks).slice(0, 15);
+
+          // Merkgebonden vs. niet-merkgebonden rekenen we zélf uit de querytabel.
+          // Windsor heeft een veld branded_vs_nonbranded, maar dat markeert alleen
+          // queries waar de volledige domeinnaam in staat: voor spotto.be telde
+          // 'spotto' (2.852 kliks) daar als niet-merkgebonden. Met de merknaam als
+          // token klopt het wél, en de regel is uitlegbaar aan de klant.
+          const split = { branded: { clicks: 0, impressions: 0 }, nonbranded: { clicks: 0, impressions: 0 } };
+          if (brandTokens.length) {
+            for (const q of queries) {
+              const hay = q.query.toLowerCase();
+              const bucket = brandTokens.some(t => hay.includes(t)) ? split.branded : split.nonbranded;
+              bucket.clicks += q.clicks;
+              bucket.impressions += q.impressions;
+            }
+          }
+          out.branded = brandTokens.length ? {
+            tokens: brandTokens,
+            branded: { ...split.branded, ctr: div(split.branded.clicks, split.branded.impressions) },
+            nonbranded: { ...split.nonbranded, ctr: div(split.nonbranded.clicks, split.nonbranded.impressions) },
+          } : null;
+
+          return out;
+        }
+
+        // Twee vergelijkingsperiodes: dezelfde lengte direct ervoor, en dezelfde
+        // dagen vorig jaar. Allebei alleen de totalen + kanalen (detail=false) —
+        // ze voeden de deltas, niet de tabellen. Falen mag niet fataal zijn.
+        const prevFrom = req.body?.compareStartDate;
+        const prevTo = req.body?.compareEndDate;
+        const yoyFrom = req.body?.yearAgoStartDate;
+        const yoyTo = req.body?.yearAgoEndDate;
+        // 35s i.p.v. krapper: een koude Search-Console-call duurt bij Windsor ~28s
+        // (warm ~1s, hij cachet per periode). Met een krappe timeout zou de
+        // vergelijking bij het eerste bezoek structureel wegvallen.
+        const compare = (from, to) => ((from && to)
+          ? buildRange(from, to, false, 35000).catch(e => ({ __error: e.message }))
+          : Promise.resolve(null));
+
+        const [current, previous, yearAgo] = await Promise.all([
+          buildRange(startDate, endDate, true, 45000),
+          compare(prevFrom, prevTo),
+          compare(yoyFrom, yoyTo),
+        ]);
+
+        // Websitetype bepaalt welk funnelblok de UI toont. Staat het niet in de
+        // Config-tab, dan leiden we het af: gemeten omzet = webshop.
+        const measuredRevenue = (current.totals && current.totals.revenue) || 0;
+        const type = webCfg.type || (measuredRevenue > 0 ? 'webshop' : 'leads');
+
+        return res.status(200).json({
+          period: { startDate, endDate },
+          comparePeriod: (prevFrom && prevTo) ? { startDate: prevFrom, endDate: prevTo } : null,
+          yearAgoPeriod: (yoyFrom && yoyTo) ? { startDate: yoyFrom, endDate: yoyTo } : null,
+          hasGa4,
+          hasGsc,
+          website: {
+            type,
+            typeSource: webCfg.type ? 'config' : 'afgeleid',
+            goalEvent,
+            goalLabel: webCfg.goalLabel || null,
+            goalAvailable: current.goalAvailable,
+          },
+          current,
+          previous: previous && previous.__error ? null : previous,
+          previousError: previous && previous.__error ? previous.__error : null,
+          yearAgo: yearAgo && yearAgo.__error ? null : yearAgo,
+          yearAgoError: yearAgo && yearAgo.__error ? yearAgo.__error : null,
+        });
+      }
+
       // E-mail data — ConvertKit (subscribers + broadcasts) of Klaviyo (campagne-performance).
       // Connector wordt automatisch bepaald: expliciet via CLIENTS.email_connector, anders een
       // goedkope probe (klaviyo → convertkit; een 400 "No ... account" betekent niet-gekoppeld).
@@ -622,7 +1126,7 @@ module.exports = async (req, res) => {
       }
 
       default:
-        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData', 'getDashboard', 'getEmail', 'getFields' beschikbaar).` });
+        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData', 'getDashboard', 'getRoas', 'getWebsite', 'getEmail', 'getFields' beschikbaar).` });
     }
   } catch (err) {
     return res.status(502).json({ error: err.message });

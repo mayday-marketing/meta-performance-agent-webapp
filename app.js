@@ -72,6 +72,12 @@
     // configwaarde gebruiken. Bewust niet in sessionStorage: dit is een scenario,
     // geen instelling.
     roasInputs: { grossMargin: null, seasonalDiscount: null, activeScenario: null },
+    // Website-tab — volgt WEL de dashboardperiode uit de topbar.
+    website: null,                    // getWebsite-respons: { current, previous, yearAgo, website, ... }
+    websiteLoading: false,
+    websiteError: null,
+    websiteKey: null,                 // klant+periode waarvoor de tab geladen is (lazy refresh)
+    websiteCompare: "prev",           // 'prev' (vorige periode) | 'yoy' (vorig jaar)
   };
 
   /* ---------- Session persistence ---------- */
@@ -291,6 +297,10 @@
     state.roasLoading = false;
     state.roasInputs = { grossMargin: null, seasonalDiscount: null, activeScenario: null };
     state.roasRevenueMode = null;
+    state.website = null;
+    state.websiteKey = null;
+    state.websiteError = null;
+    state.websiteLoading = false;
     state.chatMessages = [];
     dashboardInited = false;
     $("#brand-input").value = "";
@@ -419,6 +429,8 @@
       refreshOverview();
       state.emailKey = null; // e-mail-cache verloopt bij periode-wissel
       if (state.page === "email") refreshEmail();
+      state.websiteKey = null;
+      if (state.page === "website") websiteFetch();
     };
     const presets = [
       { label: "90 dagen", days: 90 },
@@ -443,6 +455,7 @@
       library:     { title: "Library",     crumbs: ["Dashboard", "Library"] },
       analysis:    { title: "Analysis",    crumbs: ["Dashboard", "Analysis"] },
       email:       { title: "E-mail",      crumbs: ["Dashboard", "E-mail"] },
+      website:     { title: "Website",     crumbs: ["Dashboard", "Website"] },
       roas:        { title: "ROAS",        crumbs: ["Dashboard", "ROAS"] },
       methodology: { title: "Methodology", crumbs: ["Dashboard", "Methodology"] },
     };
@@ -456,6 +469,9 @@
     // ROAS heeft een eigen periode (month-to-date) en wordt daarom niet door de
     // dashboard-periodewissel ververst, alleen bij het eerste bezoek.
     if (page === "roas" && typeof roasFetch === "function") roasFetch();
+    // Website volgt de dashboardperiode en wordt lui geladen (en opnieuw na een
+    // periodewissel, zie bindPeriodToggle/bindDateFilter).
+    if (page === "website" && typeof websiteFetch === "function") websiteFetch();
   }
 
   // Spring vanuit de Analyse naar een specifieke advertentie in de Library: filter op
@@ -492,6 +508,8 @@
         refreshOverview();
         state.emailKey = null; // e-mail-cache verloopt bij periode-wissel
         if (state.page === "email") refreshEmail();
+        state.websiteKey = null;
+        if (state.page === "website") websiteFetch();
       }, 400);
     };
     inputs.forEach((inp) => { inp.onchange = onChange; });
@@ -2270,6 +2288,73 @@
       overperformers,
       underperformers,
       ads: buildAdsSummary(ads),
+      // Websitecijfers meesturen zodra de Website-tab geladen is. Zonder die tab
+      // is er geen websitedata in het geheugen; dan blijft dit weg i.p.v. nullen
+      // te sturen die de agent als 'geen verkeer' zou lezen.
+      website: buildWebsiteSummary(),
+    };
+  }
+
+  // Compacte samenvatting van de Website-tab voor de analyse-agent en de chat.
+  // Alleen de cijfers waar een uitspraak op te baseren is; geen lange lijsten.
+  function buildWebsiteSummary() {
+    const w = state.website;
+    if (!w || !w.current) return null;
+    const t = w.current.totals;
+    const prev = w.previous ? w.previous.totals : null;
+    const goal = webGoal();
+    const round = (n, d = 2) => (n == null || !isFinite(n)) ? null : +n.toFixed(d);
+
+    return {
+      period: w.period,
+      comparePeriod: w.comparePeriod,
+      siteType: w.website.type,
+      goal: { label: goal.label, event: w.website.goalEvent, measured: goal.on },
+      totals: {
+        sessions: t.sessions,
+        users: t.users,
+        newUserShare: round(t.newUserShare, 3),
+        engagementRate: round(t.engagementRate, 3),
+        avgEngagementTimeSec: round(t.avgEngagementTime, 0),
+        conversions: goal.valueOf(t),
+        conversionRate: round(goal.rateOf(t), 4),
+        revenue: round(t.revenue, 2),
+        transactions: t.transactions,
+        aov: round(t.aov, 2),
+      },
+      previousTotals: prev ? {
+        sessions: prev.sessions,
+        engagementRate: round(prev.engagementRate, 3),
+        conversions: goal.valueOf(prev),
+        conversionRate: round(goal.rateOf(prev), 4),
+        revenue: round(prev.revenue, 2),
+      } : null,
+      channels: (w.current.channels || []).slice(0, 8).map(c => ({
+        channel: c.channel,
+        sessions: c.sessions,
+        engagementRate: round(c.engagementRate, 3),
+        conversions: goal.rowOf(c),
+        conversionRate: round(c.conversionRate, 4),
+        revenue: round(c.revenue, 2),
+      })),
+      topLandingPages: (w.current.landingPages || []).slice(0, 8).map(p => ({
+        page: p.page, sessions: p.sessions,
+        engagementRate: round(p.engagementRate, 3),
+        conversionRate: round(p.conversionRate, 4),
+      })),
+      search: w.current.search.available ? {
+        clicks: w.current.search.clicks,
+        impressions: w.current.search.impressions,
+        ctr: round(w.current.search.ctr, 4),
+        position: round(w.current.search.position, 1),
+        topQueries: (w.current.queries || []).slice(0, 8).map(q => ({
+          query: q.query, clicks: q.clicks, impressions: q.impressions, position: round(q.position, 1),
+        })),
+        quickWins: (w.current.quickWins || []).slice(0, 8).map(q => ({
+          query: q.query, impressions: q.impressions, clicks: q.clicks, position: round(q.position, 1),
+        })),
+      } : null,
+      funnel: (w.current.funnel && w.current.funnel.available) ? w.current.funnel : null,
     };
   }
 
@@ -3673,6 +3758,664 @@
         <li><strong>Break-even</strong> = (1 − korting) / (brutomarge − korting), voor volle prijs en voor de lopende seizoenskorting. Het gekozen scenario bepaalt de drempel voor het oordeel.</li>
         <li><strong>Welke omzet het oordeel bepaalt</strong> staat per klant in de Config-tab onder <strong>Oordeel op</strong> (<em>GA4</em> of <em>Platform</em>). Met sluitende server-side tracking is GA4 betrouwbaar; zonder goede consent-dekking onderschat GA4 en is platform realistischer. De toggle bovenaan overschrijft dit voor deze sessie.</li>
         <li>Een kanaal verschijnt zodra het bijbehorende ad-account in de <strong>Config-tab</strong> van de klantsheet staat.</li>
+      </ul>
+      ${errHtml}
+    </section>`;
+  }
+
+  /* ==========================================================
+     Website-tab — analytics-overzicht van de site zelf
+     ==========================================================
+     Bron: GA4 (verkeer, gedrag, conversie) + Search Console (organisch zoeken),
+     allebei via api/windsor.js action=getWebsite. Bewust GEEN spend of ROAS:
+     die horen in de ROAS-tab, anders staan er twee antwoorden op dezelfde vraag.
+
+     Deze tab volgt WEL de periode uit de topbar (anders dan de ROAS-tab, die een
+     eigen maandperiode heeft): een website-overzicht hoort bij hetzelfde ritme als
+     Overview en Analysis.
+     ========================================================== */
+
+  const WEB_COMPARE = [
+    { key: "prev", label: "vs vorige periode" },
+    { key: "yoy", label: "vs vorig jaar" },
+  ];
+
+  // Datumrekenen zonder toISOString(): dat zet een lokale middernacht in UTC+2 op
+  // de dag ervoor. Zelfde aanpak als de ROAS-tab (ymd/pad2 hierboven).
+  const webAtNoon = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d, 12); };
+  const webIso = (dt) => ymd(dt.getFullYear(), dt.getMonth(), dt.getDate());
+
+  // Even lange periode, direct vóór de huidige.
+  function webPrevRange(start, end) {
+    const days = Math.round((webAtNoon(end) - webAtNoon(start)) / 86400000) + 1;
+    const e = webAtNoon(start); e.setDate(e.getDate() - 1);
+    const s = new Date(e); s.setDate(s.getDate() - (days - 1));
+    return { start: webIso(s), end: webIso(e) };
+  }
+
+  function websiteFetch() {
+    if (!state.session) return;
+    const start = state.period.start, end = state.period.end;
+    if (!start || !end) return;
+    const key = `${state.session.clientId}|${start}|${end}`;
+    if (state.websiteLoading) return;
+    if (state.website && state.websiteKey === key) { renderWebsite(); return; }
+    if (!state.session.hasWindsor) { renderWebsite(); return; }
+
+    const prev = webPrevRange(start, end);
+    const yoy = roasCompareRange({ start, end });
+
+    state.websiteLoading = true;
+    state.websiteError = null;
+    state.website = null;
+    state.websiteKey = key;
+    renderWebsite();
+
+    windsorCall("getWebsite", {
+      startDate: start, endDate: end,
+      compareStartDate: prev.start, compareEndDate: prev.end,
+      yearAgoStartDate: yoy.start, yearAgoEndDate: yoy.end,
+    })
+      .then((res) => {
+        if (state.websiteKey !== key) return;   // periode gewisseld tijdens fetch
+        state.website = res;
+        state.websiteLoading = false;
+        renderWebsite();
+      })
+      .catch((err) => {
+        if (state.websiteKey !== key) return;
+        state.websiteLoading = false;
+        state.websiteError = err.message || "Onbekende fout bij laden websitedata.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderWebsite();
+      });
+  }
+  window.__refreshWebsite = () => { state.website = null; state.websiteKey = null; websiteFetch(); };
+  window.__webCompare = (k) => { state.websiteCompare = k; renderWebsite(); };
+
+  /* ---------- Formatters ---------- */
+
+  // null = niet gemeten. Overal een streepje, nooit een nul: '0 sessies' en 'niet
+  // gekoppeld' zijn twee verschillende antwoorden.
+  const webFmt = {
+    int: (n) => (n == null || !isFinite(n)) ? "—" : Math.round(n).toLocaleString("nl-NL"),
+    pct1: (n) => (n == null || !isFinite(n)) ? "—" : (n * 100).toFixed(1).replace(".", ",") + "%",
+    pct0: (n) => (n == null || !isFinite(n)) ? "—" : (n * 100).toFixed(0) + "%",
+    pct2: (n) => (n == null || !isFinite(n)) ? "—" : (n * 100).toFixed(2).replace(".", ",") + "%",
+    eur: (n) => (n == null || !isFinite(n)) ? "—" : "€ " + Math.round(n).toLocaleString("nl-NL"),
+    eur2: (n) => (n == null || !isFinite(n)) ? "—" : "€ " + n.toFixed(2).replace(".", ","),
+    dur: (n) => {
+      if (n == null || !isFinite(n)) return "—";
+      const s = Math.round(n);
+      return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
+    },
+    pos: (n) => (n == null || !isFinite(n)) ? "—" : n.toFixed(1).replace(".", ","),
+    // Verhoudingen die boven 1 kunnen uitkomen (key events per sessie): als getal
+    // tonen, niet als percentage — '118%' leest als een onmogelijke conversieratio.
+    ratio: (n) => (n == null || !isFinite(n)) ? "—" : n.toFixed(2).replace(".", ","),
+    delta: (cur, prev) => {
+      if (prev == null || !isFinite(prev) || prev === 0 || cur == null || !isFinite(cur)) return null;
+      return (cur - prev) / prev;
+    },
+  };
+
+  // De vergelijkingsperiode waar de deltas tegen afgezet worden.
+  function webBase() {
+    const w = state.website;
+    if (!w) return null;
+    return state.websiteCompare === "yoy" ? w.yearAgo : w.previous;
+  }
+  function webCompareLabel() {
+    return (WEB_COMPARE.find(c => c.key === state.websiteCompare) || WEB_COMPARE[0]).label;
+  }
+
+  // invert: bij zoekpositie is lager beter, dus daar kleurt een daling groen.
+  function webDeltaHtml(cur, prev, invert) {
+    const d = webFmt.delta(cur, prev);
+    if (d == null) return `<div class="delta"><span class="vs">geen vergelijking</span></div>`;
+    const good = invert ? d < 0 : d >= 0;
+    return `<div class="delta ${good ? "up" : "down"}">${d >= 0 ? "↑" : "↓"} ${(Math.abs(d) * 100).toFixed(1)}%
+      <span class="vs">${escapeHtml(webCompareLabel())}</span></div>`;
+  }
+
+  // Het conversiecijfer dat de hele tab gebruikt: het ingestelde hoofddoel als dat
+  // meetbaar is, anders álle key events samen. Dat verschil is groot (bij een klant
+  // 2.112 formulieren tegenover 72.004 key events), dus het label zegt welk van de
+  // twee je ziet.
+  function webGoal() {
+    const w = state.website;
+    const on = !!(w && w.website && w.website.goalAvailable);
+    const label = on
+      ? (w.website.goalLabel || w.website.goalEvent)
+      : "Conversies";
+    return {
+      on,
+      label,
+      sub: on ? `GA4-event ${w.website.goalEvent}` : "alle key events samen",
+      valueOf: (t) => (!t ? null : (on ? t.goalConversions : t.conversions)),
+      rateOf: (t) => (!t ? null : (on ? t.goalConversionRate : t.conversionRate)),
+      rowOf: (r) => (!r ? null : (on ? r.goalConversions : r.conversions)),
+    };
+  }
+
+  /* ---------- Render ---------- */
+
+  function renderWebsite() {
+    const root = $("#website-content");
+    if (!root) return;
+
+    if (!state.session?.hasWindsor) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">De Website-tab draait op Windsor-data. Voor deze klant is geen Windsor-koppeling geconfigureerd.</p>`);
+      return;
+    }
+    const bar = renderWebsiteBar();
+    if (state.websiteLoading) {
+      root.innerHTML = bar + renderAnalysisEmpty(`<p class="muted" style="margin:0;">Websitedata laden… (GA4 en Search Console worden parallel opgehaald)</p>`);
+      return;
+    }
+    if (state.websiteError) {
+      root.innerHTML = bar + renderAnalysisEmpty(`<p style="color:#c0392b; margin:0;">${escapeHtml(state.websiteError)}</p>
+        <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshWebsite()">Opnieuw proberen</button>`);
+      return;
+    }
+    const w = state.website;
+    if (!w) { root.innerHTML = bar; return; }
+
+    if (!w.hasGa4 && !w.hasGsc) {
+      root.innerHTML = bar + renderAnalysisEmpty(`
+        <p class="muted" style="margin:0 0 10px;">Nog geen bronnen gekoppeld voor deze tab.</p>
+        <p class="muted" style="margin:0; font-size:12px;">Zet in de <strong>Config-tab</strong> van de klantsheet een <em>GA4 property</em> (verkeer en conversie) en/of een <em>Search Console site</em> (organisch zoeken) klaar.</p>`);
+      return;
+    }
+
+    root.innerHTML = bar
+      + renderWebsiteKpis()
+      + renderWebsiteChart()
+      + renderWebsiteChannels()
+      + renderWebsiteSources()
+      + renderWebsiteLanding()
+      + renderWebsiteFunnel()
+      + renderWebsiteSearch()
+      + renderWebsiteAudience()
+      + renderWebsiteNotes();
+  }
+
+  function renderWebsiteBar() {
+    const w = state.website;
+    const start = state.period.start, end = state.period.end;
+    const cmp = state.websiteCompare === "yoy"
+      ? roasCompareRange({ start, end })
+      : webPrevRange(start, end);
+    const buttons = WEB_COMPARE.map(c =>
+      `<button class="${c.key === state.websiteCompare ? "on" : ""}" onclick="window.__webCompare('${c.key}')">${escapeHtml(c.label)}</button>`
+    ).join("");
+    const typeLine = w
+      ? `${w.website.type === "webshop" ? "Webshop" : "Leadgeneratie"} · ${w.website.typeSource === "config" ? "uit de Config-tab" : "afgeleid uit de data"}`
+      : "";
+
+    return `<section class="panel" style="padding:14px 18px; margin-bottom:16px;">
+      <div class="roas-bar">
+        <div>
+          <div class="info-label">Periode</div>
+          <div style="font-family:var(--font-serif); font-size:20px; color:var(--text); margin-top:2px;">${escapeHtml(start || "—")} → ${escapeHtml(end || "—")}</div>
+          <div class="muted" style="font-size:11px; margin-top:2px;">vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}${typeLine ? ` · ${escapeHtml(typeLine)}` : ""}</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <div class="period-toggle" title="Waartegen de veranderingen afgezet worden">${buttons}</div>
+          <button class="btn tiny" onclick="window.__refreshWebsite()">↻ Verversen</button>
+        </div>
+      </div>
+      <div class="muted" style="font-size:11px; margin-top:8px;">De periode komt uit de balk bovenaan — pas hem daar aan.</div>
+    </section>`;
+  }
+
+  function renderWebsiteKpis() {
+    const w = state.website;
+    const cur = w.current.totals, base = webBase();
+    const prev = base ? base.totals : null;
+    const goal = webGoal();
+    const isShop = w.website.type === "webshop";
+
+    const card = (opts) => `<div class="kpi-card">
+      <div class="label"><span class="dot" style="background:var(${opts.cvar})"></span>${escapeHtml(opts.label)}</div>
+      <div class="value">${opts.value}</div>
+      ${webDeltaHtml(opts.cur, opts.prev, opts.invert)}
+      <div class="muted" style="font-size:11px;">${escapeHtml(opts.sub || "")}</div>
+    </div>`;
+
+    const cards = [
+      card({
+        label: "Sessies", cvar: "--kpi-1",
+        value: webFmt.int(cur.sessions), cur: cur.sessions, prev: prev && prev.sessions,
+        sub: cur.users == null ? "geen GA4-data" : `${webFmt.int(cur.users)} gebruikers · ${webFmt.pct0(cur.newUserShare)} nieuw`,
+      }),
+      card({
+        label: "Betrokken sessies", cvar: "--kpi-2",
+        value: webFmt.pct0(cur.engagementRate), cur: cur.engagementRate, prev: prev && prev.engagementRate,
+        sub: `${webFmt.dur(cur.avgEngagementTime)} gemiddeld · ${cur.pagesPerSession == null ? "—" : cur.pagesPerSession.toFixed(1).replace(".", ",")} pagina's per sessie`,
+      }),
+      card({
+        label: goal.label, cvar: "--kpi-3",
+        value: webFmt.int(goal.valueOf(cur)), cur: goal.valueOf(cur), prev: goal.valueOf(prev),
+        sub: `${webFmt.pct2(goal.rateOf(cur))} van de sessies · ${goal.sub}`,
+      }),
+    ];
+
+    cards.push(isShop
+      ? card({
+          label: "Omzet", cvar: "--kpi-4",
+          value: webFmt.eur(cur.revenue), cur: cur.revenue, prev: prev && prev.revenue,
+          sub: `${webFmt.int(cur.transactions)} transacties · gemiddeld ${webFmt.eur(cur.aov)}`,
+        })
+      : card({
+          label: "Organisch zoeken", cvar: "--kpi-4",
+          value: webFmt.int(w.current.search.clicks), cur: w.current.search.clicks, prev: base && base.search ? base.search.clicks : null,
+          sub: w.current.search.available
+            ? `kliks · positie ${webFmt.pos(w.current.search.position)} · CTR ${webFmt.pct2(w.current.search.ctr)}`
+            : "geen Search Console gekoppeld",
+        }));
+
+    return `<div class="kpi-grid" style="margin-bottom:16px;">${cards.join("")}</div>`;
+  }
+
+  function renderWebsiteChart() {
+    const cur = state.website?.current;
+    if (!cur || !cur.daily || cur.daily.length < 2 || !window.Charts) return "";
+    const goal = webGoal();
+    const days = cur.daily;
+    const convValues = days.map(d => (goal.on ? (d.goal || 0) : (d.conversions || 0)));
+    const hasConv = convValues.some(v => v > 0);
+
+    const spec = {
+      width: 980, height: 260,
+      x: days.map(d => { const [, m, dd] = d.date.split("-"); return `${Number(dd)}/${Number(m)}`; }),
+      series: [
+        { label: "Sessies", values: days.map(d => d.sessions), kind: "area", axis: "left", color: Charts.seriesColor(0) },
+        ...(hasConv ? [{ label: goal.label, values: convValues, kind: "line", axis: "right", color: Charts.seriesColor(2) }] : []),
+      ],
+      leftFormat: Charts.fmt.k,
+      rightFormat: Charts.fmt.int,
+      maxXLabels: 10,
+    };
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Verkeer per dag</h2>
+        <div class="panel-sub">Sessies${hasConv ? ` en ${escapeHtml(goal.label.toLowerCase())}` : ""} over de gekozen periode</div>
+      </div></div>
+      ${chartSvg(spec)}
+    </section>`;
+  }
+
+  // Sessies, betrokkenheid en conversie per GA4-kanaalgroep. Betaalde kanalen staan
+  // er bewust bij — maar zonder spend of ROAS: die vraag beantwoordt de ROAS-tab.
+  function renderWebsiteChannels() {
+    const w = state.website;
+    const cur = w.current.channels || [];
+    if (!cur.length) {
+      return `<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Kanalen</h2>
+          <div class="panel-sub">${w.current.errors.ga4Channels ? "Kon de kanaalverdeling niet ophalen" : "Geen GA4-data in deze periode"}</div>
+        </div></div>
+      </section>`;
+    }
+    const goal = webGoal();
+    const isShop = w.website.type === "webshop";
+    const base = webBase();
+    const prevMap = new Map((base?.channels || []).map(c => [c.channel, c]));
+    const totalSessions = cur.reduce((s, c) => s + c.sessions, 0);
+
+    const rows = cur.map(c => {
+      const p = prevMap.get(c.channel);
+      const d = webFmt.delta(c.sessions, p ? p.sessions : null);
+      return `<tr>
+        <td><strong>${escapeHtml(c.channel)}</strong></td>
+        <td class="right">${webFmt.int(c.sessions)}</td>
+        <td class="right">${webFmt.pct0(totalSessions ? c.sessions / totalSessions : null)}</td>
+        <td class="right">${webFmt.pct0(c.engagementRate)}</td>
+        <td class="right">${webFmt.int(goal.rowOf(c))}</td>
+        <td class="right"><strong>${webFmt.pct2(c.conversionRate)}</strong></td>
+        ${isShop ? `<td class="right">${webFmt.eur(c.revenue)}</td>` : ""}
+        <td class="right">${d == null ? "—" : `<span class="${d >= 0 ? "delta up" : "delta down"}" style="display:inline;">${d >= 0 ? "↑" : "↓"} ${(Math.abs(d) * 100).toFixed(0)}%</span>`}</td>
+      </tr>`;
+    }).join("");
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Kanalen</h2>
+        <div class="panel-sub">GA4-kanaalgroepen · conversie gemeten als ${escapeHtml(goal.label.toLowerCase())}</div>
+      </div></div>
+      <div class="lib-table"><table>
+        <thead><tr>
+          <th>Kanaal</th>
+          <th class="right">Sessies</th>
+          <th class="right">Aandeel</th>
+          <th class="right">Betrokken</th>
+          <th class="right">${escapeHtml(goal.label)}</th>
+          <th class="right">Conversieratio</th>
+          ${isShop ? `<th class="right">Omzet</th>` : ""}
+          <th class="right">Sessies ${escapeHtml(webCompareLabel())}</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="muted" style="font-size:11px; margin:12px 0 0;">
+        Advertentiekosten en ROAS staan bewust niet in deze tabel: die vraag beantwoordt de ROAS-tab,
+        op dezelfde GA4-omzet. Eén cijfer, één plek.
+      </p>
+    </section>`;
+  }
+
+  function renderWebsiteSources() {
+    const rows = state.website?.current?.sources || [];
+    if (!rows.length) return "";
+    const isShop = state.website.website.type === "webshop";
+    const body = rows.map(s => `<tr>
+      <td>${escapeHtml(s.source)}</td>
+      <td class="right">${webFmt.int(s.sessions)}</td>
+      <td class="right">${webFmt.pct0(s.engagementRate)}</td>
+      <td class="right">${webFmt.int(s.conversions)}</td>
+      ${isShop ? `<td class="right">${webFmt.eur(s.revenue)}</td>` : ""}
+    </tr>`).join("");
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Bronnen</h2>
+        <div class="panel-sub">Top ${rows.length} op sessies · bron / medium zoals GA4 het registreert</div>
+      </div></div>
+      <div class="lib-table"><table>
+        <thead><tr>
+          <th>Bron / medium</th><th class="right">Sessies</th><th class="right">Betrokken</th>
+          <th class="right">Key events</th>${isShop ? `<th class="right">Omzet</th>` : ""}
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table></div>
+      <p class="muted" style="font-size:11px; margin:12px 0 0;">
+        Key events is hier het GA4-totaal over álle doelen — een uitsplitsing per doel bestaat op
+        bronniveau niet zonder extra configuratie.
+      </p>
+    </section>`;
+  }
+
+  function renderWebsiteLanding() {
+    const w = state.website;
+    const rows = w?.current?.landingPages || [];
+    if (!rows.length) return "";
+    const goal = webGoal();
+    const isShop = w.website.type === "webshop";
+    const win = w.current.pageLevelWindow;
+    const body = rows.map(p => `<tr>
+      <td class="row-caption" title="${escapeHtml(p.page)}">${escapeHtml(p.page)}</td>
+      <td class="right">${webFmt.int(p.sessions)}</td>
+      <td class="right">${webFmt.pct0(p.engagementRate)}</td>
+      <td class="right">${webFmt.int(p.conversions)}</td>
+      <td class="right"><strong>${webFmt.ratio(p.conversionRate)}</strong></td>
+      ${isShop ? `<td class="right">${webFmt.eur(p.revenue)}</td>` : ""}
+    </tr>`).join("");
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Landingspagina's</h2>
+        <div class="panel-sub">Waar bezoekers binnenkomen — top ${rows.length} op sessies</div>
+      </div></div>
+      <div class="lib-table"><table>
+        <thead><tr>
+          <th>Pagina</th><th class="right">Sessies</th><th class="right">Betrokken</th>
+          <th class="right">Key events</th><th class="right">Per sessie</th>${isShop ? `<th class="right">Omzet</th>` : ""}
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table></div>
+      <p class="muted" style="font-size:11px; margin:12px 0 0;">
+        <strong>Per sessie</strong> is het aantal key events per sessie, niet een conversieratio: GA4 telt hier álle
+        key events van de property samen, dus de waarde kan boven 1 uitkomen. Het hoofddoel apart per pagina levert
+        GA4 niet zonder extra configuratie.
+      </p>
+      ${win ? `<p class="muted" style="font-size:11px; margin:12px 0 0;">
+        Deze tabel dekt ${escapeHtml(win.startDate)} → ${escapeHtml(win.endDate)} (${win.maxDays} dagen), korter dan de gekozen periode.
+        Paginadata komt ongeaggregeerd binnen; over langere periodes duurt dat te lang. De cijfers hierboven dekken wél de hele periode.
+      </p>` : ""}
+    </section>`;
+  }
+
+  // E-commerce-funnel. Alleen voor webshops én alleen als GA4 de stappen levert:
+  // een funnel van nullen zou lezen als 'niemand legt iets in de winkelmand'.
+  function renderWebsiteFunnel() {
+    const w = state.website;
+    if (w.website.type !== "webshop") return "";
+    const f = w.current.funnel;
+    if (!f || !f.available) {
+      return `<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Verkoopfunnel</h2>
+          <div class="panel-sub">Geen e-commerce-events gemeten in deze periode</div>
+        </div></div>
+        <p class="muted" style="margin:0; font-size:12px;">
+          GA4 leverde geen winkelmand- of checkout-events. Meestal betekent dat dat de
+          e-commerce-tracking (view_item, add_to_cart, begin_checkout, purchase) nog niet volledig staat.
+        </p>
+      </section>`;
+    }
+    const steps = [
+      { label: "Productweergaven", value: f.itemViews },
+      { label: "In winkelmand", value: f.addToCarts, rate: f.cartRate, rateLabel: "van weergaven" },
+      { label: "Checkout gestart", value: f.checkouts, rate: f.checkoutRate, rateLabel: "van winkelmand" },
+      { label: "Aankopen", value: f.purchases, rate: f.purchaseRate, rateLabel: "van checkouts" },
+    ].filter(s => s.value != null);
+    const max = Math.max(...steps.map(s => s.value), 1);
+
+    const bars = steps.map(s => `<div class="web-funnel-step">
+      <div class="web-funnel-head">
+        <span>${escapeHtml(s.label)}</span>
+        <span><strong>${webFmt.int(s.value)}</strong>${s.rate != null ? ` <span class="muted">${webFmt.pct1(s.rate)} ${escapeHtml(s.rateLabel)}</span>` : ""}</span>
+      </div>
+      <div class="web-funnel-bar"><div class="fill" style="width:${Math.max(1, (s.value / max) * 100).toFixed(1)}%;"></div></div>
+    </div>`).join("");
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Verkoopfunnel</h2>
+        <div class="panel-sub">Gemiddelde orderwaarde ${webFmt.eur(f.aov)}${f.firstTimePurchasers != null ? ` · ${webFmt.int(f.firstTimePurchasers)} eerste kopers van ${webFmt.int(f.purchasers)}` : ""}</div>
+      </div></div>
+      <div class="web-funnel">${bars}</div>
+    </section>`;
+  }
+
+  function renderWebsiteSearch() {
+    const w = state.website;
+    if (!w.hasGsc) {
+      return `<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Organisch zoeken</h2>
+          <div class="panel-sub">Geen Search Console gekoppeld</div>
+        </div></div>
+        <p class="muted" style="margin:0; font-size:12px;">
+          Zet <strong>Search Console site</strong> in de Config-tab van de klantsheet om hier vertoningen,
+          kliks, posities en zoekopdrachten te zien. Gebruik exact de property zoals Google hem noemt:
+          <em>sc-domain:merk.be</em> of <em>https://www.merk.be/</em>.
+        </p>
+      </section>`;
+    }
+    const s = w.current.search;
+    const base = webBase();
+    const ps = base ? base.search : null;
+    if (!s.available) {
+      return `<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Organisch zoeken</h2>
+          <div class="panel-sub">Search Console leverde geen rijen voor deze periode</div>
+        </div></div>
+        <p class="muted" style="margin:0; font-size:12px;">${escapeHtml(w.current.errors.gscEmpty || w.current.errors.gscTotals || "Controleer de property in de Config-tab.")}</p>
+      </section>`;
+    }
+
+    const kpi = (label, value, cur, prev, invert, sub) => `<div class="kpi-card">
+      <div class="label"><span class="dot"></span>${escapeHtml(label)}</div>
+      <div class="value" style="font-size:30px;">${value}</div>
+      ${webDeltaHtml(cur, prev, invert)}
+      ${sub ? `<div class="muted" style="font-size:11px;">${escapeHtml(sub)}</div>` : ""}
+    </div>`;
+
+    const b = w.current.branded;
+    const brandTotal = b ? (b.branded.clicks + b.nonbranded.clicks) : 0;
+    const brandedBlock = (b && brandTotal > 0) ? `<div class="web-brand-split">
+      <div><strong>${webFmt.pct0(b.branded.clicks / brandTotal)}</strong> merkgebonden
+        <span class="muted">${webFmt.int(b.branded.clicks)} kliks · CTR ${webFmt.pct1(b.branded.ctr)}</span></div>
+      <div><strong>${webFmt.pct0(b.nonbranded.clicks / brandTotal)}</strong> niet-merkgebonden
+        <span class="muted">${webFmt.int(b.nonbranded.clicks)} kliks · CTR ${webFmt.pct1(b.nonbranded.ctr)}</span></div>
+      <div class="muted" style="font-size:11px;">Merkgebonden = de zoekopdracht bevat ${b.tokens.map(t => `<em>${escapeHtml(t)}</em>`).join(" of ")}. Berekend over de zoekopdrachten die Google vrijgeeft, niet over alle kliks.</div>
+    </div>` : "";
+
+    const qRows = (w.current.queries || []).map(q => `<tr>
+      <td class="row-caption" title="${escapeHtml(q.query)}">${escapeHtml(q.query)}</td>
+      <td class="right">${webFmt.int(q.clicks)}</td>
+      <td class="right">${webFmt.int(q.impressions)}</td>
+      <td class="right">${webFmt.pct1(q.ctr)}</td>
+      <td class="right">${webFmt.pos(q.position)}</td>
+    </tr>`).join("");
+
+    const wins = w.current.quickWins || [];
+    const winRows = wins.map(q => `<tr>
+      <td class="row-caption" title="${escapeHtml(q.query)}">${escapeHtml(q.query)}</td>
+      <td class="right">${webFmt.int(q.impressions)}</td>
+      <td class="right">${webFmt.int(q.clicks)}</td>
+      <td class="right">${webFmt.pct1(q.ctr)}</td>
+      <td class="right"><strong>${webFmt.pos(q.position)}</strong></td>
+    </tr>`).join("");
+
+    const pRows = (w.current.searchPages || []).map(p => `<tr>
+      <td class="row-caption" title="${escapeHtml(p.page)}">${escapeHtml(p.page)}</td>
+      <td class="right">${webFmt.int(p.clicks)}</td>
+      <td class="right">${webFmt.int(p.impressions)}</td>
+      <td class="right">${webFmt.pct1(p.ctr)}</td>
+      <td class="right">${webFmt.pos(p.position)}</td>
+    </tr>`).join("");
+
+    // Search Console loopt twee tot drie dagen achter. Zonder die melding lijkt een
+    // periode die tot vandaag loopt een daling te tonen die er niet is.
+    const last = (w.current.searchDaily || []).slice(-1)[0];
+    const lagDays = last ? Math.round((webAtNoon(state.period.end) - webAtNoon(last.date)) / 86400000) : null;
+    const lagNote = (lagDays != null && lagDays > 0)
+      ? `<div class="muted" style="font-size:11px; margin-top:10px;">Search Console loopt achter: laatste dag met data is ${escapeHtml(last.date)} (${lagDays} dag${lagDays === 1 ? "" : "en"} vóór het einde van de periode). Google levert die dagen nog na.</div>`
+      : "";
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Organisch zoeken</h2>
+        <div class="panel-sub">Google Search Console · wat mensen intypen voordat ze op de site komen</div>
+      </div></div>
+      <div class="kpi-grid" style="margin-bottom:16px;">
+        ${kpi("Kliks", webFmt.int(s.clicks), s.clicks, ps && ps.clicks, false)}
+        ${kpi("Vertoningen", webFmt.int(s.impressions), s.impressions, ps && ps.impressions, false)}
+        ${kpi("CTR", webFmt.pct2(s.ctr), s.ctr, ps && ps.ctr, false, "kliks gedeeld door vertoningen")}
+        ${kpi("Positie", webFmt.pos(s.position), s.position, ps && ps.position, true, "gewogen naar vertoningen")}
+      </div>
+      ${brandedBlock}
+      ${wins.length ? `<h3 class="web-subhead">Kansen — net buiten de eerste pagina</h3>
+      <div class="lib-table"><table>
+        <thead><tr><th>Zoekopdracht</th><th class="right">Vertoningen</th><th class="right">Kliks</th><th class="right">CTR</th><th class="right">Positie</th></tr></thead>
+        <tbody>${winRows}</tbody>
+      </table></div>
+      <p class="muted" style="font-size:11px; margin:10px 0 0;">Zoekopdrachten op positie 8 tot 20 met minstens 50 vertoningen: hier levert een paar plaatsen stijgen het meeste verkeer op.</p>` : ""}
+      ${qRows ? `<h3 class="web-subhead">Meeste kliks</h3>
+      <div class="lib-table"><table>
+        <thead><tr><th>Zoekopdracht</th><th class="right">Kliks</th><th class="right">Vertoningen</th><th class="right">CTR</th><th class="right">Positie</th></tr></thead>
+        <tbody>${qRows}</tbody>
+      </table></div>` : ""}
+      ${pRows ? `<h3 class="web-subhead">Pagina's in de zoekresultaten</h3>
+      <div class="lib-table"><table>
+        <thead><tr><th>Pagina</th><th class="right">Kliks</th><th class="right">Vertoningen</th><th class="right">CTR</th><th class="right">Positie</th></tr></thead>
+        <tbody>${pRows}</tbody>
+      </table></div>` : ""}
+      ${lagNote}
+    </section>`;
+  }
+
+  function renderWebsiteAudience() {
+    const c = state.website?.current;
+    if (!c) return "";
+    const goal = webGoal();
+    const devices = c.devices || [], returning = c.newVsReturning || [], countries = c.countries || [];
+    if (!devices.length && !returning.length && !countries.length) return "";
+
+    const mini = (title, rows) => `<div class="web-mini">
+      <div class="info-label">${escapeHtml(title)}</div>
+      <table>${rows}</table>
+    </div>`;
+
+    const totalDev = devices.reduce((s, d) => s + d.sessions, 0);
+    const devRows = devices.map(d => `<tr>
+      <td>${escapeHtml(d.device)}</td>
+      <td class="right">${webFmt.pct0(totalDev ? d.sessions / totalDev : null)}</td>
+      <td class="right">${webFmt.pct0(d.engagementRate)}</td>
+    </tr>`).join("");
+
+    const totalRet = returning.reduce((s, d) => s + d.sessions, 0);
+    const retRows = returning.map(d => `<tr>
+      <td>${escapeHtml(d.group === "new" ? "nieuw" : d.group === "returning" ? "terugkerend" : d.group)}</td>
+      <td class="right">${webFmt.pct0(totalRet ? d.sessions / totalRet : null)}</td>
+      <td class="right">${webFmt.int(d.sessions)}</td>
+    </tr>`).join("");
+
+    const totalC = countries.reduce((s, d) => s + d.sessions, 0);
+    const cRows = countries.map(d => `<tr>
+      <td>${escapeHtml(d.country)}</td>
+      <td class="right">${webFmt.pct0(totalC ? d.sessions / totalC : null)}</td>
+      <td class="right">${webFmt.int(d.sessions)}</td>
+    </tr>`).join("");
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Publiek</h2>
+        <div class="panel-sub">Aandeel van de sessies, en betrokkenheid waar die iets toevoegt</div>
+      </div></div>
+      <div class="web-mini-grid">
+        ${devices.length ? mini("Apparaat — aandeel en betrokkenheid", devRows) : ""}
+        ${returning.length ? mini("Nieuw vs. terugkerend (sessies)", retRows) : ""}
+        ${countries.length ? mini("Land (sessies)", cRows) : ""}
+      </div>
+      <p class="muted" style="font-size:11px; margin:12px 0 0;">
+        Bij apparaat staat de betrokkenheid en niet de conversieratio: ${escapeHtml(goal.on
+          ? `GA4 splitst ${goal.label.toLowerCase()} op dit niveau niet uit, en een ratio over álle key events zou een veel te hoog cijfer geven`
+          : "zonder ingesteld hoofddoel zou een ratio over álle key events een veel te hoog cijfer geven")}.
+      </p>
+    </section>`;
+  }
+
+  function renderWebsiteNotes() {
+    const w = state.website;
+    const e = w.current.errors || {};
+    const msgs = [];
+    const add = (label, v) => { if (v) msgs.push(`${label}: ${v}`); };
+    add("GA4-totalen", e.ga4Totals);
+    add("GA4-dagreeks", e.ga4Daily);
+    add("GA4-kanalen", e.ga4Channels);
+    add("GA4-doel", e.ga4Goal);
+    add("GA4-bronnen", e.ga4Sources);
+    add("GA4-landingspagina's", e.ga4Landing);
+    add("GA4-funnel", e.ga4Funnel);
+    add("Search Console", e.gscTotals || e.gscEmpty);
+    add("Search Console — zoekopdrachten", e.gscQueries);
+    add("Search Console — pagina's", e.gscPages);
+    if (w.previousError) add("Vergelijkingsperiode", w.previousError);
+    if (w.yearAgoError) add("Vorig jaar", w.yearAgoError);
+
+    const errHtml = msgs.length
+      ? `<div style="margin-top:10px; font-size:11px; color:#c0392b;">${msgs.map(m => escapeHtml(m)).join("<br>")}</div>`
+      : "";
+
+    const goal = webGoal();
+    return `<section class="panel">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Hoe deze cijfers berekend zijn</h2>
+        <div class="panel-sub">Zodat de tab navolgbaar blijft</div>
+      </div></div>
+      <ul class="roas-notes">
+        <li><strong>Sessies en gebruikers</strong> komen uit GA4. Gebruikers worden over de hele periode ontdubbeld: iemand die op vijf dagen langskomt telt één keer. Optellen per dag zou hem vijf keer tellen.</li>
+        <li><strong>Betrokken sessies</strong> is GA4's engagement rate: sessies die langer dan tien seconden duren, een key event opleveren of minstens twee pagina's zien. Dit verving bouncepercentage.</li>
+        <li><strong>${escapeHtml(goal.label)}</strong> — ${goal.on
+          ? `het hoofddoel uit de Config-tab (GA4-event <em>${escapeHtml(w.website.goalEvent)}</em>). Alle key events samen zouden een veel hoger, minder bruikbaar cijfer geven.`
+          : `alle key events van de property samen. Zet <strong>Conversiedoel</strong> in de Config-tab om op één doel te sturen — dat scheelt vaak een factor tien.`}</li>
+        <li><strong>Organisch zoeken</strong> komt uit Search Console, niet uit GA4. CTR en positie zijn opnieuw berekend uit kliks en vertoningen; een gemiddelde van gemiddelden zou hier niet kloppen. Google geeft alleen zoekopdrachten vrij boven een privacydrempel, dus de querytabellen tellen niet op tot het totaal.</li>
+        <li><strong>Betaald verkeer</strong> staat hier als kanaal, maar zonder kosten of ROAS. Die staan in de ROAS-tab, op dezelfde GA4-omzet.</li>
+        <li>GA4-property en Search Console-site komen uit de <strong>Config-tab</strong> van de klantsheet. Ontbreekt er één, dan blijft de rest gewoon werken.</li>
       </ul>
       ${errHtml}
     </section>`;

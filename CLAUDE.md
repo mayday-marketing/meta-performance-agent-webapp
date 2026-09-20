@@ -67,9 +67,12 @@ isolation bugs (an email cache that wasn't client-keyed; a `sheetId` IDOR in
   `load-period`, `load-all`, `analysis-benchmarks`, `context`.
 - **Google Sheets** (`api/sheets.js`) — reads `Merkcontext`, appends analysis
   history. Sheet is resolved from `CLIENTS[clientId].sheetId` (never the request).
-- **GA4** (`googleanalytics4` via Windsor) — omzetbron voor de ROAS-tab:
-  `purchase_revenue` per dag, totaal én per `session_source_medium`. Property-id
-  uit de Config-tab (`GA4 property`).
+- **GA4** (`googleanalytics4` via Windsor) — omzetbron voor de ROAS-tab en
+  hoofdbron voor de Website-tab: `purchase_revenue` per dag, totaal én per
+  `session_source_medium`. Property-id uit de Config-tab (`GA4 property`).
+- **Search Console** (`searchconsole` via Windsor) — organisch zoeken in de
+  Website-tab: kliks, vertoningen, positie, queries en pagina's. Property uit de
+  Config-tab (`Search Console site`).
 
 ## ROAS-tab (blended MER + kanaalsplitsing)
 
@@ -110,8 +113,65 @@ los van de dashboardperiode in de topbar.
   oordeel, maar blijven alle ROAS-cijfers staan. Let op in JS: `null / getal === 0`,
   dus overal expliciet op `!= null` toetsen.
 - **Isolatie:** elke nieuwe connector-slug hoort in `ACCOUNT_ID_CONNECTORS` in
-  `windsor.js`. Ontbreekt hij daar, dan geldt de fail-closed-regel niet en geeft een
-  niet-geconfigureerde connector álle klanten terug.
+  `windsor.js` (inclusief `searchconsole`). Ontbreekt hij daar, dan geldt de
+  fail-closed-regel niet en geeft een niet-geconfigureerde connector álle klanten
+  terug.
+
+## Website-tab (GA4 + Search Console)
+
+Analytics-overzicht van de site zelf (`#page-website`, nav `data-page="website"`,
+`api/windsor.js` action `getWebsite`). Volgt **wel** de dashboardperiode uit de
+topbar — anders dan de ROAS-tab, die een eigen maandperiode heeft.
+
+- **Scheiding met de ROAS-tab is bewust.** Betaald verkeer staat hier als kanaal,
+  maar zónder spend of ROAS. Eén cijfer, één plek; anders ontstaan twee waarheden.
+- **Twee vergelijkingsperiodes worden in dezelfde call opgehaald** (vorige periode
+  én vorig jaar), allebei met `detail:false` (alleen totalen + kanalen). De toggle
+  in de UI wisselt daartussen zonder nieuwe fetch.
+- **Hoofddoel per klant.** `Conversiedoel` in de Config-tab is een GA4-eventnaam;
+  die wordt een veldnaam (`conversions_<event>`) in een **aparte, niet-fatale**
+  call. Bestaat het event niet, dan valt de tab terug op `conversions` (álle key
+  events samen) met de vlag `goalAvailable:false`. Dat verschil is groot — bij één
+  klant 2.112 formulieren tegenover 72.004 key events — dus de UI zegt altijd welk
+  van de twee je ziet. Zet het veld nooit in de hoofdcall: één verkeerde eventnaam
+  sloopt dan de hele tab.
+- **`Websitetype`** (`webshop`/`leads`) bepaalt of de verkoopfunnel of de
+  leadweergave verschijnt. Leeg → afgeleid uit de data (gemeten omzet = webshop).
+- **Gebruikers mag je niet over dagen optellen.** De totalen-call gaat daarom
+  zónder `date` (GA4 ontdubbelt dan over de periode); de dagreeks is een aparte
+  call met alleen optelbare maatstaven. Ook binnen één call kan GA4 bij lage
+  volumes méér nieuwe dan totale gebruikers rapporteren — daarom is `newUserShare`
+  `null` zodra nieuw > totaal, in plaats van afgekapt op 100%.
+- **Ratio's altijd zelf uitrekenen** uit de tellers: CTR = kliks/vertoningen,
+  zoekpositie gewogen naar vertoningen, engagement rate = engaged/sessions. Een
+  gemiddelde van dagelijkse gemiddelden klopt niet.
+- **Merkgebonden vs. niet-merkgebonden rekenen we zelf** uit de querytabel met
+  merktokens. Windsor's veld `branded_vs_nonbranded` markeert alleen queries met de
+  volledige domeinnaam erin: voor `spotto.be` viel de query "spotto" (2.852 kliks)
+  daar onder *niet*-merkgebonden.
+
+## Known pitfalls in de Website-tab
+
+- **Windsor's REST-endpoint negeert `accounts` én `limit`** (geverifieerd). Elke
+  call haalt dus álle klanten op en filtert pas server-side. Voor hoog-cardinale
+  dimensies is dat fataal: `page_path` over 30 dagen was 272.000 rijen / 61 MB /
+  65 s. Daarom is die tabel geschrapt en geldt `PAGE_LEVEL_MAX_DAYS = 30` voor
+  landingspagina's en Search-Console-queries/pagina's; `pageLevelWindow` vertelt de
+  UI het echte venster (zelfde recept als `adLevelWindow`).
+- **Search Console is traag bij een koude cache**: ~28 s voor de eerste call van een
+  periode, ~1 s daarna. Vandaar 35 s timeout op de vergelijkingsperiodes.
+- **Search Console lag**: data loopt 2–3 dagen achter; de UI meldt de laatste dag
+  met data, anders lijkt het einde van elke periode een daling.
+- **Account-id-vorm.** Windsor geeft een domeinproperty terug als `spotto.be`,
+  zonder het `sc-domain:`-voorvoegsel dat Google's UI toont. `normId` in
+  `windsor.js` stript dat voorvoegsel; zonder die strip matcht de config nooit en
+  blijft de tab (fail-closed) leeg. Een URL-prefix-property moet exact matchen,
+  inclusief slash: `https://www.merk.be/`.
+- **"Key events" is geen conversieratio.** Op bron-, pagina- en apparaatniveau
+  splitst GA4 het hoofddoel niet uit, dus daar staat het GA4-totaal over álle key
+  events. De landingspagina-tabel toont dat als *per sessie* (kan boven 1 uitkomen),
+  het apparaatblok toont betrokkenheid in plaats van een ratio. Maak daar geen
+  percentage van.
 
 ## The two AI agents (know which prompt serves which consumer)
 

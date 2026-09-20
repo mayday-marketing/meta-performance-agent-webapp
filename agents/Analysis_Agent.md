@@ -40,7 +40,7 @@ Je MOET enkel een geldige JSON teruggeven met onderstaande structuur. Geen tekst
 | `winners[].delta` | Korte vergelijking zoals `"+47%"`, `"2.7×"`, `"3 van 5"`. Lege string `""` als er geen schone vergelijking is. |
 | `winners[].heading` | Korte titel, max ~50 tekens. Geen punt aan het einde. |
 | `winners[].body` | 2–3 zinnen. Beschrijf wat werkte en geef de cijfers die de claim ondersteunen. |
-| `winners[].tag` | Eén van: `Format · Reel`, `Format · Carrousel`, `Format · Foto`, `Format · Video`, `Platform · Instagram`, `Platform · Facebook`, `Paid`, `Cadens`, `Pillar · [naam]`. |
+| `winners[].tag` | Eén van: `Format · Reel`, `Format · Carrousel`, `Format · Foto`, `Format · Video`, `Platform · Instagram`, `Platform · Facebook`, `Paid`, `Cadens`, `Website`, `Zoekverkeer`, `Pillar · [naam]`. |
 | `losers[]` | Zelfde velden als winners — maar voor wat onder presteert. `delta` mag negatief (`"−31%"`). |
 | `recs[].heading` | Eén concrete actie of strategische keuze. Imperatief gesteld. |
 | `recs[].body` | 2–3 zinnen. Leg uit waarom en hoe. |
@@ -112,6 +112,13 @@ Voor winners en losers, spreid de 5 over deze invalshoeken (niet 5× dezelfde ho
 - **Paid** — gebruik `ads`. Als `ads.level === "ad"` heb je per-advertentie data: vergelijk `bestAdsByEngagement` vs `worstAdsByEngagement` op engagement/CTR/CPM, en benoem spend en (indien aanwezig) retentie. Elke ad heeft een `adType` (`Reel`/`Carrousel`/`Foto`/`Video`/`Post`) — gebruik dat om format-conclusies binnen paid te trekken (bv. "Reel-ads halen hogere engagement dan foto-ads"). Als `ads.level === "campaign"` blijft het op campagne-niveau (reach/engagement).
   - **Efficiëntie-metrics:** `ads.paidTotals` geeft account-niveau `spend`, `cpm`, `ctr`, `roas`, `cac`. Per ad zijn `cpm`, `roas`, `cac` ook beschikbaar. Gebruik deze voor efficiëntie-inzichten ("CPM €8,40 — gemiddeld", "ROAS 3,2× op €1.200 spend").
   - **ROAS/CAC alleen claimen als ze niet null zijn.** `roas`/`cac` zijn `null` wanneer de klant geen conversies/aankoopwaarde trackt — doe dan géén ROAS/CAC-uitspraak (wel CPM/CTR/spend, die zijn er altijd). NOOIT conversies of ROAS verzinnen.
+
+- **Website** — alleen als het blok `website` in de data zit (dat komt uit de Website-tab; ontbreekt het, dan heeft de gebruiker die tab niet geopend en zeg je er niets over).
+  - `website.totals` geeft `sessions`, `users`, `engagementRate`, `conversions`, `conversionRate`, en voor webshops `revenue`/`aov`. `website.previousTotals` is dezelfde set voor de vorige periode — gebruik die voor deltas, schat ze niet.
+  - `website.goal.measured` zegt of de conversies één ingesteld hoofddoel zijn (`true`) of álle key events samen (`false`). Bij `false` is het aantal opgeblazen: noem het dan "key events", niet "conversies", en trek er geen conclusie over verkoop of leads uit.
+  - `website.channels` geeft per GA4-kanaalgroep sessies, betrokkenheid en conversie. Dit is de brug tussen social/paid en wat er op de site gebeurt: een kanaal dat veel verkeer stuurt maar slecht converteert is een sterke loser.
+  - `website.search` (Search Console) geeft `clicks`, `impressions`, `ctr`, `position`, plus `topQueries` en `quickWins` (positie 8–20 met veel vertoningen). `quickWins` is bruikbaar als concrete `recs`-actie. Bij positie geldt: lager is beter.
+  - Tel GA4-omzet en platform-omzet nooit bij elkaar op, en haal websiteconversies niet door elkaar met de conversies uit `ads` — dat zijn andere meetlatten.
 
 Voor recommendations, focus op:
 - **Wat moet de klant volgende week doen** (1 concrete actie)

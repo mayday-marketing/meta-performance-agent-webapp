@@ -85,6 +85,46 @@ function okVerdictSource(v) {
   return null;
 }
 
+// Search Console-property. Twee geldige vormen in Google's API:
+//   sc-domain:example.com      (domeinproperty)
+//   https://www.example.com/   (URL-prefix-property)
+// Past bewust niet in okAccount(): die staat geen dubbele punt of slash toe.
+// De waarde moet exact matchen met wat Windsor als account_id teruggeeft.
+function okSearchConsoleSite(v) {
+  const s = String(v).trim();
+  const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+  // Domeinproperty. Windsor geeft hem terug ZONDER het 'sc-domain:'-voorvoegsel
+  // ('spotto.be'), Google's eigen UI mét. Beide mogen hier; windsor.js haalt het
+  // voorvoegsel weg voor de vergelijking (zie normId).
+  if (/^sc-domain:/i.test(s)) {
+    const host = s.slice(10).trim();
+    return HOST.test(host) ? 'sc-domain:' + host.toLowerCase() : null;
+  }
+  if (HOST.test(s)) return s.toLowerCase();
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    if (u.username || u.password) return null;
+    return u.origin + '/';            // Google's URL-prefix-vorm eindigt op een slash
+  } catch { return null; }
+}
+
+// GA4-eventnaam van het hoofddoel. Belandt in een Windsor-veldnaam
+// (conversions_<event>), dus strikt: kleine letters, cijfers, underscore.
+function okEventName(v) {
+  const s = String(v).trim().toLowerCase().replace(/\s+/g, '_');
+  return /^[a-z][a-z0-9_]{0,39}$/.test(s) ? s : null;
+}
+
+// Websitetype bepaalt welk funnelblok de Website-tab toont. Niet ingevuld →
+// afgeleid uit de data (omzet gemeten = webshop), zie windsor.js getWebsite.
+function okWebsiteType(v) {
+  const s = String(v).toLowerCase().replace(/[^a-z]/g, '');
+  if (/^(webshop|ecommerce|shop|verkoop|commerce)/.test(s)) return 'webshop';
+  if (/^(lead|contact|offerte|afspraak|service)/.test(s)) return 'leads';
+  return null;
+}
+
 function okHttpsUrl(v, hosts) {
   try {
     const u = new URL(String(v).trim());
@@ -123,6 +163,20 @@ const CONFIG_FIELDS = {
   pinterestadaccount:  { path: 'accounts.pinterest',        check: okAccount },
   snapchatadaccount:   { path: 'accounts.snapchat',         check: okAccount },
   amazonadsaccount:    { path: 'accounts.amazon_ads',       check: okAccount },
+
+  // --- Website-tab: GA4-analytics + organisch zoeken ------------------------
+  // De GA4-property staat hierboven al (ga4property). Search Console is een eigen
+  // connector met een eigen id-vorm (sc-domain:… of https://…/).
+  searchconsolesite:     { path: 'accounts.searchconsole', check: okSearchConsoleSite },
+  searchconsoleproperty: { path: 'accounts.searchconsole', check: okSearchConsoleSite },
+  googlesearchconsole:   { path: 'accounts.searchconsole', check: okSearchConsoleSite },
+  // 'webshop' of 'leads'. Bepaalt of de tab de e-commerce-funnel of de
+  // leadconversies toont. Leeg → afgeleid uit de data.
+  websitetype:           { path: 'website.type',      check: okWebsiteType },
+  // GA4-eventnaam van het hoofddoel, bv. 'purchase', 'generate_lead' of
+  // 'property_form_submit'. Bepaalt de conversiekolom in de hele tab.
+  conversiedoel:         { path: 'website.goalEvent', check: okEventName },
+  conversiedoellabel:    { path: 'website.goalLabel', check: v => v.slice(0, 40) },
 
   // --- ROAS-tab: break-even-parameters -------------------------------------
   // Brutomarge en de lopende seizoenskorting bepalen de minimum-ROAS waaronder
@@ -185,7 +239,7 @@ function roasTargets(roas) {
 }
 
 function emptyConfig() {
-  return { brandName: null, accent: null, accentText: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null };
+  return { brandName: null, accent: null, accentText: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null, website: {} };
 }
 
 function setPath(obj, path, value) {

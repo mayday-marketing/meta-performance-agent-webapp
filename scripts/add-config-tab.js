@@ -31,6 +31,20 @@ const envIdx = process.argv.indexOf('--env');
 const ENV_FILE = envIdx !== -1 ? process.argv[envIdx + 1] : null;
 // --identify <url|id> …  → zegt per sheet hoe hij heet, waar hij staat en bij
 // welke klant hij hoort. Leest alleen, schrijft nooit.
+// --folders  → per klant: waar wijst driveFolderId naartoe?
+// --ancestors <id>  → de mappenketen boven een bestand, mét map-ids.
+const FOLDERS = process.argv.includes('--folders');
+const ancIdx = process.argv.indexOf('--ancestors');
+const ANCESTORS = ancIdx !== -1 ? (process.argv[ancIdx + 1] || '').replace(/.*\/d\/([A-Za-z0-9_-]+).*/, '$1') : null;
+// --sheet <id>  → werk op deze sheet i.p.v. te zoeken. Alleen samen met --only,
+// zodat je nooit per ongeluk één sheet aan alle klanten hangt.
+const sheetIdx = process.argv.indexOf('--sheet');
+const SHEET_OVERRIDE = sheetIdx !== -1
+  ? (process.argv[sheetIdx + 1] || '').replace(/.*\/d\/([A-Za-z0-9_-]+).*/, '$1')
+  : null;
+// --verify  → leest de Config-tab terug en haalt hem door DEZELFDE parser als de
+// app (api/_config.js), zodat je ziet wat het dashboard straks werkelijk krijgt.
+const VERIFY = process.argv.includes('--verify');
 const idIdx = process.argv.indexOf('--identify');
 const IDENTIFY = idIdx !== -1
   ? process.argv.slice(idIdx + 1).filter(a => !a.startsWith('--')).map(a => {
@@ -360,13 +374,30 @@ const ROWS = [
   ['MailerLite account', '[id]', 'Alleen invullen als MailerLite gekoppeld is'],
   ['ConvertKit account', '[id]', 'Alleen invullen als ConvertKit gekoppeld is'],
 
+  ['WEBSITE (GA4 + SEARCH CONSOLE)', '', ''],
+  ['GA4 property', '[cijferreeks]', 'Property-id, bv. 491908260. Voedt de Website- en de ROAS-tab'],
+  ['Search Console site', '[sc-domain:merk.be of https://www.merk.be/]', 'Exact zoals Google de property noemt. Zonder dit veld geen organisch-zoeken-blok'],
+  ['Website type', '[webshop of leads]', 'Bepaalt of de tab de verkoopfunnel of de leadconversies toont. Leeg = afgeleid uit de data'],
+  ['Conversiedoel', '[ga4_eventnaam]', 'GA4-event van het hoofddoel, bv. purchase of generate_lead. Zonder dit veld telt de tab álle key events samen'],
+  ['Conversiedoel label', '[Contactaanvraag]', 'Hoe dat doel in het dashboard heet'],
+
+  ['ROAS (BETAALDE KANALEN + BREAK-EVEN)', '', ''],
+  ['TikTok ad account', '[id]', 'Een kanaal verschijnt in de ROAS-tab zodra hier een id staat'],
+  ['Google Ads account', '[id]', ''],
+  ['Bing ad account', '[id]', ''],
+  ['Brutomarge', '[45%]', 'Marge op de volle prijs. Zonder dit veld is er geen break-even en dus geen oordeel'],
+  ['Seizoenskorting', '[30%]', 'Korting die nu loopt. Break-even = (1 − korting) / (brutomarge − korting). Leeg = enkel volle prijs'],
+  ['Minimum ROAS', '[leeg laten tenzij je de break-even wil overrulen]', 'Directe override van de drempel'],
+  ['Oordeel op', '[GA4 of Platform]', 'Welke omzetdefinitie het oordeel bepaalt. Standaard GA4'],
+
   ['DOCUMENTLINKS', '', ''],
   ['Merkbrief link', '[https://...]', "Elk veld dat op 'link' of 'url' eindigt wordt automatisch meegenomen"],
   ['Strategie link', '[https://...]', ''],
   ['Rapportage link', '[https://...]', ''],
 ];
 
-const BOLD_ROWS = [0, 3, 4, 9, 16]; // titel, kopregel en de sectiekoppen
+// Titel, kopregel en de sectiekoppen — indexen volgen ROWS hierboven.
+const BOLD_ROWS = [0, 3, 4, 9, 16, 22, 34];
 
 /* ---------- Uitvoeren ---------- */
 
@@ -432,6 +463,69 @@ async function ensureConfigTab(sheetId, token) {
   console.log(`Service-account: ${email}`);
   console.log(APPLY ? 'Modus: UITVOEREN\n' : 'Modus: DROOGLOOP (voeg --apply toe om echt te schrijven)\n');
 
+  if (VERIFY) {
+    const { parseConfigRows } = require('../api/_config.js');
+    for (const [id, cfg] of Object.entries(clients)) {
+      if (ONLY && id.toLowerCase() !== ONLY) continue;
+      const sid = SHEET_OVERRIDE || cfg.sheetId;
+      if (!sid) { console.log(`- ${id.padEnd(12)} geen sheetId — overgeslagen`); continue; }
+      try {
+        const r = await api(`https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent('Config!A1:B60')}`, token);
+        const { config, warnings } = parseConfigRows(r.values || []);
+        console.log(`\n- ${id} (${sid})`);
+        console.log(`  merknaam:   ${config.brandName || '—'}`);
+        console.log(`  accent:     ${config.accent || '— (dashboard gebruikt de standaardkleur)'}`);
+        console.log(`  logo:       ${config.logoUrl || '—'}`);
+        const acc = Object.entries(config.accounts);
+        console.log(`  accounts:   ${acc.length ? acc.map(([k, v]) => `${k}=${v}`).join(', ') : '— (geen scoping: alle accounts van de sleutel)'}`);
+        const lnk = Object.keys(config.links);
+        console.log(`  links:      ${lnk.length ? lnk.join(', ') : '—'}`);
+        console.log(`  warnings:   ${warnings.length ? warnings.join(' | ') : 'geen'}`);
+      } catch (e) {
+        console.log(`\n- ${id} FOUT: ${e.message}`);
+      }
+    }
+    console.log('');
+    return;
+  }
+
+  if (FOLDERS) {
+    for (const [id, cfg] of Object.entries(clients)) {
+      if (!cfg.driveFolderId) { console.log(`- ${id.padEnd(12)} geen driveFolderId`); continue; }
+      try {
+        const f = await api(`https://www.googleapis.com/drive/v3/files/${cfg.driveFolderId}?fields=id,name,mimeType,parents&supportsAllDrives=true`, token);
+        const segs = [];
+        let cur = f.parents && f.parents[0];
+        for (let d = 0; cur && d < 8; d++) {
+          const par = await api(`https://www.googleapis.com/drive/v3/files/${cur}?fields=id,name,parents&supportsAllDrives=true`, token);
+          segs.unshift(par.name);
+          cur = par.parents && par.parents[0];
+        }
+        const kind = f.mimeType === FOLDER ? 'map' : `GEEN MAP (${f.mimeType})`;
+        console.log(`- ${id.padEnd(12)} ${segs.join('/')}/${f.name}   [${kind}]`);
+        console.log(`  ${' '.repeat(12)} geconfigureerde id: ${cfg.driveFolderId}`);
+      } catch (e) {
+        console.log(`- ${id.padEnd(12)} FOUT: ${e.message}`);
+      }
+    }
+    console.log('');
+    return;
+  }
+
+  if (ANCESTORS) {
+    let cur = ANCESTORS;
+    const chain = [];
+    for (let d = 0; cur && d < 12; d++) {
+      const f = await api(`https://www.googleapis.com/drive/v3/files/${cur}?fields=id,name,mimeType,parents&supportsAllDrives=true`, token);
+      chain.unshift({ id: f.id, name: f.name, folder: f.mimeType === FOLDER });
+      cur = f.parents && f.parents[0];
+    }
+    console.log('\nMappenketen (bovenaan begint de Drive):');
+    chain.forEach((c, i) => console.log(`${'  '.repeat(i)}${c.folder ? '[map] ' : '[bestand] '}${c.name}\n${'  '.repeat(i)}      id: ${c.id}`));
+    console.log('');
+    return;
+  }
+
   if (IDENTIFY) {
     const clientFolders = {};
     for (const [id, cfg] of Object.entries(clients)) if (cfg.driveFolderId) clientFolders[cfg.driveFolderId] = id;
@@ -444,6 +538,12 @@ async function ensureConfigTab(sheetId, token) {
         console.log(`  type:   ${kind}`);
         console.log(`  pad:    ${r.path || '(direct in de klantmap)'}`);
         console.log(`  klant:  ${r.owner || 'GEEN match met een driveFolderId uit CLIENTS'}`);
+        if (r.mimeType === GSHEET) {
+          try {
+            const meta = await api(`https://sheets.googleapis.com/v4/spreadsheets/${r.id}?fields=sheets.properties.title`, token);
+            console.log(`  tabs:   ${(meta.sheets || []).map(x => x.properties.title).join(' | ')}`);
+          } catch (e) { console.log(`  tabs:   niet leesbaar (${e.message})`); }
+        }
       } catch (e) {
         console.log(`\n${fid}\n  FOUT: ${e.message}`);
       }
@@ -456,8 +556,14 @@ async function ensureConfigTab(sheetId, token) {
   const discovered = {};   // clientId -> sheetId, om achteraf in CLIENTS te zetten
 
   for (const [id, cfg] of Object.entries(clients)) {
-    if (ONLY && id.toLowerCase() !== ONLY) continue;
+      if (ONLY && id.toLowerCase() !== ONLY) continue;
     let sheetId = cfg.sheetId || null;
+
+    // Expliciet opgegeven sheet wint — handig zolang CLIENTS nog niet gecorrigeerd is.
+    if (!sheetId && SHEET_OVERRIDE) {
+      sheetId = SHEET_OVERRIDE;
+      console.log(`- ${id.padEnd(14)} sheet uit --sheet: ${sheetId}`);
+    }
 
     // Geen sheetId in CLIENTS? Zoek de sheet in de Drive-map van déze klant.
     if (!sheetId) {
@@ -465,6 +571,26 @@ async function ensureConfigTab(sheetId, token) {
         console.log(`- ${id.padEnd(14)} geen sheetId én geen driveFolderId — overgeslagen`);
         continue;
       }
+      // Wijst driveFolderId wel naar een map? Zo niet, is dát het probleem.
+      try {
+        const probe = await api(`https://www.googleapis.com/drive/v3/files/${cfg.driveFolderId}?fields=id,name,mimeType&supportsAllDrives=true`, token);
+        if (probe.mimeType !== FOLDER) {
+          console.log(`- ${id.padEnd(14)} driveFolderId wijst naar "${probe.name}" — dat is GEEN map`);
+          console.log(`  ${' '.repeat(14)} (${probe.mimeType})`);
+          if (probe.mimeType === GSHEET) {
+            console.log(`  ${' '.repeat(14)} → dit hoort in CLIENTS bij "sheetId", niet bij "driveFolderId";`);
+            console.log(`  ${' '.repeat(14)}   zet in driveFolderId de id van de klantmap zelf.`);
+            console.log(`  ${' '.repeat(14)} → of draai nu: --apply --only ${id} --sheet ${probe.id}`);
+          }
+          skipped++;
+          continue;
+        }
+      } catch (e) {
+        failed++;
+        console.log(`- ${id.padEnd(14)} FOUT bij lezen van driveFolderId: ${e.message}`);
+        continue;
+      }
+
       let hits;
       try { hits = await findSheets(cfg.driveFolderId, token); }
       catch (e) { failed++; console.log(`- ${id.padEnd(14)} FOUT bij zoeken in Drive: ${e.message}`); continue; }
