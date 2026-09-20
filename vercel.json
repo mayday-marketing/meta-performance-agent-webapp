@@ -8,6 +8,9 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "api/analysis.js": {
+      "maxDuration": 300
+    },
     "api/sheets.js": {
       "maxDuration": 15
     },
