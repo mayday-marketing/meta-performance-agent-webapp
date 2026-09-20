@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { getClientConfig, emptyConfig } = require('./_config');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -152,14 +153,26 @@ module.exports = async (req, res) => {
 
   const { method } = req;
 
-  // GET — load client context
+  // GET — load client context (default) of ?action=config
   if (method === 'GET') {
-    const { clientId, token } = req.query || {};
+    const { clientId, token, action } = req.query || {};
 
     if (!verifyToken(token, clientId)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
+    // sheetId komt uit CLIENTS, nooit uit het request — zie resolveSheetId().
     const sheetId = resolveSheetId(clientId);
+
+    // action=config — accent, logo, account-ids en links uit de Config-tab.
+    // Faalt nooit hard: zonder config draait het dashboard op de defaults.
+    if (action === 'config') {
+      try {
+        return res.status(200).json(await getClientConfig(clientId));
+      } catch (e) {
+        return res.status(200).json({ config: emptyConfig(), warnings: [e.message] });
+      }
+    }
+
     if (!sheetId) {
       return res.status(200).json({ context: '' });
     }

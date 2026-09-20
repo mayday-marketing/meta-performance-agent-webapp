@@ -81,6 +81,78 @@
   function clearSession() {
     state.session = null;
     try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+    resetBrandConfig();
+  }
+
+  /* ---------- Merkconfig (Config-tab in de klantsheet) ---------- */
+
+  // Accent, logo en merknaam komen server-side uit de Config-tab. De waarden zijn daar
+  // al gevalideerd (hex-regex + https-host-allowlist), en we zetten ze via setProperty /
+  // .src — nooit via innerHTML, zodat sheetinhoud geen markup kan injecteren.
+
+  function hexToRgbTriplet(hex) {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+    return m ? `${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}` : null;
+  }
+
+  // Inline props weghalen: anders blijft het accent van klant A staan als klant B
+  // geen eigen accent heeft (uitloggen → inloggen in hetzelfde tabblad).
+  function resetBrandConfig() {
+    const root = document.documentElement;
+    ["--accent", "--accent-text", "--btn-primary", "--accent-soft", "--heat"]
+      .forEach(prop => root.style.removeProperty(prop));
+    const logo = $("#brand-logo");
+    if (logo) { logo.hidden = true; logo.removeAttribute("src"); }
+  }
+
+  function applyBrandConfig(cfg) {
+    resetBrandConfig();
+    if (!cfg) return;
+
+    const root = document.documentElement;
+    if (cfg.accent) {
+      root.style.setProperty("--accent", cfg.accent);
+      root.style.setProperty("--accent-text", cfg.accentText || cfg.accent);
+      root.style.setProperty("--btn-primary", cfg.accent);
+      root.style.setProperty("--accent-soft", `color-mix(in oklch, ${cfg.accent} 12%, white)`);
+      const rgb = hexToRgbTriplet(cfg.accent);
+      if (rgb) root.style.setProperty("--heat", rgb);
+    }
+
+    const logo = $("#brand-logo");
+    if (logo && cfg.logoUrl) {
+      logo.src = cfg.logoUrl;
+      logo.alt = cfg.brandName || state.session?.brandName || "";
+      logo.hidden = false;
+    }
+
+    if (cfg.brandName) {
+      const sb = $("#sidebar-brand");
+      if (sb) sb.textContent = `Klant: ${cfg.brandName}`;
+    }
+  }
+
+  async function fetchBrandConfig() {
+    const s = state.session;
+    if (!s || !s.token || !s.clientId) return null;
+    try {
+      const qs = new URLSearchParams({ action: "config", clientId: s.clientId, token: s.token });
+      const res = await fetch(`/api/sheets?${qs.toString()}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (Array.isArray(data?.warnings) && data.warnings.length) {
+        console.warn("[config]", data.warnings.join(" · "));
+      }
+      const cfg = data?.config || null;
+      if (!cfg) return null;
+      // In de sessie bewaren zodat een reload meteen in de merkkleur opent.
+      state.session.brand = cfg;
+      saveSession(state.session);
+      applyBrandConfig(cfg);
+      return cfg;
+    } catch {
+      return null;
+    }
   }
 
   /* ---------- API helpers ---------- */
@@ -257,6 +329,10 @@
       updateSidebarContext();
       const ctxLabel = $("#chat-context-label");
       if (ctxLabel) ctxLabel.textContent = `Online · context: ${data.brandName}`;
+
+      // Merkconfig vóór de eerste dashboardpaint, zodat het scherm niet eerst in de
+      // standaardkleur opent. Faalt nooit hard — dan blijven de defaults staan.
+      await fetchBrandConfig();
 
       // Skip source-screen if either automatic source is available for this client.
       if (data.hasMetricool || data.hasDrive) {
@@ -3046,6 +3122,8 @@
       $("#sidebar-brand").textContent = `Klant: ${existing.brandName}`;
       $("#sidebar-brand-sub").textContent = existing.hasMetricool ? "Connected · Metricool live" : "Connected";
       updateSidebarContext();
+      applyBrandConfig(existing.brand);   // uit de sessie: geen flits van de standaardkleur
+      fetchBrandConfig();                 // en meteen verversen voor wijzigingen in de sheet
       if (existing.hasMetricool || existing.hasDrive) {
         showScreen("app-screen");
       } else {

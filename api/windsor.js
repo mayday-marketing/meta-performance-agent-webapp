@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { getClientConfig } = require('./_config');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -61,7 +62,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, clientId, token, connector, fields, startDate, endDate, datePreset, filter, accounts } = req.body || {};
+  const { action, clientId, token, connector, fields, startDate, endDate, datePreset, filter } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -81,6 +82,20 @@ module.exports = async (req, res) => {
 
   const apiKey = client.windsor_api_key;
 
+  // Account-ids komen uit de Config-tab van de klantsheet (zie _config.js). De env var
+  // CLIENTS.windsor_accounts blijft werken als fallback per connector, zodat klanten
+  // één voor één gemigreerd kunnen worden. Beide zijn server-side; het request levert
+  // nooit een account-id aan.
+  let sheetAccounts = {};
+  try {
+    const { config } = await getClientConfig(clientId);
+    sheetAccounts = config.accounts || {};
+  } catch (e) {
+    console.error('[windsor] config-tab lezen mislukt:', e.message);
+  }
+  const scopedAccounts = { ...(client.windsor_accounts || {}), ...sheetAccounts };
+  const hasScopeConfig = Object.keys(scopedAccounts).length > 0;
+
   // Account-scoping: bij een gedeeld Windsor-account (bv. mayday.marketing met meerdere klanten)
   // beperkt `windsor_accounts` per connector tot één account-id, zodat er enkel data van déze
   // klant doorkomt. Niet ingesteld → alle accounts (backward-compatible met per-klant-sleutels).
@@ -93,8 +108,8 @@ module.exports = async (req, res) => {
   // Normaliseer voor vergelijking: string, act_-prefix weg, lowercase.
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').toLowerCase();
   async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
-    const sharedMode = !!client.windsor_accounts; // gedeeld Windsor-account (meerdere klanten)
-    const wantRaw = client.windsor_accounts && client.windsor_accounts[connector];
+    const sharedMode = hasScopeConfig; // gedeeld Windsor-account (meerdere klanten)
+    const wantRaw = scopedAccounts[connector];
     const scopable = ACCOUNT_ID_CONNECTORS.has(connector);
     // Gedeeld account + scopebare connector zonder configuratie → NIET ophalen. Anders zou een
     // niet-geconfigureerde connector alle klanten teruggeven (data-lek). Lege dataset.
@@ -124,12 +139,15 @@ module.exports = async (req, res) => {
       // Voor schema-ontdekking gebruik Windsor's MCP-tools (get_connectors, get_fields) — niet via REST.
       case 'getData': {
         if (!connector || !fields) return res.status(400).json({ error: 'connector en fields vereist.' });
-        const params = { fields };
+        const params = {};
         if (startDate) params.date_from = startDate;
         if (endDate) params.date_to = endDate;
         if (datePreset) params.date_preset = datePreset;
-        if (accounts) params.accounts = Array.isArray(accounts) ? accounts.join(',') : accounts;
-        const data = await windsor(connector, apiKey, params);
+        // Via windsorScoped, niet via windsor(): anders zou deze actie bij een gedeelde
+        // Windsor-sleutel álle klantaccounts teruggeven. Een `accounts` uit het request
+        // wordt bewust genegeerd — scoping komt alleen server-side uit de config.
+        const data = await windsorScoped(connector, fields, params, 25000, 'getData');
+        if (data && data.__error) return res.status(502).json({ error: data.__error });
         return res.status(200).json(data);
       }
 
