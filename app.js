@@ -138,7 +138,7 @@
   // geen eigen accent heeft (uitloggen → inloggen in hetzelfde tabblad).
   function resetBrandConfig() {
     const root = document.documentElement;
-    ["--accent", "--accent-text", "--heat"]
+    ["--accent", "--accent-text", "--support", "--heat"]
       .forEach(prop => root.style.removeProperty(prop));
     const logo = $("#brand-logo");
     if (logo) { logo.hidden = true; logo.removeAttribute("src"); }
@@ -155,6 +155,9 @@
       const rgb = hexToRgbTriplet(cfg.accent);
       if (rgb) root.style.setProperty("--heat", rgb);
     }
+    // Steunkleur is een vulkleur, geen tekstkleur: de CSS gebruikt hem alleen als
+    // achtergrond, altijd met --fg erop.
+    if (cfg.support) root.style.setProperty("--support", cfg.support);
 
     const logo = $("#brand-logo");
     if (logo && cfg.logoUrl) {

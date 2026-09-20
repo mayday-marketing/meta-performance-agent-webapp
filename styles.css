@@ -15,7 +15,14 @@
    ========================================================== */
 
 /* ===== MERKBLOK — alleen deze regel verschilt per merk ===== */
-:root { --accent: #400745; --accent-text: var(--accent); }
+:root {
+  --accent: #400745;
+  --accent-text: var(--accent);
+  /* Steunkleur: tweede merkkleur voor highlight-vlakken. ALLEEN als achtergrond,
+     altijd met --fg erop. Nooit als tekst, nooit als reekskleur, nooit als status —
+     precies de beperking die §9 van de briefing aan mayday's FIRE oplegt. */
+  --support: #f0e6ee;
+}
 
 /* ===== SYSTEEM — niet aanpassen ===== */
 :root {

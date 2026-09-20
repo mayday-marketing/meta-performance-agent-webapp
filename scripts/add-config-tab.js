@@ -57,18 +57,32 @@ const ACCOUNTS = process.argv.includes('--accounts');
 // --set "Veld=Waarde"  (herhaalbaar) → vult kolom B van de Config-tab.
 // Matcht op de veldnaam in kolom A, hoofdletter- en spatie-ongevoelig. Schrijft
 // alleen met --apply; zonder --apply zie je wat er zou veranderen.
+// --add "Veld=Waarde" (herhaalbaar) → voegt een NIEUWE rij toe aan de Config-tab.
+// Bestaat het veld al, dan gedraagt hij zich als --set.
+const ADDS = [];
 const SETS = [];
 process.argv.forEach((a, i) => {
+  if (a === '--add' && process.argv[i + 1]) {
+    const raw = process.argv[i + 1];
+    const eq = raw.indexOf('=');
+    if (eq > 0) ADDS.push({ field: raw.slice(0, eq).trim(), value: raw.slice(eq + 1).trim() });
+  }
   if (a === '--set' && process.argv[i + 1]) {
     const raw = process.argv[i + 1];
     const eq = raw.indexOf('=');
     if (eq > 0) SETS.push({ field: raw.slice(0, eq).trim(), value: raw.slice(eq + 1).trim() });
   }
 });
+// --range <sheetId> "<Tab!A1:Z5>" → toont een willekeurig bereik, om de vorm van
+// een databron te inspecteren.
+const rangeIdx = process.argv.indexOf('--range');
+const RANGE = rangeIdx !== -1
+  ? { sheet: (process.argv[rangeIdx + 1] || '').replace(/.*\/d\/([A-Za-z0-9_-]+).*/, '$1'), a1: process.argv[rangeIdx + 2] || 'A1:Z5' }
+  : null;
 const idIdx = process.argv.indexOf('--identify');
 const IDENTIFY = idIdx !== -1
   ? process.argv.slice(idIdx + 1).filter(a => !a.startsWith('--')).map(a => {
-      const m = /\/spreadsheets\/d\/([A-Za-z0-9_-]+)/.exec(a);
+      const m = /\/(?:spreadsheets\/d|drive\/folders|file\/d)\/([A-Za-z0-9_-]+)/.exec(a);
       return m ? m[1] : a;
     })
   : null;
@@ -495,7 +509,7 @@ async function ensureConfigTab(sheetId, token) {
   console.log(`Service-account: ${email}`);
   console.log(APPLY ? 'Modus: UITVOEREN\n' : 'Modus: DROOGLOOP (voeg --apply toe om echt te schrijven)\n');
 
-  if (SETS.length) {
+  if (SETS.length || ADDS.length) {
     const { normKey, parseConfigRows } = require('../api/_config.js');
     const target = SHEET_OVERRIDE || (ONLY && clients[ONLY] && clients[ONLY].sheetId);
     if (!target) { console.error('--set vereist --sheet <id>, of een klant met sheetId via --only.'); process.exit(1); }
@@ -506,6 +520,23 @@ async function ensureConfigTab(sheetId, token) {
     rows.forEach((r, i) => { const k = normKey(r[0] || ''); if (k) rowOf[k] = i + 1; });
 
     const updates = [];
+    // Nieuwe velden onderaan aanvullen. We schrijven ze op de eerste vrije rij,
+    // zodat de bestaande indeling en opmaak intact blijven.
+    let nextRow = rows.length + 1;
+    for (const ad of ADDS) {
+      const bestaand = rowOf[normKey(ad.field)];
+      if (bestaand) {
+        const oud = (rows[bestaand - 1] && rows[bestaand - 1][1]) || '';
+        console.log(`  rij ${String(bestaand).padStart(2)}  ${ad.field.padEnd(22)} ${oud || '(leeg)'}  →  ${ad.value}   (bestond al)`);
+        updates.push({ range: `Config!B${bestaand}`, values: [[ad.value]] });
+        continue;
+      }
+      console.log(`  rij ${String(nextRow).padStart(2)}  ${ad.field.padEnd(22)} (nieuw)  →  ${ad.value}`);
+      updates.push({ range: `Config!A${nextRow}:B${nextRow}`, values: [[ad.field, ad.value]] });
+      rowOf[normKey(ad.field)] = nextRow;
+      nextRow++;
+    }
+
     for (const st of SETS) {
       const row = rowOf[normKey(st.field)];
       if (!row) { console.log(`  ! veld '${st.field}' staat niet in de Config-tab — overgeslagen`); continue; }
@@ -541,6 +572,15 @@ async function ensureConfigTab(sheetId, token) {
       if (!keys.length) { console.log('    geen windsor_accounts in CLIENTS'); continue; }
       for (const k of keys) console.log(`    ${k.padEnd(18)} ${wa[k]}`);
     }
+    console.log('');
+    return;
+  }
+
+  if (RANGE) {
+    const r = await api(`https://sheets.googleapis.com/v4/spreadsheets/${RANGE.sheet}/values/${encodeURIComponent(RANGE.a1)}`, token);
+    const rows = r.values || [];
+    console.log(`\n${RANGE.a1} — ${rows.length} rij(en)`);
+    rows.forEach((row, i) => console.log(String(i + 1).padStart(3) + '  ' + row.map(c => String(c).slice(0, 22)).join(' | ')));
     console.log('');
     return;
   }

@@ -184,6 +184,10 @@ const CONFIG_FIELDS = {
   merknaam:          { path: 'brandName',                  check: v => v.slice(0, 60) },
   accentkleur:       { path: 'accent',                     check: okHex },
   accenttekstkleur:  { path: 'accentText',                 check: okHex },
+  // Steunkleur: tweede merkkleur, uitsluitend als vlakvulling met donkere tekst.
+  // Nooit als tekstkleur en nooit als statuskleur — zie §9 van de briefing.
+  steunkleur:        { path: 'support',                    check: okHex },
+  tweedekleur:       { path: 'support',                    check: okHex },
   logourl:           { path: 'logoUrl',                    check: v => okHttpsUrl(v, LOGO_HOSTS) },
   instagramaccount:  { path: 'accounts.instagram',         check: okAccount },
   facebookaccount:   { path: 'accounts.facebook_organic',  check: okAccount },
@@ -293,7 +297,7 @@ function roasTargets(roas) {
 }
 
 function emptyConfig() {
-  return { brandName: null, accent: null, accentText: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null, website: {}, seo: {} };
+  return { brandName: null, accent: null, accentText: null, support: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null, website: {}, seo: {} };
 }
 
 function setPath(obj, path, value) {
