@@ -216,7 +216,7 @@
       parts.push(`<text x="${(bijRand ? edge : mid).toFixed(1)}" y="${(H - 20).toFixed(1)}" text-anchor="${bijRand ? "end" : "middle"}" font-size="10.5" fill="${softColor()}">loopt nog</text>`);
     }
 
-    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}"" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" style="display:block;">${parts.join("")}</svg>`;
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" style="display:block;">${parts.join("")}</svg>`;
     return series; // so caller can build a matching legend
   }
 

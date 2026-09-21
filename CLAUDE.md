@@ -326,6 +326,64 @@ Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
   voor VS/EN. De UI waarschuwt vóór de call bij die combinatie in plaats van een
   leeg resultaat te tonen.
 
+## Rapport-tab (presentatie samenstellen)
+
+Kiest per pagina welke blokken in een presentatie komen en levert die als slides
+in de browser (printen = PDF) of als `.pptx` (`#page-report`, nav
+`data-page="report"`, `report.js` + `api/report.js`).
+
+- **Een slide wordt gebouwd door de render-functie van de tab zelf.** Dat is de
+  kern: één cijfer, één herkomst, dus een deck kan niet iets anders beweren dan
+  het dashboard. `window.__reportBridge` (onderaan `app.js`) geeft `state`, de
+  renderers en `borrow()` door. Die renderers lezen uit `state`, niet uit hun
+  argumenten, dus `borrow()` zet state **synchroon** om en in een `finally`
+  terug — er mag niets tussen zitten dat await't.
+- **De Overview-blokken zijn de uitzondering.** `renderKpis()` en
+  `renderTrendChart()` schrijven rechtstreeks in `#kpi-grid` / `#trend-chart` en
+  geven niets terug; die vier zijn in `report.js` opnieuw opgebouwd uit
+  `state.overview`.
+- **Eén periode: die van de topbar.** De knoppen op de tab zetten de
+  datumvelden in de topbar, zodat alle tabs meebewegen en er geen tweede
+  waarheid ontstaat. **ROAS is de uitzondering** — die tab heeft een eigen
+  maandperiode, dus het rapport haalt `getRoas` apart op voor de
+  rapportperiode en geeft het resultaat via `borrow()` aan de renderers.
+- **Mislukte lading = pagina overslaan, niet leeg renderen.** De renderers geven
+  óók zonder data nog HTML terug: een break-even-paneel vol streepjes, een
+  KPI-rij met nullen. Op het dashboard klopt dat (je ziet dat de tab niets
+  heeft), in een rapport dat een klant los doorneemt is het een slide die meet
+  wat nooit gemeten is. `buildSlides()` slaat de blokken van een gefaalde
+  pagina daarom volledig over en zet er één 'geen data'-slide voor in de plaats.
+- **Slides worden geknipt op de panelen die al in het blok zitten**; een tabel
+  boven `MAX_ROWS` (11) verdeelt zich over meerdere slides met `(1/3)` in de
+  titel. Afkappen zou rijen weglaten zonder het te zeggen.
+- **Eén extractor voedt twee afnemers.** `extract()` leest KPI's, tabellen,
+  grafieken en losse tekst uit de gerenderde HTML; daar gaan zowel de pptx als
+  de duiding op. Een met de hand geschreven datamodel per blok zou bij elke
+  dashboardwijziging stilletjes verouderen.
+- **De dashboardbreekpunten hangen aan de vénsterbreedte, een slide niet.** Een
+  slide is altijd 1280×720, dus zonder de `.rp-body`-overschrijvingen in
+  `styles.css` zou de indeling van de PDF afhangen van hoe breed het venster
+  toevallig stond. Voeg voor elke nieuwe responsieve grid-regel ook daar een
+  regel toe.
+- **pptx wordt in de browser gebouwd** (pptxgenjs via jsDelivr, lui geladen).
+  Server-side zou een dependency én een headless renderer voor de SVG's vragen —
+  een functie heeft geen DOM. KPI's en tabellen worden echte PowerPoint-objecten
+  (bewerkbaar), grafieken een PNG op 2× (pixelgelijk aan het dashboard). De
+  merkletter kan niet mee in een pptx: koppen vallen terug op Georgia, cijfers
+  op Arial.
+- **Een losse SVG is strenger dan de pagina.** `charts.js` had een dwaal-quote
+  achter `viewBox` — de HTML-parser slikt dat, een `<img>` met een
+  data-URL-SVG niet, en daardoor viel élke grafiek stil uit de pptx.
+  `svgToPng()` gooit nu ook attributen met een ongeldige XML-naam weg en
+  waarschuwt in de console als een grafiek niet omgezet kan worden.
+- **Duiding is één call voor de hele deck** (`api/report.js`,
+  `agents/Report_Agent.md`): goedkoper dan één per blok, en de samenvatting kan
+  niet iets anders beweren dan de losse duidingen. Gedeeltelijke output is
+  geldig — een deck met duiding bij tien van de twaalf blokken is bruikbaar,
+  een harde fout niet. Mislukt de call, dan blijven de cijfers gewoon staan.
+- **De keuze staat in `localStorage` per klant**, niet in de sheet: het is een
+  voorkeur van deze browser, en een rapport maak je elke maand opnieuw.
+
 ## Rapportstijl — één accent, alles afgeleid
 
 De interface volgt één rapportstijl: warm papier tegenover
@@ -442,7 +500,7 @@ voor alle klanten; per klant te overschrijven met `dataforseo_login` /
 `dataforseo_password` in `CLIENTS`. Zonder deze twee blijven de SEO-tab en de
 Sources-sub-tab van GEO leeg met een uitleg; de rest van het dashboard — inclusief
 de GEO-baseline, die uit Drive komt — merkt er niets van). Optional prompt
-overrides: `AGENT_SYSTEM_PROMPT`, `ANALYSIS_SYSTEM_PROMPT`.
+overrides: `AGENT_SYSTEM_PROMPT`, `ANALYSIS_SYSTEM_PROMPT`, `REPORT_SYSTEM_PROMPT`.
 
 ## Deploy
 

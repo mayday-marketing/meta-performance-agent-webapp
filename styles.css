@@ -2188,3 +2188,157 @@ th.c, td.c { text-align: center; }
 .geo-action h3 { margin: 0 0 6px; font-size: 15px; }
 .geo-action p { font-size: 13px; color: var(--fg-muted); margin: 0 0 6px; line-height: 1.6; }
 .geo-action .done { font-size: 12px; color: var(--positive); font-weight: 500; }
+
+
+/* ==========================================================
+   RAPPORT
+   Twee standen op één pagina: de configurator (wat komt er in
+   het rapport) en de deck (de slides zelf). De slides hebben
+   een vaste maat van 1280x720 zodat de verhouding op elk
+   scherm dezelfde is; passend maken gebeurt met een transform,
+   en bij printen staat die schaal op 1.
+   Breekpunten volgen de ladder 1180 / 900 / 760 / 520.
+   ========================================================== */
+
+.rp-bar { padding: 14px 18px; margin-bottom: 16px; }
+.rp-presets { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.rp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--grid-gap, 16px); }
+@media (max-width: 1180px) { .rp-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px)  { .rp-grid { grid-template-columns: 1fr; } }
+
+.rp-card { padding: 18px; }
+.rp-card.on { border-color: color-mix(in oklch, var(--accent) 34%, var(--border)); }
+.rp-card-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
+}
+.rp-page { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.rp-page strong { display: block; font-size: 14px; font-weight: 600; color: var(--fg); }
+.rp-page em { display: block; font-style: normal; font-size: 11px; color: var(--fg-muted); margin-top: 2px; line-height: 1.45; }
+.rp-count {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; color: var(--fg-muted);
+  white-space: nowrap; padding-top: 2px;
+}
+.rp-blocks { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+.rp-block {
+  display: flex; align-items: center; gap: 9px; cursor: pointer;
+  font-size: 13px; color: var(--fg); padding: 5px 6px; border-radius: 7px;
+}
+.rp-block:hover { background: var(--surface-mute); }
+.rp-card input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 1px 0 0; flex: none; }
+
+.rp-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin-top: var(--grid-gap, 16px); padding: 18px;
+}
+.rp-toggle { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; max-width: 560px; }
+.rp-toggle input { accent-color: var(--accent); width: 16px; height: 16px; margin: 2px 0 0; flex: none; }
+.rp-toggle strong { display: block; font-size: 14px; font-weight: 600; }
+.rp-toggle em { display: block; font-style: normal; font-size: 12px; color: var(--fg-muted); margin-top: 3px; line-height: 1.5; }
+.rp-go { display: flex; align-items: center; gap: 14px; }
+
+.rp-steps { margin-top: var(--grid-gap, 16px); padding: 16px 18px; }
+.rp-step { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: baseline; padding: 5px 0; font-size: 13px; }
+.rp-step .mark { color: var(--fg-muted); }
+.rp-step.ok .mark { color: var(--positive); }
+.rp-step.fail .mark { color: var(--negative); }
+.rp-step .note { font-size: 11px; color: var(--fg-muted); }
+
+/* ---------- De slides ---------- */
+
+.rp-deck { --rp-scale: 1; --rp-h: 720px; display: flex; flex-direction: column; gap: 22px; }
+.rp-slide-wrap { height: var(--rp-h); }
+.rp-slide {
+  width: 1280px; height: 720px; transform: scale(var(--rp-scale)); transform-origin: top left;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  /* De onderrand houdt de voettekst vrij: die staat absoluut op 20px, dus de
+     inhoud moet daarboven stoppen. Zonder deze ruimte schuift een duiding van
+     drie regels dwars door het paginanummer heen. */
+  padding: 48px 56px 58px; box-sizing: border-box; position: relative; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.rp-slide.cover, .rp-slide.divider { justify-content: center; }
+.rp-slide.divider { background: var(--surface-mute); }
+
+.rp-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--accent-data, var(--accent));
+}
+.rp-head { padding-bottom: 14px; border-bottom: 1px solid var(--border); flex: none; }
+.rp-head h2 { font-family: var(--font-display); font-weight: 400; font-size: 32px; margin: 6px 0 0; color: var(--fg); }
+.rp-head .rp-sub { font-size: 14px; color: var(--fg-muted); margin-top: 6px; }
+.rp-title-body h1, .rp-divider-body h1 {
+  font-family: var(--font-display); font-weight: 400; font-size: 54px; margin: 12px 0 0; color: var(--fg);
+}
+.rp-divider-body h1 { font-size: 44px; }
+.rp-period { font-size: 18px; color: var(--fg-muted); margin-top: 10px; }
+.rp-made { font-size: 12px; color: var(--fg-muted); margin-top: 30px; }
+
+.rp-body { flex: 1; min-height: 0; overflow: hidden; padding-top: 20px; }
+.rp-summary p { font-family: var(--font-display); font-size: 19px; line-height: 1.55; color: var(--fg); margin: 0 0 14px; }
+.rp-sources dl { margin: 0; display: grid; grid-template-columns: 200px 1fr; gap: 8px 22px; }
+.rp-sources dt { font-size: 13px; font-weight: 600; color: var(--fg); }
+.rp-sources dd { font-size: 13px; line-height: 1.55; color: var(--fg-muted); margin: 0; }
+
+/* De duiding onder de cijfers, nooit ervoor: eerst wat er gemeten is. */
+.rp-note {
+  flex: none; border-top: 1px solid var(--border); padding: 14px 0 0; margin-top: 12px;
+}
+.rp-note p { font-size: 14px; line-height: 1.5; color: var(--fg); margin: 0; }
+.rp-note ul { margin: 8px 0 0; padding-left: 18px; }
+.rp-note li { font-size: 12.5px; line-height: 1.5; color: var(--fg-muted); }
+
+.rp-foot {
+  position: absolute; left: 56px; right: 56px; bottom: 20px;
+  display: flex; justify-content: space-between; font-size: 11px; color: var(--fg-muted);
+}
+
+/* Een paneel zit al in een slide: geen dubbele kaders, geen dubbele marges. En
+   geen dubbele kop — de slide draagt de titel al in zijn eigen header. */
+.rp-body .panel { border: none; background: none; padding: 0; margin: 0 0 16px; box-shadow: none; }
+.rp-body .panel:last-child { margin-bottom: 0; }
+.rp-body .panel-header { display: none; }
+.rp-body .lib-table table { min-width: 0; }
+.rp-body .kpi-grid { margin: 0 0 16px; }
+
+/* Een slide is altijd 1280px breed, ook als het browservenster smal staat. De
+   responsieve regels van het dashboard hangen aan de vénsterbreedte, niet aan
+   het vlak waarin ze staan, en zouden de indeling van een slide dus laten
+   meebewegen met het venster — dan hangt de PDF af van hoe breed iemand zijn
+   scherm toevallig had. Deze regels zetten de desktopindeling terug; ze winnen
+   op specificiteit, ongeacht de volgorde. */
+.rp-body .kpi-grid      { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.rp-body .row-2         { grid-template-columns: 2fr 1fr; }
+.rp-body .row-3         { grid-template-columns: 1fr 1fr 1fr; }
+.rp-body .insight-grid  { grid-template-columns: 1fr 1fr 1fr; }
+.rp-body .web-mini-grid { grid-template-columns: repeat(3, 1fr); }
+.rp-body .geo-grid2     { grid-template-columns: 1fr 1fr; }
+.rp-body .geo-phases    { grid-template-columns: repeat(6, 1fr); }
+.rp-body .geo-actions   { grid-template-columns: 1fr 1fr; }
+.rp-body .method-grid   { grid-template-columns: 1fr 1fr; }
+.rp-body .table-wrap, .rp-body .tablewrap { overflow-x: visible; }
+
+@media (max-width: 900px) {
+  .rp-actions { flex-direction: column; align-items: stretch; }
+  .rp-go { justify-content: space-between; }
+}
+
+/* ---------- Printen = PDF ----------
+   Eén slide per pagina, op ware grootte. Alles buiten de deck valt weg, ook de
+   werkbalk: die hoort bij het samenstellen, niet bij het rapport. */
+@page { size: 1280px 720px; margin: 0; }
+
+@media print {
+  .sidebar, .topbar, .chat-panel, .chat-toggle-btn, .tweaks-panel,
+  .nav-backdrop, .rp-deckbar { display: none !important; }
+  html, body { background: #fff; }
+  .page-shell, .app-main, .page-content { display: block; padding: 0; margin: 0; max-width: none; }
+  .rp-deck { --rp-scale: 1; --rp-h: 720px; display: block; }
+  .rp-slide-wrap { height: auto; break-after: page; page-break-after: always; }
+  .rp-slide-wrap:last-child { break-after: auto; page-break-after: auto; }
+  .rp-slide {
+    transform: none; border: none; border-radius: 0;
+    width: 1280px; height: 720px; box-shadow: none;
+  }
+}

@@ -11,6 +11,9 @@
     "api/analysis.js": {
       "maxDuration": 300
     },
+    "api/report.js": {
+      "maxDuration": 300
+    },
     "api/sheets.js": {
       "maxDuration": 15
     },
