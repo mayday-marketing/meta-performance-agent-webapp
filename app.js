@@ -3625,18 +3625,32 @@
     // kosten tonen, met een titel die klopt. Een nullijn zou 0,00× suggereren.
     const hasRevenue = cur.totals.revenueAvailable !== false;
 
-    const spec = {
-      width: 980, height: 260,
-      x: days.map(d => { const [y, m, dd] = d.date.split("-"); return `${Number(dd)}/${Number(m)}`; }),
+    // Geen tweede as: euro's en een verhouding zijn twee eenheden. Twee grafieken
+    // onder elkaar, elk met een eigen nulas, in plaats van één met twee assen —
+    // die laatste laat je de reeksen vergelijken die niets met elkaar te maken
+    // hebben.
+    const xDagen = days.map(d => { const [y, m, dd] = d.date.split("-"); return `${Number(dd)}/${Number(m)}`; });
+    const specGeld = {
+      width: 980, height: hasRevenue ? 210 : 260,
+      x: xDagen,
       series: [
         ...(hasRevenue ? [{ label: "Omzet", values: days.map(d => d.revenue), kind: "area", axis: "left", color: Charts.seriesColor(0) }] : []),
         { label: "Advertentiekosten", values: days.map(d => d.spend), kind: hasRevenue ? "bar" : "area", axis: "left", color: Charts.seriesColor(1) },
-        ...(hasRevenue ? [{ label: "Blended ROAS", values: days.map(d => (d.spend > 0 ? d.revenue / d.spend : 0)), kind: "line", axis: "right", color: Charts.seriesColor(2) }] : []),
       ],
       leftFormat: Charts.fmt.euroK,
-      rightFormat: (v) => v.toFixed(1).replace(".", ",") + "×",
       maxXLabels: 10,
     };
+    const specRatio = hasRevenue ? {
+      width: 980, height: 132,
+      x: xDagen,
+      series: [{
+        label: "Blended ROAS",
+        values: days.map(d => (d.spend > 0 ? d.revenue / d.spend : 0)),
+        kind: "line", axis: "left", color: Charts.seriesColor(2),
+      }],
+      leftFormat: (v) => v.toFixed(1).replace(".", ",") + "×",
+      maxXLabels: 10,
+    } : null;
     return `<section class="panel" style="margin-bottom:16px;">
       <div class="panel-header">
         <div>
@@ -3646,7 +3660,9 @@
             : "Koppel een GA4-property in de Config-tab om hier de omzet en de blended ROAS bij te zien"}</div>
         </div>
       </div>
-      ${chartSvg(spec)}
+      ${chartSvg(specGeld)}
+      ${specRatio ? `<div class="panel-sub" style="margin:14px 0 2px;">Blended ROAS per dag${min.value ? ` · drempel ${roasFmt.ratio(min.value)}` : ""}</div>
+      ${chartSvg(specRatio)}` : ""}
     </section>`;
   }
 
@@ -4235,23 +4251,31 @@
     const convValues = days.map(d => (goal.on ? (d.goal || 0) : (d.conversions || 0)));
     const hasConv = convValues.some(v => v > 0);
 
-    const spec = {
-      width: 980, height: 260,
-      x: days.map(d => { const [, m, dd] = d.date.split("-"); return `${Number(dd)}/${Number(m)}`; }),
-      series: [
-        { label: "Sessies", values: days.map(d => d.sessions), kind: "area", axis: "left", color: Charts.seriesColor(0) },
-        ...(hasConv ? [{ label: goal.label, values: convValues, kind: "line", axis: "right", color: Charts.seriesColor(2) }] : []),
-      ],
+    // Sessies en conversies schelen een orde van grootte; op één as met twee
+    // schalen lijkt elke beweging even groot. Dus twee grafieken.
+    const xDagen = days.map(d => { const [, m, dd] = d.date.split("-"); return `${Number(dd)}/${Number(m)}`; });
+    const specSessies = {
+      width: 980, height: hasConv ? 210 : 260,
+      x: xDagen,
+      series: [{ label: "Sessies", values: days.map(d => d.sessions), kind: "area", axis: "left", color: Charts.seriesColor(0) }],
       leftFormat: Charts.fmt.k,
-      rightFormat: Charts.fmt.int,
       maxXLabels: 10,
     };
+    const specDoel = hasConv ? {
+      width: 980, height: 132,
+      x: xDagen,
+      series: [{ label: goal.label, values: convValues, kind: "line", axis: "left", color: Charts.seriesColor(2) }],
+      leftFormat: Charts.fmt.int,
+      maxXLabels: 10,
+    } : null;
     return `<section class="panel" style="margin-bottom:16px;">
       <div class="panel-header"><div>
         <h2 class="panel-title">Verkeer per dag</h2>
         <div class="panel-sub">Sessies${hasConv ? ` en ${escapeHtml(goal.label.toLowerCase())}` : ""} over de gekozen periode</div>
       </div></div>
-      ${chartSvg(spec)}
+      ${chartSvg(specSessies)}
+      ${specDoel ? `<div class="panel-sub" style="margin:14px 0 2px;">${escapeHtml(goal.label)} per dag</div>
+      ${chartSvg(specDoel)}` : ""}
     </section>`;
   }
 

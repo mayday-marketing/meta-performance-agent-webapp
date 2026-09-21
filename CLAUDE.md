@@ -326,6 +326,66 @@ Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
   voor VS/EN. De UI waarschuwt vóór de call bij die combinatie in plaats van een
   leeg resultaat te tonen.
 
+## Rapportstijl — één accent, alles afgeleid
+
+De interface volgt het model van de Spotto-rapportstijl: warm papier tegenover
+één getinte grafiekbak, schreef voor wat je leest en schreefloos voor wat je
+afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
+**één hexcode** uit de Config-tab.
+
+- **Acht afgeleide tokens** staan in `styles.css` (`--accent-data`, `--s2`,
+  `--panel`, `--panel-grid`, `--panel-axis`, `--strip`, `--on-accent`,
+  `--marker`), met een `color-mix`-terugval. `deriveBrandTokens()` in `app.js`
+  overschrijft ze per klant en per thema.
+- **De enige regel die echt werk doet:** de datakleur wordt naar inkt gemengd
+  tot haar lichtheid ≤ 0,22 is (in dark mode juist opgelicht tot ≥ 0,34). Een
+  licht merkaccent — geel, lime — verdwijnt anders als reekskleur, en een donker
+  accent is op `#121212` net zo onleesbaar. Het ruwe accent blijft voor vlakken
+  en decoratie; de afgetopte variant draagt de data. `--on-accent` klapt naar
+  inkt zodra het accent te licht is voor witte tekst.
+- **Reeks 1 en 2 komen uit het merk, reeks 3+ uit het vaste palet.** Een
+  accentramp draagt niet meer dan twee reeksen; `--chart-3…6` en `--slice-1…7`
+  blijven merkonafhankelijk, net als de statuskleuren.
+- `applyDerivedTokens()` hangt in `applyBrandConfig()` **en** in `setTheme()` —
+  de formules hebben in dark mode een ander eindpunt. Daarna `repaintCharts()`,
+  want grafieken bakken hun kleuren in de SVG.
+- **Navigatie in drie standen** via `data-nav` op `<html>`: leeg/`expanded`
+  (240px), `collapsed` (rail van 68px), en `open`/`closed` (uitschuiflade onder
+  900px). `bindNav()` zet alleen het attribuut; de CSS doet de layout. De keuze
+  van de gebruiker staat in `localStorage` (`mayday.nav`) en overschrijft de
+  schermregel.
+- **De responsieve ladder** (1180 · 900 · 760 · 520) staat als commentaarblok in
+  `styles.css`. Laat een nieuw blok op dezelfde grenzen knikken; de app had eerst
+  acht losse breekpunten en dan klapt de zijbalk in terwijl een tabel nog op
+  volle breedte staat.
+- **Sub-tabs** zijn `.subtabs` (en `.geo-tabs`, dezelfde regels): browserstijl,
+  het actieve blad in de paginakleur dat de lijn van de strip onderbreekt. Ze
+  horen bij één sectie, nooit bij de app als geheel — daarvoor is de zijbalk.
+- **mayday-signatuur** onderaan de zijbalk: `assets/mayday-lockup.svg` is één
+  bestand met wordmark, beacon en tagline als vectoren, dus er hoeft geen font
+  geladen te worden. Twee varianten omdat een `<img>` geen `currentColor` erft;
+  in de rail komt `mayday-icon.svg` in de plaats. De beacon is Candy `#ed8afa`.
+
+### Grafiekregels die de renderer kent
+
+- **`incompleteFrom`** (index) arceert de staven vanaf die index, maakt het
+  lijnstuk gestreept en zet er 'loopt nog' onder. **De aanroeper moet die index
+  aanleveren** — de renderer weet niet welke dag onvolledig is, en een gok zou
+  een onwaarheid tekenen. Nog geen enkele tab geeft hem door: dat vraagt per
+  bron de laatste dag met data (`_sheetdata.js` heeft die informatie wel).
+- **`labelLast`** zet een label op de laatste volledige waarde, in de grafiek
+  zelf en niet alleen in de tooltip.
+- **Geen tweede as.** De ROAS-dagreeks en de Website-dagreeks zijn gesplitst in
+  twee grafieken onder elkaar, elk met een eigen nulas. `axis: "right"` bestaat
+  nog voor precies één geval: de overlay-grafiek op de Overview-pagina, waar de
+  gebruiker zelf maatstaven aan- en uitzet. Daar *is* de vergelijking het doel;
+  in een rapportgrafiek met vaste reeksen niet.
+- **De donut blijft.** 'Geen taart' uit de Spotto-stijl botst met de
+  kanaaldonut in de Website-tab, en die blijft staan: het palet is gevalideerd
+  op kleurenblindheid en contrast, de legenda draagt de cijfers, en de zeven
+  vaste groepen houden hun kleur. Wat een taart verbergt — de verschuiving over
+  tijd — hoort in een 100%-gestapelde staaf, niet in een andere donut.
+
 ## The two AI agents (know which prompt serves which consumer)
 
 - **Analysis** (`api/analysis.js` + `agents/Analysis_Agent.md`): single-shot,

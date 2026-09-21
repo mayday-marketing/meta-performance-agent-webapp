@@ -62,8 +62,19 @@
        ],
        leftFormat: fn(v)->string,     // default fmt.k
        rightFormat: fn(v)->string,    // default fmt.pct
-       maxXLabels: number             // default 8
+       maxXLabels: number,            // default 8
+       incompleteFrom: number,        // index vanaf waar de periode nog loopt
+       labelLast: boolean             // label op de laatste volledige waarde
      }
+
+     incompleteFrom: een maand of dag die nog loopt telt niet mee in een
+     conclusie, dus hij mag er ook niet volledig uitzien. Staven vanaf die index
+     krijgen arcering, lijnen worden gestreept, en er komt 'loopt nog' onder.
+     De aanroeper moet de index aanleveren — de renderer kan niet weten welke
+     dag onvolledig is, en een gok zou een onwaarheid tekenen.
+
+     labelLast: de laatste volledige waarde krijgt een label in de grafiek zelf,
+     niet alleen in de tooltip.
   */
   function render(el, spec) {
     if (!el) return;
@@ -99,6 +110,11 @@
     const leftFormat = spec.leftFormat || fmt.k;
     const rightFormat = spec.rightFormat || fmt.pct;
     const maxXLabels = spec.maxXLabels || 8;
+    // Alleen een geldige index binnen de reeks doet iets; alles daarbuiten wordt
+    // stil genegeerd i.p.v. half getekend.
+    const incFrom = Number.isInteger(spec.incompleteFrom) && spec.incompleteFrom > 0
+      && spec.incompleteFrom < n ? spec.incompleteFrom : null;
+    const lastFull = incFrom === null ? n - 1 : incFrom - 1;
 
     const cid = "c" + (uid++);
     const parts = [];
@@ -143,12 +159,21 @@
       if (s.kind === "bar") {
         const bi = barSeries.indexOf(s);
         const y0 = yf(0);
+        const hid = `${cid}-h${i}`;
+        if (incFrom !== null) {
+          // Arcering in dezelfde kleur: het is dezelfde reeks, alleen nog niet af.
+          parts.push(`<defs><pattern id="${hid}" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">`
+            + `<rect width="6" height="6" fill="${s.color}" fill-opacity="0.16"/>`
+            + `<line x1="0" y1="0" x2="0" y2="6" stroke="${s.color}" stroke-width="2.4" stroke-opacity="0.7"/></pattern></defs>`);
+        }
         s.values.forEach((v, k) => {
           const h = Math.max(0, y0 - yf(v));
           const cx = xAt(k);
           const bx = cx - barGroupW / 2 + bi * barW;
           const r = Math.min(4, barW / 2);
-          parts.push(`<rect x="${bx.toFixed(1)}" y="${yf(v).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="${r}" fill="${s.color}" fill-opacity="0.85"/>`);
+          const loopt = incFrom !== null && k >= incFrom;
+          const fill = loopt ? `url(#${hid})` : s.color;
+          parts.push(`<rect x="${bx.toFixed(1)}" y="${yf(v).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="${r}" fill="${fill}"${loopt ? "" : ' fill-opacity="0.85"'}/>`);
         });
       } else {
         const pts = s.values.map((v, k) => `${k === 0 ? "M" : "L"}${xAt(k).toFixed(2)},${yf(v).toFixed(2)}`).join(" ");
@@ -158,14 +183,40 @@
           parts.push(`<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${s.color}" stop-opacity="0.20"/><stop offset="100%" stop-color="${s.color}" stop-opacity="0"/></linearGradient></defs>`);
           parts.push(`<path d="${area}" fill="url(#${gid})"/>`);
         }
-        parts.push(`<path d="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`);
+        if (incFrom === null) {
+          parts.push(`<path d="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`);
+        } else {
+          // Twee paden: het volledige deel doorlopend, het lopende deel gestreept.
+          const seg = (from, to) => s.values.slice(from, to + 1)
+            .map((v, j) => `${j === 0 ? "M" : "L"}${xAt(from + j).toFixed(2)},${yf(v).toFixed(2)}`).join(" ");
+          parts.push(`<path d="${seg(0, lastFull)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`);
+          parts.push(`<path d="${seg(lastFull, n - 1)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round" stroke-linejoin="round"/>`);
+        }
         const lx = xAt(s.values.length - 1);
         const ly = yf(s.values[s.values.length - 1]);
         parts.push(`<circle cx="${lx.toFixed(2)}" cy="${ly.toFixed(2)}" r="3.5" fill="${s.color}" stroke="${surfaceColor()}" stroke-width="1.5"/>`);
       }
     });
 
-    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" style="display:block;">${parts.join("")}</svg>`;
+    // Direct label: identiteit hangt niet alleen aan de tooltip.
+    if (spec.labelLast && n) {
+      const s0 = series.find(s => s.axis !== "right") || series[0];
+      if (s0) {
+        const v = s0.values[lastFull];
+        const fmtL = s0.axis === "right" ? rightFormat : leftFormat;
+        parts.push(`<text x="${xAt(lastFull).toFixed(1)}" y="${(yFor(s0)(v) - 9).toFixed(1)}" text-anchor="middle" font-size="11.5" font-weight="600" fill="${cssVar("--fg", "#1a1a1a")}">${fmtL(v)}</text>`);
+      }
+    }
+    if (incFrom !== null) {
+      // Bij één lopend punt ligt het midden op de rechterrand; dan tegen de rand
+      // aan uitlijnen in plaats van er half buiten te vallen.
+      const mid = (xAt(incFrom) + xAt(n - 1)) / 2;
+      const edge = W - padR;
+      const bijRand = mid > edge - 32;
+      parts.push(`<text x="${(bijRand ? edge : mid).toFixed(1)}" y="${(H - 20).toFixed(1)}" text-anchor="${bijRand ? "end" : "middle"}" font-size="10.5" fill="${softColor()}">loopt nog</text>`);
+    }
+
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}"" width="100%" height="${H}" preserveAspectRatio="xMidYMid meet" style="display:block;">${parts.join("")}</svg>`;
     return series; // so caller can build a matching legend
   }
 
