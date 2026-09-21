@@ -129,6 +129,9 @@
   <div id="app-screen" class="screen" data-screen-label="Dashboard">
     <div class="page-shell">
 
+      <!-- Achtergrond voor de uitschuiflade op klein scherm -->
+      <div class="nav-backdrop" id="nav-backdrop"></div>
+
       <!-- Sidebar -->
       <aside class="sidebar">
         <!-- Klant bovenaan: logo uit de Config-tab, met de naam als terugval.
@@ -136,6 +139,8 @@
         <div class="brand">
           <img id="brand-logo" class="brand-logo" alt="" hidden>
           <span id="sidebar-brand-name">Dashboard</span>
+          <button class="nav-toggle" id="nav-toggle" type="button"
+                  aria-label="Menu inklappen" aria-expanded="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4L6 8l4 4"/></svg></button>
         </div>
         <div class="brand-pill">
           <span style="width:6px; height:6px; border-radius:50%; background:var(--positive);"></span>
@@ -194,21 +199,29 @@
         <!-- Signatuur: één SVG met wordmark, beacon en tagline als vectoren, dus
              geen font te laden. De donkere variant wisselt in dark mode. -->
         <div class="mayday-credit">
-          <img class="on-light" src="assets/mayday-lockup.svg"
-               alt="mayday — marketing agents &amp; automations" width="186" height="24">
-          <img class="on-dark" src="assets/mayday-lockup-dark.svg"
-               alt="" width="186" height="24">
+          <div class="lockup">
+            <img class="on-light" src="assets/mayday-lockup.svg"
+                 alt="mayday — marketing agents &amp; automations" width="186" height="24">
+            <img class="on-dark" src="assets/mayday-lockup-dark.svg"
+                 alt="" width="186" height="24">
+          </div>
+          <div class="mark">
+            <img class="on-light" src="assets/mayday-icon.svg" alt="mayday" width="40" height="22">
+            <img class="on-dark" src="assets/mayday-icon-dark.svg" alt="" width="40" height="22">
+          </div>
         </div>
 
         <button class="logout" onclick="logout()">
-          <span style="font-size:14px;">↪</span>
-          Afmelden
+          <span class="icon" style="font-size:14px;">↪</span>
+          <span class="label">Afmelden</span>
         </button>
       </aside>
 
       <!-- Main -->
       <main class="app-main">
         <div class="topbar">
+          <button class="nav-toggle" id="nav-open" type="button"
+                  aria-label="Menu openen" aria-expanded="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg></button>
           <div class="title-group">
             <div class="crumbs"><span>Dashboard</span><span class="sep">/</span><span>Overview</span></div>
             <h1 class="page-title">Overview</h1>

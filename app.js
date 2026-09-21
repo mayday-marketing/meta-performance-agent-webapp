@@ -5993,6 +5993,68 @@
       if (submitBtn) submitBtn.disabled = false;
     }
   }
+  /* ---------- Navigatie: rail, uitschuiflade en de keuze onthouden ----------
+     Eén attribuut op <html> bepaalt de stand; de CSS doet de layout. Zonder
+     expliciete keuze van de gebruiker volgt de zijbalk het scherm: rail onder
+     1180px, lade onder 900px. Een eigen keuze blijft staan, ook na een reload.
+     ------------------------------------------------------------------------ */
+
+  const NAV_KEY = "mayday.nav";
+  const NAV_NARROW = window.matchMedia("(max-width: 1180px)");
+  const NAV_DRAWER = window.matchMedia("(max-width: 900px)");
+
+  function navChoice() {
+    try { return localStorage.getItem(NAV_KEY); } catch { return null; }
+  }
+
+  function setNavChoice(v) {
+    try { v ? localStorage.setItem(NAV_KEY, v) : localStorage.removeItem(NAV_KEY); } catch {}
+  }
+
+  function applyNav() {
+    const root = document.documentElement;
+    // In de lade-modus zegt het attribuut alleen of de lade open staat.
+    if (NAV_DRAWER.matches) {
+      if (root.getAttribute("data-nav") !== "open") root.setAttribute("data-nav", "closed");
+      return;
+    }
+    const choice = navChoice() || (NAV_NARROW.matches ? "collapsed" : "expanded");
+    root.setAttribute("data-nav", choice);
+    const btn = $("#nav-toggle");
+    if (btn) {
+      const open = choice !== "collapsed";
+      btn.setAttribute("aria-expanded", String(open));
+      btn.setAttribute("aria-label", open ? "Menu inklappen" : "Menu uitklappen");
+    }
+  }
+
+  function setDrawer(open) {
+    document.documentElement.setAttribute("data-nav", open ? "open" : "closed");
+    const opener = $("#nav-open");
+    if (opener) opener.setAttribute("aria-expanded", String(open));
+  }
+
+  function bindNav() {
+    const root = document.documentElement;
+    const toggle = $("#nav-toggle");
+    if (toggle) toggle.addEventListener("click", () => {
+      setNavChoice(root.getAttribute("data-nav") === "collapsed" ? "expanded" : "collapsed");
+      applyNav();
+    });
+    const opener = $("#nav-open");
+    if (opener) opener.addEventListener("click", () => setDrawer(root.getAttribute("data-nav") !== "open"));
+    const backdrop = $("#nav-backdrop");
+    if (backdrop) backdrop.addEventListener("click", () => setDrawer(false));
+    // Een sectie kiezen sluit de lade: die staat anders over de inhoud die je
+    // net hebt opgevraagd.
+    $$(".nav-link").forEach(b => b.addEventListener("click", () => {
+      if (NAV_DRAWER.matches) setDrawer(false);
+    }));
+    NAV_NARROW.addEventListener("change", applyNav);
+    NAV_DRAWER.addEventListener("change", applyNav);
+    applyNav();
+  }
+
   function bindChatPanel() {
     $("#chat-toggle-btn").addEventListener("click", () => toggleChatPanel(true));
     $("#chat-close-btn").addEventListener("click", () => toggleChatPanel(false));
@@ -6054,6 +6116,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindLogin();
     bindTweaks();
+    bindNav();
     bindManualContext();
 
     const existing = loadSession();

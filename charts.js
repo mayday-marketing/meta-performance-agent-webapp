@@ -10,23 +10,30 @@
     const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return v || fallback || "";
   }
-  // Reekspalet volgens §2.4 van de design-system-briefing: reeks 1 is het
-  // merkaccent, reeks 2 de lichtere stap ervan (bedoeld voor 'vorige periode'),
-  // en daarna een vast, kleurenblind-veilig palet. Bewust maximaal zes reeksen:
-  // daarboven is een grafiek niet meer te lezen en hoort er een restpost te zijn.
-  const SERIES_TOKENS = ["--accent-100", "--accent-75", "--chart-3", "--chart-4", "--chart-5", "--chart-6"];
+  // Reekspalet: reeks 1 is de datakleur van het merk (het accent, afgetopt op
+  // lichtheid zodat een geel of lime merk niet verdwijnt), reeks 2 de lichtere
+  // stap daarvan, en daarna een vast kleurenblind-veilig palet. Bewust maximaal
+  // zes reeksen: daarboven is een grafiek niet meer te lezen en hoort er een
+  // restpost te zijn. Een accentramp draagt niet meer dan twee reeksen.
+  const SERIES_TOKENS = ["--accent-data", "--s2", "--chart-3", "--chart-4", "--chart-5", "--chart-6"];
   function seriesColor(i) {
     return cssVar(SERIES_TOKENS[i % SERIES_TOKENS.length], "#0072b2");
   }
   const softColor = () => cssVar("--fg-muted", "#6b6560");
   const surfaceColor = () => cssVar("--surface", "#ffffff");
+  // Raster en nullijn komen uit de panelfamilie: het raster licht, de as één stap
+  // donkerder. Zo blijft het onderscheid tussen 'hulplijn' en 'nul' zichtbaar.
+  const gridColor = () => cssVar("--panel-grid", "#d8dcea");
+  const axisColor = () => cssVar("--panel-axis", "#c2c7da");
 
   // Round an axis maximum up to a clean number
   function niceMax(v) {
     if (!isFinite(v) || v <= 0) return 1;
     const pow = Math.pow(10, Math.floor(Math.log10(v)));
     const n = v / pow;
-    const steps = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+    // Vaste stappenladder, zodat een as altijd op een rond getal eindigt en er
+    // nooit een tick op 6.847 staat.
+    const steps = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
     const m = steps.find(s => s >= n - 1e-9) || 10;
     return m * pow;
   }
@@ -101,7 +108,8 @@
     for (let i = 0; i <= steps; i++) {
       const v = (leftMax * i) / steps;
       const y = yL(v);
-      parts.push(`<line x1="${padL}" x2="${W - padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="currentColor" stroke-opacity="0.08"/>`);
+      // i === 0 is de nullijn: die krijgt de askleur, de rest het raster.
+      parts.push(`<line x1="${padL}" x2="${W - padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${i === 0 ? axisColor() : gridColor()}"/>`);
       parts.push(`<text x="${padL - 10}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="${softColor()}">${leftFormat(v)}</text>`);
     }
     // Right axis labels

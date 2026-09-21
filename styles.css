@@ -1448,6 +1448,148 @@ a { color: inherit; text-decoration: none; }
 .brand-logo[hidden] { display: none; }
 
 /* ==========================================================
+   Responsieve ladder — vier grenzen, en wat er op elke grens gebeurt
+   ==========================================================
+   De app had acht losse breekpunten die per onderdeel waren toegevoegd (1180,
+   900, 760, 620, 520). Daardoor kon de zijbalk inklappen terwijl een tabel nog
+   op volle breedte stond. Vanaf hier gelden deze vier voor de hele interface;
+   een nieuw blok knikt op dezelfde grenzen.
+
+     > 1180   zijbalk 240px uitgeklapt · KPI-rij vier kolommen · grafiek en
+              callout naast elkaar
+     ≤ 1180   zijbalk klapt in naar de rail van 68px (tenzij de gebruiker hem
+              expliciet open heeft gezet) · KPI-rij twee kolommen
+     ≤ 900    de rail wordt een uitschuiflade over de inhoud, met de knop in de
+              topbar · in de lade staat de volledige mayday-lockup weer
+     ≤ 760    sub-tabs horizontaal scrollbaar · callouts onder de grafiek
+     ≤ 520    tabellen scrollen horizontaal met de eerste kolom vastgezet
+
+   De oudere component-breekpunten (620 voor .method-thresholds, 520 voor
+   .geo-phases) staan nog zoals ze waren; die horen bij één blok en botsen niet
+   met de ladder.
+   ========================================================== */
+
+/* ---- Navigatiestanden -----------------------------------------------------
+   Eén attribuut op <html> zet de zijbalk om: data-nav="collapsed" is de rail,
+   data-nav="open" is de lade op klein scherm. Er rekent geen JS aan de layout —
+   app.js zet alleen het attribuut.
+   -------------------------------------------------------------------------- */
+:root[data-nav="collapsed"] .sidebar {
+  width: 68px;
+  padding: 22px 0 18px;
+  align-items: center;
+  gap: 14px;
+}
+:root[data-nav="collapsed"] .sidebar .brand { justify-content: center; padding: 0; }
+:root[data-nav="collapsed"] .sidebar .brand span,
+:root[data-nav="collapsed"] .brand-pill,
+:root[data-nav="collapsed"] .nav-section,
+:root[data-nav="collapsed"] #connectors-list,
+:root[data-nav="collapsed"] #sidebar-brand-sub,
+:root[data-nav="collapsed"] .nav-link span:not(.icon),
+:root[data-nav="collapsed"] .logout .label,
+:root[data-nav="collapsed"] .mayday-credit .lockup { display: none; }
+:root[data-nav="collapsed"] .mayday-credit .mark { display: block; }
+:root[data-nav="collapsed"] .nav-links { width: 100%; align-items: center; }
+:root[data-nav="collapsed"] .nav-link,
+:root[data-nav="collapsed"] .logout {
+  width: 44px; height: 44px; padding: 0;
+  justify-content: center; gap: 0;
+}
+:root[data-nav="collapsed"] .mayday-credit { padding: 14px 0 0; width: 44px; }
+
+/* De knop zelf: in de kop van de zijbalk, en op klein scherm in de topbar. */
+.nav-toggle {
+  appearance: none; border: 1px solid transparent; background: none;
+  color: var(--fg-muted); cursor: pointer;
+  width: 28px; height: 28px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: auto;
+}
+.nav-toggle:hover { color: var(--fg); background: var(--surface-strong); }
+.nav-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nav-toggle svg { width: 16px; height: 16px; }
+:root[data-nav="collapsed"] .nav-toggle { margin: 0; transform: scaleX(-1); }
+.topbar .nav-toggle { display: none; }
+
+/* De achtergrond van de lade bestaat alleen onder 900px. */
+.nav-backdrop { display: none; }
+
+/* Signatuur: de lockup als de zijbalk open staat, het merkteken in de rail. */
+.mayday-credit .mark { display: none; width: 44px; }
+.mayday-credit .mark img { max-width: 40px; }
+
+/* ---- ≤ 1180: rail ------------------------------------------------------- */
+@media (max-width: 1180px) {
+  /* Zonder expliciete keuze van de gebruiker zet app.js hier data-nav="collapsed";
+     staat die keuze op 'expanded', dan blijft de zijbalk open. */
+  .sidebar { gap: 18px; }
+}
+
+/* ---- ≤ 900: lade over de inhoud ---------------------------------------- */
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 60;
+    width: 240px; padding: 26px 18px; align-items: stretch;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.18);
+  }
+  /* In de lade is er breedte, dus daar hoort de volledige lockup weer. */
+  /* .brand-pill is een flexcontainer: 'revert' zou hem op block zetten en het
+     statusstipje onder de tekst duwen. */
+  :root[data-nav] .brand-pill { display: flex; }
+  :root[data-nav] .sidebar .brand span,
+  :root[data-nav] .nav-section,
+  :root[data-nav] #connectors-list,
+  :root[data-nav] #sidebar-brand-sub,
+  :root[data-nav] .nav-link span:not(.icon),
+  :root[data-nav] .logout .label,
+  :root[data-nav] .mayday-credit .lockup { display: revert; }
+  :root[data-nav] .mayday-credit .mark { display: none; }
+  :root[data-nav] .nav-link,
+  :root[data-nav] .logout { width: auto; height: auto; padding: 12px 14px; justify-content: flex-start; gap: 12px; }
+  :root[data-nav] .mayday-credit { width: auto; padding: 14px 6px 0; }
+  :root[data-nav="open"] .sidebar { transform: none; }
+  .nav-backdrop {
+    display: block;
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(0, 0, 0, 0.35);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.18s ease;
+  }
+  :root[data-nav="open"] .nav-backdrop { opacity: 1; pointer-events: auto; }
+  .sidebar .nav-toggle { display: none; }
+  .topbar .nav-toggle { display: inline-flex; width: 36px; height: 36px; margin: 0; }
+  .topbar .nav-toggle svg { width: 18px; height: 18px; }
+  .topbar { gap: 12px; }
+}
+
+/* ---- ≤ 760: sub-tabs schuiven, callouts onder de grafiek --------------- */
+@media (max-width: 760px) {
+  .geo-tabs, .subtabs {
+    flex-wrap: nowrap; overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+  .geo-tabs button, .subtabs button { flex: none; scroll-snap-align: start; }
+  .kpi-grid { grid-template-columns: 1fr; }
+}
+
+/* ---- ≤ 520: tabellen schuiven, eerste kolom blijft staan --------------- */
+@media (max-width: 520px) {
+  .table-wrap, .tablewrap { overflow-x: auto; }
+  .table-wrap table th:first-child,
+  .table-wrap table td:first-child,
+  .tablewrap table th:first-child,
+  .tablewrap table td:first-child {
+    position: sticky; left: 0;
+    background: var(--surface);
+  }
+}
+
+
+/* ==========================================================
    mayday-signatuur onderaan de zijbalk
    ==========================================================
    Eén SVG met wordmark, beacon en tagline als vectoren: geen font te laden en
@@ -1736,18 +1878,31 @@ a { color: inherit; text-decoration: none; }
    Sub-tabs, statusbanner, horizontale balken, promptmatrix, readiness-checks,
    fasenstrip en actiekaarten. Kleuren volgen de bestaande tokens. */
 
-.geo-tabs {
-  display: flex; gap: 4px; flex-wrap: wrap;
-  border-bottom: 1px solid var(--border); margin-bottom: 16px;
+/* Sub-tabs in browserstijl: het actieve blad heeft de kleur van de pagina
+   eronder en onderbreekt de lijn van de strip, dus het plakt vast aan zijn
+   inhoud. De strip is een fluistering van het merk (--strip). Tabbladen horen
+   bij één sectie, nooit bij de app als geheel — daarvoor is de zijbalk. */
+.geo-tabs, .subtabs {
+  display: flex; gap: 3px; flex-wrap: wrap; align-items: flex-end;
+  background: var(--strip);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  padding: 9px 12px 0; margin-bottom: 16px;
 }
-.geo-tabs button {
-  appearance: none; border: none; background: none; cursor: pointer;
-  font: inherit; font-size: 13px; font-weight: 600; color: var(--fg-muted);
-  padding: 9px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+.geo-tabs button, .subtabs button {
+  appearance: none; cursor: pointer; font: inherit;
+  font-size: 13px; font-weight: 500; color: var(--fg-muted);
+  padding: 10px 18px 11px; margin-bottom: -1px;
+  border: 1px solid transparent; background: none;
+  border-radius: var(--radius-tip) var(--radius-tip) 0 0;
 }
-.geo-tabs button.on { color: var(--accent-text, var(--accent)); border-bottom-color: var(--accent); }
-.geo-tabs button:hover { color: var(--fg); }
-.geo-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.geo-tabs button.on, .subtabs button.on {
+  color: var(--fg); font-weight: 600;
+  background: var(--bg);
+  border-color: var(--border); border-bottom-color: var(--bg);
+}
+.geo-tabs button:hover, .subtabs button:hover { color: var(--fg); }
+.geo-tabs button:focus-visible, .subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .geo-callout {
   border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;
