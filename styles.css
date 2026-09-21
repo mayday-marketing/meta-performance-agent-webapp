@@ -2327,7 +2327,10 @@ th.c, td.c { text-align: center; }
 /* ---------- Printen = PDF ----------
    Eén slide per pagina, op ware grootte. Alles buiten de deck valt weg, ook de
    werkbalk: die hoort bij het samenstellen, niet bij het rapport. */
-@page { size: 1280px 720px; margin: 0; }
+/* De @page-regel (papierformaat) staat bewust NIET hier: @page kan niet op een
+   selector worden begrensd en zou dus ook gelden als iemand de Website- of
+   ROAS-tab print. report.js hangt hem erin zolang de deck op het scherm staat
+   en haalt hem daarna weer weg. */
 
 @media print {
   .sidebar, .topbar, .chat-panel, .chat-toggle-btn, .tweaks-panel,

@@ -1111,9 +1111,26 @@
     if (!state.session) { root.innerHTML = ""; return; }
     if (RS.picked === null) RS.picked = loadPicked();
 
-    root.innerHTML = (RS.view === "deck" && RS.slides) ? renderDeck() : renderConfig();
+    const deck = RS.view === "deck" && RS.slides;
+    root.innerHTML = deck ? renderDeck() : renderConfig();
     bind(root);
-    if (RS.view === "deck") fitSlides();
+    pageSize(deck);
+    if (deck) fitSlides();
+  }
+
+  // Het papierformaat geldt per document, niet per element: @page kan niet op
+  // een selector worden begrensd. Stond die regel in styles.css, dan zou ook
+  // een geprinte Website- of ROAS-tab ineens op 1280x720 liggend uitkomen.
+  // Daarom hangt hij er alleen in zolang de deck op het scherm staat.
+  function pageSize(aan) {
+    const id = "rp-page-size";
+    const bestaand = document.getElementById(id);
+    if (!aan) { if (bestaand) bestaand.remove(); return; }
+    if (bestaand) return;
+    const el = document.createElement("style");
+    el.id = id;
+    el.textContent = `@page { size: ${SLIDE_W}px ${SLIDE_H}px; margin: 0; }`;
+    document.head.appendChild(el);
   }
 
   function bind(root) {
@@ -1158,5 +1175,9 @@
     paint();
   }
 
-  window.__report = { open };
+  // Ook weghalen als de gebruiker de tab verlaat terwijl de deck open staat;
+  // switchPage() roept dit aan via de brug in app.js.
+  function close() { pageSize(false); }
+
+  window.__report = { open, close };
 })();

@@ -621,7 +621,7 @@
     if (page === "geo" && typeof geoFetch === "function") geoFetch();
     // Rapport heeft een eigen periode en haalt zelf op wat de gekozen blokken
     // nodig hebben; hier alleen de configurator tekenen.
-    if (page === "report" && window.__report) window.__report.open();
+    if (window.__report) (page === "report" ? window.__report.open() : window.__report.close());
     // Bronnen leest alleen wat de app al weet; geen eigen fetch.
     if (page === "bronnen") renderBronnen();
   }
