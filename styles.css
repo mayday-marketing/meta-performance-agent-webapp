@@ -2261,6 +2261,25 @@ th.c, td.c { text-align: center; }
 .rp-slide.cover, .rp-slide.divider { justify-content: center; }
 .rp-slide.divider { background: var(--surface-mute); }
 
+/* De titelslide staat op het merkvlak met negatieve tekst. --on-accent klapt
+   om naar inkt zodra het accent te licht is voor wit (zie deriveBrandTokens in
+   app.js), dus een geel of lime merk levert geen onleesbare kop op. Alleen
+   déze slide: verderop in de deck draagt het accent de data, en dan moet het
+   vlak juist rustig blijven. */
+.rp-slide.cover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.rp-slide.cover .rp-eyebrow,
+.rp-slide.cover .rp-title-body h1,
+.rp-slide.cover .rp-period,
+.rp-slide.cover .rp-made,
+.rp-slide.cover .rp-foot { color: var(--on-accent); }
+.rp-slide.cover .rp-period { opacity: 0.86; }
+.rp-slide.cover .rp-made,
+.rp-slide.cover .rp-foot { opacity: 0.7; }
+
 .rp-eyebrow {
   font-size: 11px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--accent-data, var(--accent));

@@ -248,6 +248,18 @@ const CONFIG_FIELDS = {
   // consent-mode-dekking onderschat GA4 structureel en is platform realistischer.
   // De toggle in de ROAS-tab blijft altijd beschikbaar; dit zet alleen de default.
   oordeelop:     { path: 'roas.verdictSource', check: okVerdictSource },
+
+  // --- Losse links naar materiaal buiten het dashboard ----------------------
+  // Een rapportagedeck, een brandbook, een contentkalender: dingen waar het
+  // dashboard zelf niets mee rekent, maar waar de klant en de agent wel naartoe
+  // moeten kunnen. Ze horen hier omdat de Config-tab per klant is en
+  // meeverhuist; zonder deze velden geeft elke regel 'Onbekend veld — genegeerd'.
+  // Alleen https, en de URL wordt niet naar een hostlijst beperkt zoals het logo:
+  // dit is een verwijzing, geen bron die de pagina inlaadt.
+  presentatie:     { path: 'links.deck',      check: okHttpsUrl },
+  presentatielink: { path: 'links.deck',      check: okHttpsUrl },
+  rapportlink:     { path: 'links.report',    check: okHttpsUrl },
+  brandbook:       { path: 'links.brandbook', check: okHttpsUrl },
 };
 
 /**

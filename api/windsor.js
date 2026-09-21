@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { getClientConfig, captureOidcToken } = require('./_config');
 const { activeChannels, pendingChannels, matchGa4Channel, ga4GroupOf } = require('./_channels');
-const { getWebsiteSheetData, getConnectorRows } = require('./_sheetdata');
+const { getWebsiteSheetData, getConnectorRows, hasConnectorTab } = require('./_sheetdata');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -160,13 +160,25 @@ module.exports = async (req, res) => {
         from: params?.date_from, to: params?.date_to,
       }).catch(e => ({ __error: e.message }));
 
-      const usable = rows && !rows.__error && Array.isArray(rows.data) && rows.data.length > 0;
-      if (usable) return rows;
-
-      // Zonder sleutel is de sheet de enige bron: dan is 'niets gevonden' het
-      // eindantwoord en geen tussenstap.
-      if (sheetOnly) {
-        if (rows && rows.__error) return rows;
+      // getConnectorRows kent drie antwoorden, en die moeten uit elkaar blijven:
+      //   null        → geen tab voor deze connector in de sheet
+      //   {__error}   → sheet niet leesbaar
+      //   {data: []}  → tab gevónden, alleen geen rijen in deze periode
+      // Dat laatste is een geldig antwoord, geen ontbrekende bron. Werden ze op
+      // één hoop gegooid, dan meldde een rustige maand 'geen tab in de
+      // datasheet' — een foutmelding over de configuratie terwijl er niets mis
+      // is met de configuratie.
+      if (rows && rows.__error) {
+        if (sheetOnly) return rows;                 // geen tweede bron
+      } else if (rows && Array.isArray(rows.data)) {
+        if (rows.data.length > 0) return rows;
+        // Leeg. Alleen doorvallen naar live als de sheet de gevraagde periode
+        // aantoonbaar nog niet haalt (lopende export, backfill); anders is leeg
+        // gewoon leeg en kost een API-call alleen tijd en quota.
+        const sh = rows.__sheet || {};
+        const looptAchter = !!(sh.dated && sh.max && params?.date_from && sh.max < params.date_from);
+        if (sheetOnly || !looptAchter) return rows;
+      } else if (sheetOnly) {
         return { data: [], __error: `Geen tab in de datasheet voor ${connector}.` };
       }
       // Mét sleutel: stilletjes doorvallen naar de live-bron.
@@ -1205,13 +1217,28 @@ module.exports = async (req, res) => {
 
         const candidates = client.email_connector ? [client.email_connector] : ['klaviyo', 'convertkit'];
         let conn = null;
-        for (let i = 0; i < candidates.length; i++) {
-          const c = candidates[i];
-          if (i === candidates.length - 1) { conn = c; break; } // laatste kandidaat: aannemen (bespaart een probe)
-          if (sheetOnly) { conn = c; break; }   // geen sleutel → geen probe; de sheet beslist
-          const probeField = c === 'klaviyo' ? 'campaign' : 'broadcasts__id';
-          const probe = await safeCall(windsor(c, apiKey, { fields: probeField, date_from: endDate, date_to: endDate }, 20000), `email-probe-${c}`);
-          if (!probe.__error || !/No .* account/i.test(probe.__error)) { conn = c; break; }
+        // Zonder sleutel valt er niets te proben; dan beslist het bestaan van een
+        // tab in de datasheet. Deze tak staat bewust vóór de 'laatste kandidaat
+        // aannemen'-regel hieronder: die regel bespaart een dure probe, maar in
+        // sheet-modus is er geen probe om te besparen en levert aannemen juist
+        // een verkeerde connector op. Zo kreeg élke klant zonder sleutel klaviyo
+        // toegewezen — ook een die ConvertKit gebruikt of helemaal geen e-mail —
+        // met een rode 'geen tab in de datasheet' in plaats van de nette
+        // 'niet gekoppeld'. Een expliciete email_connector in CLIENTS blijft
+        // leidend: die is een bewuste uitspraak van ons, geen gok.
+        if (sheetOnly && !client.email_connector) {
+          for (const c of candidates) {
+            if (await hasConnectorTab(clientId, c)) { conn = c; break; }
+          }
+        } else {
+          for (let i = 0; i < candidates.length; i++) {
+            const c = candidates[i];
+            if (i === candidates.length - 1) { conn = c; break; } // laatste kandidaat: aannemen (bespaart een probe)
+            if (sheetOnly) { conn = c; break; }
+            const probeField = c === 'klaviyo' ? 'campaign' : 'broadcasts__id';
+            const probe = await safeCall(windsor(c, apiKey, { fields: probeField, date_from: endDate, date_to: endDate }, 20000), `email-probe-${c}`);
+            if (!probe.__error || !/No .* account/i.test(probe.__error)) { conn = c; break; }
+          }
         }
         if (!conn) return res.status(200).json({ connector: null, reason: 'Geen e-mailconnector gekoppeld.' });
 

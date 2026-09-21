@@ -629,4 +629,22 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to } = {
   return { data, __sheet: { tab: best.title, rows: data.length, min, max, dated: dateCol != null } };
 }
 
-module.exports = { getWebsiteSheetData, matchTabs, headerIndex, covers, getConnectorRows };
+// Heeft de datasheet van deze klant überhaupt een tab voor deze connector?
+// Alleen de tabnamen, dus één goedkope (en gecachete) call — geen tabinhoud.
+// Nodig omdat 'welke e-mailconnector gebruikt deze klant' zonder API-sleutel
+// niet te proben valt: dan is het bestaan van de tab het enige antwoord.
+async function hasConnectorTab(clientId, connector) {
+  const pattern = CONNECTOR_TABS[connector];
+  if (!pattern) return false;
+  const sheetId = resolveDataSheetId(clientId);
+  if (!sheetId) return false;
+  try {
+    const token = await getAccessToken();
+    const titles = await listTabs(clientId, sheetId, token);
+    return titles.some(t => !/^_windsor_staging/i.test(t) && pattern.test(t));
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { getWebsiteSheetData, matchTabs, headerIndex, covers, getConnectorRows, hasConnectorTab };

@@ -814,6 +814,10 @@
       line:   v("--border", "#e3ded6"),
       soft:   v("--surface-mute", "#f6f3ee"),
       paper:  v("--bg", "#ffffff"),
+      // Titelslide: merkvlak met negatieve tekst. --on-accent is in app.js al
+      // omgeklapt naar inkt als het accent te licht is voor wit.
+      accentFlat: v("--accent", "#400745"),
+      onAccent:   v("--on-accent", "#ffffff"),
     };
   }
 
@@ -945,10 +949,11 @@
         slide.background = { color: P.paper };
 
         if (s.kind === "title") {
-          slide.addText("PERFORMANCE-RAPPORT", { x: PPT.M, y: 2.5, w: PPT.W - 2 * PPT.M, h: 0.3, fontSize: 11, bold: true, charSpacing: 2, color: P.accent, fontFace: PPT.data });
-          slide.addText(state.session?.brandName || state.session?.clientId || "", { x: PPT.M, y: 2.85, w: PPT.W - 2 * PPT.M, h: 1.1, fontSize: 44, color: P.ink, fontFace: PPT.display });
-          slide.addText(periodLabel(), { x: PPT.M, y: 3.95, w: PPT.W - 2 * PPT.M, h: 0.4, fontSize: 16, color: P.muted, fontFace: PPT.data });
-          slide.addText(`Samengesteld op ${nlDate(todayIso())} · mayday marketing`, { x: PPT.M, y: PPT.H - 0.9, w: PPT.W - 2 * PPT.M, h: 0.3, fontSize: 10, color: P.muted, fontFace: PPT.data });
+          slide.background = { color: P.accentFlat };
+          slide.addText("PERFORMANCE-RAPPORT", { x: PPT.M, y: 2.5, w: PPT.W - 2 * PPT.M, h: 0.3, fontSize: 11, bold: true, charSpacing: 2, color: P.onAccent, fontFace: PPT.data });
+          slide.addText(state.session?.brandName || state.session?.clientId || "", { x: PPT.M, y: 2.85, w: PPT.W - 2 * PPT.M, h: 1.1, fontSize: 44, color: P.onAccent, fontFace: PPT.display });
+          slide.addText(periodLabel(), { x: PPT.M, y: 3.95, w: PPT.W - 2 * PPT.M, h: 0.4, fontSize: 16, color: P.onAccent, fontFace: PPT.data, transparency: 15 });
+          slide.addText(`Samengesteld op ${nlDate(todayIso())} · mayday marketing`, { x: PPT.M, y: PPT.H - 0.9, w: PPT.W - 2 * PPT.M, h: 0.3, fontSize: 10, color: P.onAccent, fontFace: PPT.data, transparency: 30 });
           continue;
         }
 
