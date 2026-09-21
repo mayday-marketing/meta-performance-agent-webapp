@@ -130,11 +130,11 @@ Deze agent werkt bij voorkeur via een vaste Google Drive mapstructuur. De aanbev
 
 | Bestand | Naamconventie | Voorbeeld |
 |---|---|---|
-| Analytics PDF | `[merk]_[YYYY-MM]_analytics.pdf` | `spotto_2026-02_analytics.pdf` |
+| Analytics PDF | `[merk]_[YYYY-MM]_analytics.pdf` | `merknaam_2026-02_analytics.pdf` |
 | Instagram CSV | `instagram_[YYYY-MM].csv` | `instagram_2026-02.csv` |
 | Facebook CSV | `facebook_[YYYY-MM].csv` | `facebook_2026-02.csv` |
 | Ads CSV | `meta_ads_[YYYY-MM].csv` | `meta_ads_2026-02.csv` |
-| Rapport output | `[Merk]_[YYYY-MM]_Performance.xlsx` | `Spotto_2026-02_Performance.xlsx` |
+| Rapport output | `[Merk]_[YYYY-MM]_Performance.xlsx` | `Merknaam_2026-02_Performance.xlsx` |
 
 ---
 

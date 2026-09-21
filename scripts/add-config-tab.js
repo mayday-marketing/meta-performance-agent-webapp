@@ -11,7 +11,7 @@
    Gebruik:
      node scripts/add-config-tab.js              # droogloop: toont alleen wat er zou gebeuren
      node scripts/add-config-tab.js --apply      # voert het echt uit
-     node scripts/add-config-tab.js --apply --only spotto
+     node scripts/add-config-tab.js --apply --only merknaam
 
    De service-account moet bewerkrechten op de sheet hebben. Heeft hij alleen
    leesrechten, dan meldt het script dat per klant en gaat door met de rest.
@@ -420,7 +420,7 @@ const ROWS = [
   ['Logo URL', '[https://...]', 'SVG of PNG, max 28px hoog. Alleen https van een toegestane host'],
 
   ['ACCOUNT-IDS', '', ''],
-  ['Instagram account', '[username]', 'Windsor-veld account_name, bv. spotto.be (zonder @)'],
+  ['Instagram account', '[username]', 'Windsor-veld account_name, bv. merk.be (zonder @)'],
   ['Facebook account', '[paginanaam of id]', 'Connector facebook_organic'],
   ['Meta ad account', '[act_...]', 'Connector facebook (Meta Ads)'],
   ['Klaviyo account', '[id]', 'Alleen invullen als Klaviyo gekoppeld is'],

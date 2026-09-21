@@ -19,7 +19,7 @@ behind Vercel SSO and will redirect the runner to a login page).
 
 ```bash
 BASE_URL=https://meta-performance-agent-webapp.vercel.app \
-CLIENT_ID=spotto \
+CLIENT_ID=merknaam \
 PASSWORD='the-client-password' \
 node evals/run.mjs
 ```

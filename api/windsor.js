@@ -108,7 +108,7 @@ module.exports = async (req, res) => {
   // Account-scoping: bij een gedeeld Windsor-account (bv. mayday.marketing met meerdere klanten)
   // beperkt `windsor_accounts` per connector tot één account-id, zodat er enkel data van déze
   // klant doorkomt. Niet ingesteld → alle accounts (backward-compatible met per-klant-sleutels).
-  //   CLIENTS: "spotto": { "windsor_api_key": "<mayday>", "windsor_accounts": { "instagram": "17841457272403407", "facebook": "1060778095034495" } }
+  //   CLIENTS: "merknaam": { "windsor_api_key": "<mayday>", "windsor_accounts": { "instagram": "17841457272403407", "facebook": "1060778095034495" } }
   //
   // LET OP: de Windsor REST-endpoint negeert de `accounts`-queryparam (geverifieerd) — die werkt
   // alleen via de MCP. Daarom vragen we `account_id` op en filteren we server-side. Alleen voor
@@ -127,8 +127,8 @@ module.exports = async (req, res) => {
   ]);
   // Normaliseer voor vergelijking: string, lowercase, en de voorvoegsels weg die
   // een platform wel toont maar Windsor niet teruggeeft: 'act_' (Meta) en
-  // 'sc-domain:' (Search Console — Windsor geeft 'spotto.be', Google's UI toont
-  // 'sc-domain:spotto.be'; zonder deze strip matcht de config nooit en blijft de
+  // 'sc-domain:' (Search Console — Windsor geeft 'merk.be', Google's UI toont
+  // 'sc-domain:merk.be'; zonder deze strip matcht de config nooit en blijft de
   // tab leeg).
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').replace(/^sc-domain:/i, '').toLowerCase();
   async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
@@ -608,7 +608,7 @@ module.exports = async (req, res) => {
 
         // Tokens waarop een zoekopdracht als merkgebonden telt: de merknaam uit de
         // Config-tab en het eerste label van de Search-Console-property
-        // ('sc-domain:spotto.be' → 'spotto'). Zonder allebei geen merkopsplitsing —
+        // ('sc-domain:merk.be' → 'merk'). Zonder allebei geen merkopsplitsing —
         // een lege lijst zou alles als niet-merkgebonden bestempelen.
         const brandTokens = (() => {
           const out = new Set();
@@ -1035,8 +1035,8 @@ module.exports = async (req, res) => {
 
           // Merkgebonden vs. niet-merkgebonden rekenen we zélf uit de querytabel.
           // Windsor heeft een veld branded_vs_nonbranded, maar dat markeert alleen
-          // queries waar de volledige domeinnaam in staat: voor spotto.be telde
-          // 'spotto' (2.852 kliks) daar als niet-merkgebonden. Met de merknaam als
+          // queries waar de volledige domeinnaam in staat: voor merk.be telde
+          // 'merk' (2.852 kliks) daar als niet-merkgebonden. Met de merknaam als
           // token klopt het wél, en de regel is uitlegbaar aan de klant.
           const split = { branded: { clicks: 0, impressions: 0 }, nonbranded: { clicks: 0, impressions: 0 } };
           // Rekenen over de volledige lijst, niet over de getoonde top 15 — en dus

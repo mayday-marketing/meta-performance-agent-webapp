@@ -27,7 +27,7 @@ this repo are Dutch too — match that.
 ## Multi-tenant model — the load-bearing rule
 
 Every client's config lives in the **`CLIENTS` env var** (JSON), keyed by lowercase
-client id: `{ "spotto": { password, sheetId, driveFolderId, brandName,
+client id: `{ "merknaam": { password, sheetId, driveFolderId, brandName,
 metricool_token, metricool_user_id, windsor_api_key, anthropic_api_key,
 email_connector } }`. Most fields are optional; connectors are enabled per client.
 
@@ -147,7 +147,7 @@ topbar — anders dan de ROAS-tab, die een eigen maandperiode heeft.
   gemiddelde van dagelijkse gemiddelden klopt niet.
 - **Merkgebonden vs. niet-merkgebonden rekenen we zelf** uit de querytabel met
   merktokens. Windsor's veld `branded_vs_nonbranded` markeert alleen queries met de
-  volledige domeinnaam erin: voor `spotto.be` viel de query "spotto" (2.852 kliks)
+  volledige domeinnaam erin: bij een klant viel de merknaam zonder extensie (2.852 kliks)
   daar onder *niet*-merkgebonden.
 
 ### Donut, verschilkolommen en zoeken in de Website-tab
@@ -188,7 +188,7 @@ Gemeten: een sheet-tab lezen duurt 0,3–2,3 s, een koude Windsor-fetch over 90 
   kán worden, en een sheet-id daaruit accepteren zou een klant laten kiezen wiens
   data hij leest.
 - **Tabs worden op patroon herkend**, niet op naam: de exportnamen verschillen per
-  klant (`Google Analytics 4 - dag - SPOTTO - windsor.ai`). `_windsor_staging_*` is
+  klant (`Google Analytics 4 - dag - MERKNAAM - windsor.ai`). `_windsor_staging_*` is
   een restant van een lopende export en wordt overgeslagen.
 - **Koppen worden genormaliseerd** (kleine letters, leestekens weg): GA4 schrijft
   `Date`, Search Console `date`. Het doelveld heet `Key event count for <event>` en
@@ -225,7 +225,7 @@ Gemeten: een sheet-tab lezen duurt 0,3–2,3 s, een koude Windsor-fetch over 90 
   periode, ~1 s daarna. Vandaar 35 s timeout op de vergelijkingsperiodes.
 - **Search Console lag**: data loopt 2–3 dagen achter; de UI meldt de laatste dag
   met data, anders lijkt het einde van elke periode een daling.
-- **Account-id-vorm.** Windsor geeft een domeinproperty terug als `spotto.be`,
+- **Account-id-vorm.** Windsor geeft een domeinproperty terug als `merk.be`,
   zonder het `sc-domain:`-voorvoegsel dat Google's UI toont. `normId` in
   `windsor.js` stript dat voorvoegsel; zonder die strip matcht de config nooit en
   blijft de tab (fail-closed) leeg. Een URL-prefix-property moet exact matchen,
@@ -328,7 +328,7 @@ Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
 
 ## Rapportstijl — één accent, alles afgeleid
 
-De interface volgt het model van de Spotto-rapportstijl: warm papier tegenover
+De interface volgt één rapportstijl: warm papier tegenover
 één getinte grafiekbak, schreef voor wat je leest en schreefloos voor wat je
 afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
 **één hexcode** uit de Config-tab.
@@ -380,7 +380,7 @@ afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
   nog voor precies één geval: de overlay-grafiek op de Overview-pagina, waar de
   gebruiker zelf maatstaven aan- en uitzet. Daar *is* de vergelijking het doel;
   in een rapportgrafiek met vaste reeksen niet.
-- **De donut blijft.** 'Geen taart' uit de Spotto-stijl botst met de
+- **De donut blijft.** De regel 'geen taart' botst met de
   kanaaldonut in de Website-tab, en die blijft staan: het palet is gevalideerd
   op kleurenblindheid en contrast, de legenda draagt de cijfers, en de zeven
   vaste groepen houden hun kleur. Wat een taart verbergt — de verschuiving over

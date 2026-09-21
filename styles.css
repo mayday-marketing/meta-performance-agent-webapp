@@ -92,7 +92,7 @@
   --shadow: none;              /* §3: kaarten hebben een rand, geen schaduw */
   --shadow-sm: none;
 
-  /* ---- Rapportstijl (Spotto-model, merk-agnostisch) ----------------------
+  /* ---- Rapportstijl, merk-agnostisch -------------------------------------
      Alles hieronder is afgeleid van --accent. app.js overschrijft --accent-data
      en de panelfamilie met een variant die op lichtheid is afgetopt (een licht
      merkaccent zou als reekskleur verdwijnen); de waarden hier zijn de terugval

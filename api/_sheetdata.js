@@ -41,7 +41,7 @@ function resolveDataSheetId(clientId) {
 
 /* ---------- Tabherkenning ----------
    De exporttaken krijgen in Windsor een lange naam die per klant verschilt
-   ('Google Analytics 4 - dag - SPOTTO - windsor.ai'). We matchen daarom op
+   ('Google Analytics 4 - dag - MERKNAAM - windsor.ai'). We matchen daarom op
    patroon in plaats van op een exacte naam, zodat er niets per klant
    geconfigureerd hoeft te worden. `_windsor_staging_*` zijn restanten van een
    lopende export en worden overgeslagen. */

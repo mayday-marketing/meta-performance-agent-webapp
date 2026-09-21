@@ -49,7 +49,7 @@ performance-agent@performance-agent-493301.iam.gserviceaccount.com
 
 ## 1 · Kies de klantcode
 
-Kleine letters, geen spaties (bijvoorbeeld `spotto`). Dit is tegelijk de sleutel
+Kleine letters, geen spaties (bijvoorbeeld `merknaam`). Dit is tegelijk de sleutel
 in de `CLIENTS` env var en wat de klant intypt bij het inloggen. `auth.js` zet de
 ingetypte code altijd om naar lowercase.
 
@@ -158,7 +158,7 @@ waarschuwing.
 | `Logo URL` | https-URL, alleen van `drive.google.com`, `lh3.googleusercontent.com` of `mayday.marketing` |
 
 De steunkleur is bedoeld voor kleuren die als tekst onbruikbaar zijn maar als
-highlight-vlak prima werken — bij Spotto haalt het geel `#fbe431` 1,23:1 op de
+highlight-vlak prima werken — bij één klant haalt het geel `#fbe431` 1,23:1 op de
 achtergrond, maar 13,46:1 met donkere tekst erop. Het dashboard zet hem daarom
 alleen als achtergrond in, nooit als tekst-, reeks- of statuskleur. Heeft de
 klant maar één merkkleur, laat het veld dan leeg.

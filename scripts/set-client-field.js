@@ -13,7 +13,7 @@
 
    Waarom scripten i.p.v. met de hand in het tekstvak van Vercel: die JSON bevat
    alle klantwachtwoorden op één regel. Eén komma verkeerd en elke klant kan niet
-   meer inloggen — en dat is precies hoe spotto's sheet-id ooit in het veld
+   meer inloggen — en dat is precies hoe het sheet-id van klant A ooit in het veld
    driveFolderId terechtkwam.
    ========================================================== */
 

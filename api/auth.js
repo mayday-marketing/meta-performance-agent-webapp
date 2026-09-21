@@ -24,7 +24,7 @@ module.exports = async (req, res) => {
   }
 
   // Parse clients from env var
-  // Format: { "spotto": { "password": "abc", "sheetId": "1xyz...", "brandName": "Spotto" } }
+  // Format: { "merknaam": { "password": "abc", "sheetId": "1xyz...", "brandName": "Merknaam" } }
   let clients;
   try {
     clients = JSON.parse(process.env.CLIENTS || '{}');

@@ -94,7 +94,7 @@ function okSearchConsoleSite(v) {
   const s = String(v).trim();
   const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
   // Domeinproperty. Windsor geeft hem terug ZONDER het 'sc-domain:'-voorvoegsel
-  // ('spotto.be'), Google's eigen UI mét. Beide mogen hier; windsor.js haalt het
+  // ('merk.be'), Google's eigen UI mét. Beide mogen hier; windsor.js haalt het
   // voorvoegsel weg voor de vergelijking (zie normId).
   if (/^sc-domain:/i.test(s)) {
     const host = s.slice(10).trim();

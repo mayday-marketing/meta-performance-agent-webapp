@@ -1,6 +1,6 @@
 /* Mock data — vervangen door live Metricool API in stap 3 */
 const DATA = {
-  brand: "Spotto",
+  brand: "Demomerk",
 
   kpis: [
     {
