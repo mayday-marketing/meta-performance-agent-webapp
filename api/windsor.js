@@ -135,21 +135,47 @@ module.exports = async (req, res) => {
     const sharedMode = hasScopeConfig; // gedeeld Windsor-account (meerdere klanten)
     const wantRaw = scopedAccounts[connector];
     const scopable = ACCOUNT_ID_CONNECTORS.has(connector);
+
+    // ---- DATASHEET EERST, VOOR ELKE PAGINA ----------------------------------
+    // Staat er een datasheet, dan beantwoordt die de vraag — ook als er een
+    // Windsor-sleutel is. Drie redenen, in volgorde van gewicht:
+    //   1. De sheet is de gecontroleerde bron. Wat daarin staat is nagekeken en
+    //      verandert niet tussen twee keer laden; een API-antwoord kan per dag
+    //      verschuiven (retroactieve attributie, late conversies).
+    //   2. De sheet gaat verder terug. Metricool en Windsor geven 12 maanden;
+    //      een archiefsheet houdt alles. Dat is precies het archiefscenario
+    //      waar deze app op gebouwd is.
+    //   3. Een sheetantwoord kost niets en is snel. Een API-call kost quota en
+    //      tijd, en die tijd zit in het 55s-budget van de functie.
+    // De API blijft de terugval: kent de sheet deze vraag niet, of dekt hij de
+    // gevraagde periode niet, dan gaat het alsnog live. Zo levert een sheet die
+    // achterloopt geen stilte op, maar verse cijfers.
+    //
+    // Deze poging staat BEWUST vóór de fail-closed-scopingregel hieronder: die
+    // regel bestaat omdat één Windsor-sleutel meerdere klanten kan bevatten. Een
+    // datasheet hoort per definitie bij één klant, dus daar valt niets te lekken
+    // en hoeft er niets geblokkeerd te worden.
+    if (client?.dataSheetId) {
+      const rows = await getConnectorRows(clientId, connector, fieldsCsv, {
+        from: params?.date_from, to: params?.date_to,
+      }).catch(e => ({ __error: e.message }));
+
+      const usable = rows && !rows.__error && Array.isArray(rows.data) && rows.data.length > 0;
+      if (usable) return rows;
+
+      // Zonder sleutel is de sheet de enige bron: dan is 'niets gevonden' het
+      // eindantwoord en geen tussenstap.
+      if (sheetOnly) {
+        if (rows && rows.__error) return rows;
+        return { data: [], __error: `Geen tab in de datasheet voor ${connector}.` };
+      }
+      // Mét sleutel: stilletjes doorvallen naar de live-bron.
+    }
+
     // Gedeeld account + scopebare connector zonder configuratie → NIET ophalen. Anders zou een
     // niet-geconfigureerde connector alle klanten teruggeven (data-lek). Lege dataset.
     if (sharedMode && scopable && !wantRaw) return { data: [] };
     const scope = !!wantRaw && scopable;
-
-    // Sheet-only: de datasheet beantwoordt de vraag, of niemand doet het. Scoping
-    // op account-id is hier niet nodig — een datasheet hoort bij één klant, dus
-    // de fail-closed-regel hierboven is al gedekt door de sheet zelf.
-    if (sheetOnly) {
-      const rows = await getConnectorRows(clientId, connector, fieldsCsv, {
-        from: params?.date_from, to: params?.date_to,
-      }).catch(e => ({ __error: e.message }));
-      if (rows) return rows;
-      return { data: [], __error: `Geen tab in de datasheet voor ${connector}.` };
-    }
 
     let fields = fieldsCsv;
     if (scope) {

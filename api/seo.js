@@ -276,7 +276,9 @@ module.exports = async (req, res) => {
 
   // Vastgelegde meting uit de Drive-map van de klant. Faalt nooit hard: zonder
   // bestand komt hier `data: null` terug en blijft alles hieronder live.
-  const baseline = await getSeoBaseline(cid, client?.driveFolderId);
+  // `force` komt van de ↻-knop in de tab. Die moet ook het bestand opnieuw
+  // ophalen, anders blijft een net bijgewerkte meting tot vijf minuten hangen.
+  const baseline = await getSeoBaseline(cid, client?.driveFolderId, force === true);
   const fixed = baseline.data;
 
   // Het bestand mag domein, markt en taal aanvullen, maar nooit overschrijven:

@@ -154,7 +154,7 @@ module.exports = async (req, res) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-opus-4-8',
+        model: 'claude-opus-5',
         max_tokens: 8192, // ruim genoeg voor 5 winners + 5 losers + recs (was 4096 → JSON kapte af)
         system: systemPrompt,
         messages: [{ role: 'user', content: userMsg }],
@@ -171,7 +171,23 @@ module.exports = async (req, res) => {
     }
 
     const data = await anthropicRes.json();
-    const text = data.content?.[0]?.text || '';
+    // ALLE tekstblokken samenvoegen, niet alleen het eerste. Een model mag meer
+    // dan één blok terugsturen (en een denkblok vóór het antwoord zetten); met
+    // `content[0].text` kwam er dan een lege string terug en zag de gebruiker
+    // 'Geen antwoord ontvangen' terwijl de API netjes 200 gaf.
+    const text = (Array.isArray(data.content) ? data.content : [])
+      .filter(b => b && b.type === 'text' && typeof b.text === 'string')
+      .map(b => b.text)
+      .join('\n')
+      .trim();
+    if (!text) {
+      // Leeg antwoord is bijna altijd een afgekapt antwoord. Zeg dat, in plaats
+      // van een lege bel te tonen.
+      const reden = data.stop_reason === 'max_tokens'
+        ? 'Het antwoord werd afgekapt (max_tokens bereikt).'
+        : `Het model gaf geen tekst terug (stop_reason: ${data.stop_reason || 'onbekend'}).`;
+      return res.status(502).json({ error: reden });
+    }
     const parsed = extractJson(text);
     const validationError = validateAnalysis(parsed);
     if (validationError) {

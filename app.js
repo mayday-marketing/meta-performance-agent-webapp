@@ -2945,7 +2945,18 @@
   // top/bottom-uittreksels en samenvattingen die het patroon vasthouden.
   function buildAnalysisSummary() {
     const ov = state.overview;
-    if (!ov) return null;
+    // Zonder Overview is er nog steeds context: de SEO-, GEO- en Websitetab
+    // kunnen wél geladen zijn. Die hoorden de agent altijd al te bereiken, maar
+    // deze functie gaf hier `null` terug en stuurde dus helemaal niets mee —
+    // waarop de agent terecht antwoordde dat hij geen data had.
+    if (!ov) {
+      const partial = {
+        website: buildWebsiteSummary(),
+        seo: buildSeoSummary(),
+        geo: buildGeoSummary(),
+      };
+      return Object.values(partial).some(v => v != null) ? partial : null;
+    }
     const posts = arrayOrEmpty(ov.allPosts);
     const ads = arrayOrEmpty(ov.adsCampaigns);
 
@@ -3058,6 +3069,94 @@
       // is er geen websitedata in het geheugen; dan blijft dit weg i.p.v. nullen
       // te sturen die de agent als 'geen verkeer' zou lezen.
       website: buildWebsiteSummary(),
+      // SEO en GEO meesturen zodra die tabs geladen zijn. Net als bij website:
+      // niet geladen = weglaten, niet nullen sturen.
+      seo: buildSeoSummary(),
+      geo: buildGeoSummary(),
+    };
+  }
+
+  // Compacte samenvatting van de SEO-tab. Zoekvolume is marktvraag, positie is
+  // onze plek daarin — de agent moet die twee uit elkaar kunnen houden, dus
+  // beide staan er per keyword bij. 'niet gemeten' (geen rank) en 'buiten de
+  // top N' (rank met pos null) blijven verschillend; dat onderscheid weggooien
+  // zou de agent laten concluderen dat een keyword niet rankt terwijl er nooit
+  // naar gekeken is.
+  function buildSeoSummary() {
+    const items = arrayOrEmpty(state.seo && state.seo.items);
+    if (!items.length) return null;
+    const s = state.seoSettings || {};
+    const ranks = (state.seoRanks && state.seoRanks.ranks) || {};
+    const depth = (state.seoRanks && state.seoRanks.depth) || 20;
+
+    const withVolume = items.filter(i => i.volume != null);
+    const trendOf = (monthly) => {
+      const m = arrayOrEmpty(monthly).filter(x => x && x.volume != null);
+      if (m.length < 6) return null;
+      const last = m.slice(-3).reduce((a, x) => a + x.volume, 0) / 3;
+      const prev = m.slice(-6, -3).reduce((a, x) => a + x.volume, 0) / 3;
+      return prev ? +(((last - prev) / prev) * 100).toFixed(1) : null;
+    };
+
+    const keywords = items.map(i => {
+      const r = ranks[i.keyword];
+      return {
+        keyword: i.keyword,
+        volume: i.volume,
+        competition: i.competition,
+        cpc: i.cpc,
+        trend3mPct: trendOf(i.monthly),
+        // drie toestanden, bewust niet samengevoegd
+        position: !r ? "niet gemeten" : (r.pos == null ? `buiten de top ${depth}` : r.pos),
+        url: r && r.url ? r.url : null,
+      };
+    }).sort((a, b) => (b.volume || 0) - (a.volume || 0));
+
+    return {
+      domain: s.domain || null,
+      market: s.location || null,
+      language: s.language || null,
+      // Waar deze cijfers vandaan komen en wanneer ze gemeten zijn — zodat de
+      // agent weet of hij naar een live meting of een vastgelegde kijkt.
+      source: s.source || "api",
+      measuredAt: s.measuredAt || null,
+      depth,
+      totals: {
+        keywords: items.length,
+        keywordsWithVolume: withVolume.length,
+        monthlyVolume: withVolume.reduce((a, i) => a + i.volume, 0),
+        measuredPositions: Object.keys(ranks).length,
+        inTopN: Object.values(ranks).filter(r => r && r.pos != null).length,
+      },
+      keywords: keywords.slice(0, 40),
+    };
+  }
+
+  // Compacte samenvatting van de GEO-tab (AI-zichtbaarheid). Een audit is een
+  // momentopname met een datum en een methode; die twee gaan mee, anders kan de
+  // agent een half jaar oude meting als 'de stand van vandaag' presenteren.
+  function buildGeoSummary() {
+    const g = state.geo;
+    if (!g) return null;
+    return {
+      auditDate: g.auditDate || null,
+      label: g.label || null,
+      promptCount: g.promptCount != null ? g.promptCount : null,
+      method: g.method || null,
+      status: g.status ? { level: g.status.level, title: g.status.title } : null,
+      kpis: arrayOrEmpty(g.kpis).map(k => ({ label: k.label, value: k.value, delta: k.delta })),
+      engines: arrayOrEmpty(g.engines).map(e => ({
+        name: e.name, runs: e.runs, mentionRatePct: e.mentionRatePct,
+        shareOfVoicePct: e.shareOfVoicePct, topCompetitor: e.topCompetitor,
+      })),
+      byType: arrayOrEmpty(g.byType).map(t => ({ type: t.type, ratePct: t.ratePct })),
+      competitors: arrayOrEmpty(g.competitors).map(c => ({ name: c.name, engines: c.engines })),
+      phase: (arrayOrEmpty(g.phases).find(p => p.here) || {}).title || null,
+      readiness: arrayOrEmpty(g.readiness).map(c => ({ check: c.check, status: c.status })),
+      actions: arrayOrEmpty(g.actions).slice(0, 5).map(a => ({
+        priority: a.priority, title: a.title, effort: a.effort,
+      })),
+      previous: g.previous || null,
     };
   }
 
@@ -5814,6 +5913,13 @@
         if (!seoSameList(state.seoRanks?.keywords, state.seoKeywords)) state.seoRanks = null;
         seoCacheSet("vol", state.seoKeywords, res);
         renderSeo();
+        // Komt de meting uit een vastgelegd bestand, dan kosten posities niets
+        // en zijn ze al gemeten — dan is een knop een overbodige drempel. Die
+        // staat er alleen voor de live-laag, waar elke keyword een SERP-call is.
+        // Zonder dit blijven de posities ook buiten de data die de agent krijgt.
+        if (res.settings?.source === "drive" && !state.seoRanks && !state.seoRanksLoading) {
+          seoRankFetch(false);
+        }
       })
       .catch((err) => {
         state.seoLoading = false;
