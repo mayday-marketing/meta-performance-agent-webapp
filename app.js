@@ -134,14 +134,91 @@
     return m ? `${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}` : null;
   }
 
+
+  // Kleuren afleiden uit het merkaccent (§ rapportstijl). Eén regel doet het echte
+  // werk: de datakleur wordt naar inkt gemengd tot ze leesbaar is op het papier —
+  // een licht merkaccent (geel, lime) verdwijnt anders als reekskleur, en in dark
+  // mode is een donker accent op #121212 net zo onleesbaar. Al het andere hangt
+  // daaraan vast, dus een klant levert één hexcode en het hele rapport volgt.
+  const DERIVED_PROPS = ["--accent-data", "--s2", "--panel", "--panel-grid",
+                         "--panel-axis", "--strip", "--on-accent", "--marker"];
+
+  function hexToRgb(hex) {
+    const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || "").trim());
+    if (!m) return null;
+    let h = m[1];
+    if (h.length === 3) h = h.split("").map(c => c + c).join("");
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+
+  function relLum(hex) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return 0;
+    const [r, g, b] = rgb.map(v => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  function mixHex(a, b, p) {
+    const x = hexToRgb(a), y = hexToRgb(b);
+    if (!x || !y) return a;
+    return "#" + x.map((v, i) =>
+      Math.round(v + (y[i] - v) * p).toString(16).padStart(2, "0")).join("");
+  }
+
+  function deriveBrandTokens(accent, dark) {
+    if (!hexToRgb(accent)) return null;
+    const paper = dark ? "#121212" : "#faf9f7";
+    const ink = dark ? "#e6e1e5" : "#1a1a1a";
+    const surface = dark ? "#1e1e1e" : "#ffffff";
+
+    let data = accent, step = 0;
+    while (step < 0.9 && (dark ? relLum(data) < 0.34 : relLum(data) > 0.22)) {
+      step += 0.05;
+      data = mixHex(accent, ink, step);
+    }
+
+    // Een licht accent kan geen witte tekst dragen, en mag als decoratieve stip
+    // juist wél zijn eigen kleur houden.
+    const lightBrand = relLum(accent) > 0.32;
+    const panel = mixHex(data, dark ? surface : paper, dark ? 0.84 : 0.91);
+
+    return {
+      "--accent-data": data,
+      "--s2": mixHex(data, dark ? ink : "#ffffff", 0.45),
+      "--panel": panel,
+      "--panel-grid": mixHex(data, panel, 0.76),
+      "--panel-axis": mixHex(data, panel, 0.58),
+      "--strip": mixHex(data, paper, 0.95),
+      "--on-accent": lightBrand ? "#1a1a1a" : "#ffffff",
+      "--marker": lightBrand ? accent : mixHex(accent, dark ? surface : paper, 0.7)
+    };
+  }
+
+  // Opnieuw afleiden voor het actieve thema. Wordt ook na een themawissel gebeld,
+  // want de formules hebben een ander eindpunt in dark mode.
+  function applyDerivedTokens(accent) {
+    const root = document.documentElement;
+    const hex = accent || state.session?.brand?.accent;
+    DERIVED_PROPS.forEach(prop => root.style.removeProperty(prop));
+    if (!hex) return;
+    const tokens = deriveBrandTokens(hex, root.getAttribute("data-theme") === "dark");
+    if (!tokens) return;
+    Object.keys(tokens).forEach(k => root.style.setProperty(k, tokens[k]));
+  }
+
   // Inline props weghalen: anders blijft het accent van klant A staan als klant B
   // geen eigen accent heeft (uitloggen → inloggen in hetzelfde tabblad).
   function resetBrandConfig() {
     const root = document.documentElement;
-    ["--accent", "--accent-text", "--support", "--heat"]
+    ["--accent", "--accent-text", "--support", "--heat"].concat(DERIVED_PROPS)
       .forEach(prop => root.style.removeProperty(prop));
     const logo = $("#brand-logo");
     if (logo) { logo.hidden = true; logo.removeAttribute("src"); }
+    const naam = $("#sidebar-brand-name");
+    if (naam) { naam.textContent = "Dashboard"; naam.hidden = false; }
   }
 
   function applyBrandConfig(cfg) {
@@ -154,6 +231,7 @@
       root.style.setProperty("--accent-text", cfg.accentText || cfg.accent);
       const rgb = hexToRgbTriplet(cfg.accent);
       if (rgb) root.style.setProperty("--heat", rgb);
+      applyDerivedTokens(cfg.accent);
     }
     // Steunkleur is een vulkleur, geen tekstkleur: de CSS gebruikt hem alleen als
     // achtergrond, altijd met --fg erop.
@@ -169,6 +247,10 @@
     if (cfg.brandName) {
       const sb = $("#sidebar-brand");
       if (sb) sb.textContent = `Klant: ${cfg.brandName}`;
+      // Naam bovenaan alleen tonen als er geen logo is — twee keer hetzelfde merk
+      // boven elkaar zetten leest als een fout.
+      const naam = $("#sidebar-brand-name");
+      if (naam) { naam.textContent = cfg.brandName; naam.hidden = !!cfg.logoUrl; }
     }
   }
 
@@ -5951,7 +6033,14 @@
     if (state.website && typeof renderWebsite === "function") renderWebsite();
   }
   function setDensity(v) { document.documentElement.setAttribute("data-density", v); $$("[data-tweak-density]").forEach(b => b.classList.toggle("on", b.dataset.tweakDensity === v)); }
-  function setTheme(v) { document.documentElement.setAttribute("data-theme", v); $$("[data-tweak-theme]").forEach(b => b.classList.toggle("on", b.dataset.tweakTheme === v)); repaintCharts(); }
+  function setTheme(v) {
+    document.documentElement.setAttribute("data-theme", v);
+    $$("[data-tweak-theme]").forEach(b => b.classList.toggle("on", b.dataset.tweakTheme === v));
+    // De afleiding heeft in dark mode een ander eindpunt, dus eerst opnieuw
+    // rekenen en daarna hertekenen — grafieken bakken hun kleuren in de SVG.
+    applyDerivedTokens();
+    repaintCharts();
+  }
 
   /* ---------- Boot ---------- */
 

@@ -91,6 +91,39 @@
   --heat: 64, 7, 69;           /* app.js overschrijft dit met het klantaccent */
   --shadow: none;              /* §3: kaarten hebben een rand, geen schaduw */
   --shadow-sm: none;
+
+  /* ---- Rapportstijl (Spotto-model, merk-agnostisch) ----------------------
+     Alles hieronder is afgeleid van --accent. app.js overschrijft --accent-data
+     en de panelfamilie met een variant die op lichtheid is afgetopt (een licht
+     merkaccent zou als reekskleur verdwijnen); de waarden hier zijn de terugval
+     als die afleiding niet heeft gelopen.
+     ------------------------------------------------------------------------ */
+  --accent-data: var(--accent);                                     /* reeks 1, lijn, direct label */
+  --s2: color-mix(in oklch, var(--accent-data) 55%, white);         /* reeks 2, de staven */
+  --panel: color-mix(in oklch, var(--accent-data) 9%, var(--bg));   /* de grafiekbak, nooit een kaart */
+  --panel-grid: color-mix(in oklch, var(--accent-data) 24%, var(--panel));
+  --panel-axis: color-mix(in oklch, var(--accent-data) 42%, var(--panel));
+  --strip: color-mix(in oklch, var(--accent-data) 5%, var(--bg));   /* strip achter de tabbladen */
+  --on-accent: #ffffff;                                             /* tekst op een accentvlak */
+  --marker: color-mix(in oklch, var(--accent) 30%, var(--bg));      /* decoratief, nooit data */
+
+  /* Schreef voor wat je leest (koppen, grote cijfers), schreefloos voor wat je
+     afleest. Systeemletters: geen extra verzoek, geen AVG-vraag. */
+  --font-display: "Iowan Old Style", "Charter", "Bitstream Charter",
+                  "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+
+  /* Radius schaalt met het vlak: groter vlak, grotere ronding. */
+  --radius-panel: 16px;
+  --radius-card: 14px;
+  --radius-tip: 11px;
+
+  /* De enige drie verticale afstanden die het rapport kent. */
+  --gap-section: 44px;
+  --gap-kpi: 40px;
+  --gap-controls: 26px;
+
+  /* Eén schaduw in de hele app: onder de tooltip, omdat die echt zweeft. */
+  --shadow-tip: 0 8px 24px rgba(0, 0, 0, 0.10);
 }
 
 /* Donkere modus (§2.1 en §8) — opt-in via data-theme="dark". */
@@ -122,6 +155,17 @@
   --slice-5: #d55181;
   --slice-6: #008300;
   --slice-7: #9085e9;
+
+  /* Rapportstijl in dark: dezelfde formules, ander eindpunt. --accent-data wordt
+     hier door app.js juist opgelicht i.p.v. verdonkerd — een donker merkaccent is
+     op #121212 onleesbaar. */
+  --s2: color-mix(in oklch, var(--accent-data) 55%, #e6e1e5);
+  --panel: color-mix(in oklch, var(--accent-data) 16%, var(--surface));
+  --panel-grid: color-mix(in oklch, var(--accent-data) 34%, var(--panel));
+  --panel-axis: color-mix(in oklch, var(--accent-data) 52%, var(--panel));
+  --strip: color-mix(in oklch, var(--accent-data) 8%, var(--bg));
+  --marker: color-mix(in oklch, var(--accent) 45%, var(--surface));
+  --shadow-tip: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 /* Compacte dichtheid — alleen ritme, nooit de radius of de kleuren. */
@@ -163,15 +207,20 @@ body {
    letterspacing alleen vanaf 16px; kleiner dan 11px komt nergens voor. */
 /* Geen margin: 0 hier — tientallen blokken leunen nog op de standaardmarge van
    de browser. Die nullen we pas als de layout per blok expliciet spacing krijgt. */
-h1, h2, h3 { font-family: var(--font-body); line-height: 1.2; text-wrap: balance; }
-h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.022em; }
-h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.014em; }
-h3 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+h1, h2, h3 { line-height: 1.2; text-wrap: balance; }
+/* De kop is een bewering, niet een label: schreef, licht gewicht, en het
+   scherpe deel vet met <b>. */
+h1 { font-family: var(--font-display); font-size: 40px; font-weight: 400; line-height: 1.14; letter-spacing: -0.005em; }
+h2 { font-family: var(--font-display); font-size: 25px; font-weight: 400; letter-spacing: -0.005em; }
+h1 b, h2 b { font-weight: 700; }
+h3 { font-family: var(--font-body); font-size: 12px; font-weight: 600; letter-spacing: 0.11em; text-transform: uppercase; color: var(--fg-muted); }
 
 /* Cijfers krijgen tabulaire breedtes, zodat kolommen niet verspringen. */
 .kpi-value {
-  font-size: 34px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 37px;
+  font-weight: 400;
+  line-height: 1;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums lining-nums;
 }
@@ -343,19 +392,18 @@ a { color: inherit; text-decoration: none; }
   display: flex; flex-direction: column;
   padding: 26px 18px; gap: 22px;
 }
+/* Bovenaan staat de klant: zijn logo als dat er is, anders zijn naam. */
 .sidebar .brand {
-  font-size: 16px; line-height: 1.1;
-  color: var(--fg);
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  padding: 0 6px;
+  padding: 0 6px; min-height: 28px;
+  display: flex; align-items: center;
 }
 .sidebar .brand span {
-  display: block; margin-top: 6px;
-  font-size: 10px; color: var(--fg-muted);
-  letter-spacing: 0.04em; text-transform: none;
-  font-family: var(--font-body);
+  font-size: 15px; font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.01em; line-height: 1.2;
 }
+.sidebar .brand span[hidden] { display: none; }
+.sidebar .brand .brand-logo { margin-left: 0; max-height: 26px; }
 .nav-links { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .nav-section {
   font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
@@ -418,8 +466,9 @@ a { color: inherit; text-decoration: none; }
 }
 .topbar .crumbs .sep { opacity: 0.5; }
 .topbar h1.page-title {
-  margin: 0;  font-size: 28px; font-weight: 400;
-  letter-spacing: 0.02em;
+  margin: 0; font-family: var(--font-display);
+  font-size: 40px; font-weight: 400; line-height: 1.14;
+  letter-spacing: -0.005em;
   color: var(--fg);
   text-transform: none;
 }
@@ -487,10 +536,11 @@ a { color: inherit; text-decoration: none; }
   background: var(--accent);
 }
 .kpi-card .value {
-  font-size: 34px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 37px;
+  font-weight: 400;
   letter-spacing: -0.02em;
-  line-height: 1.05;
+  line-height: 1;
   font-variant-numeric: tabular-nums lining-nums;
   color: var(--fg);
   margin-top: 4px;
@@ -525,11 +575,12 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 14px; flex-wrap: wrap;
 }
 .panel-title {
-  font-size: 22px;
+  font-family: var(--font-display);
+  font-size: 25px;
   font-weight: 400;
   color: var(--fg);
   margin: 0;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.005em;
 }
 .panel-sub { font-size: 12px; color: var(--fg-muted); margin-top: 4px; }
 .panel-actions { display: flex; gap: 8px; align-items: center; }
@@ -1395,6 +1446,24 @@ a { color: inherit; text-decoration: none; }
   object-fit: contain;
 }
 .brand-logo[hidden] { display: none; }
+
+/* ==========================================================
+   mayday-signatuur onderaan de zijbalk
+   ==========================================================
+   Eén SVG met wordmark, beacon en tagline als vectoren: geen font te laden en
+   niets dat kan verschuiven. Twee varianten omdat een <img> geen currentColor
+   erft — de donkere wisselt in dark mode.
+   ========================================================== */
+.mayday-credit {
+  margin-top: 18px;
+  padding: 14px 6px 0;
+  border-top: 1px solid var(--border);
+}
+.mayday-credit img { display: block; width: 100%; max-width: 186px; height: auto; }
+.mayday-credit .on-dark { display: none; }
+:root[data-theme="dark"] .mayday-credit .on-light { display: none; }
+:root[data-theme="dark"] .mayday-credit .on-dark { display: block; }
+
 
 /* ==========================================================
    ROAS-tab — blended MER, kanaalsplitsing en break-even

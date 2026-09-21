@@ -131,7 +131,12 @@
 
       <!-- Sidebar -->
       <aside class="sidebar">
-        <div class="brand">mayday<br><span>marketing · social agent</span></div>
+        <!-- Klant bovenaan: logo uit de Config-tab, met de naam als terugval.
+             mayday staat onderaan, als signatuur. -->
+        <div class="brand">
+          <img id="brand-logo" class="brand-logo" alt="" hidden>
+          <span id="sidebar-brand-name">Dashboard</span>
+        </div>
         <div class="brand-pill">
           <span style="width:6px; height:6px; border-radius:50%; background:var(--positive);"></span>
           <span id="sidebar-brand">Klant: —</span>
@@ -186,6 +191,15 @@
         </div>
 
         <div id="sidebar-brand-sub" style="font-size:10px; color:var(--fg-muted); letter-spacing:0.06em; padding:0 6px;">—</div>
+        <!-- Signatuur: één SVG met wordmark, beacon en tagline als vectoren, dus
+             geen font te laden. De donkere variant wisselt in dark mode. -->
+        <div class="mayday-credit">
+          <img class="on-light" src="assets/mayday-lockup.svg"
+               alt="mayday — marketing agents &amp; automations" width="186" height="24">
+          <img class="on-dark" src="assets/mayday-lockup-dark.svg"
+               alt="" width="186" height="24">
+        </div>
+
         <button class="logout" onclick="logout()">
           <span style="font-size:14px;">↪</span>
           Afmelden
@@ -211,9 +225,6 @@
               <span class="dot" style="background:#fff;"></span>
               Vraag de Agent
             </button>
-            <!-- Merklogo rechtsboven (design system §3). src + alt worden in app.js
-                 gezet uit de Config-tab; verborgen zolang er geen logo is. -->
-            <img id="brand-logo" class="brand-logo" alt="" hidden>
           </div>
         </div>
 
