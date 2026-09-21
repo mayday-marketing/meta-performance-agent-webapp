@@ -142,48 +142,40 @@
           <button class="nav-toggle" id="nav-toggle" type="button"
                   aria-label="Menu inklappen" aria-expanded="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4L6 8l4 4"/></svg></button>
         </div>
-        <div class="brand-pill">
-          <span style="width:6px; height:6px; border-radius:50%; background:var(--positive);"></span>
-          <span id="sidebar-brand">Klant: —</span>
-        </div>
-        <div id="sidebar-context" class="brand-pill" style="display:none;" title="Merkcontext zoals opgegeven bij handmatige upload">
-          <span style="width:6px; height:6px; border-radius:50%; background:var(--accent);"></span>
-          <span>Merkcontext: <span id="sidebar-context-count">—</span></span>
-        </div>
 
         <div class="nav-links">
-          <div class="nav-section">Workspace</div>
+          <div class="nav-section">Rapporten</div>
           <button class="nav-link on" data-page="overview">
-            <span class="icon">◐</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg></span>
             <span>Overview</span>
           </button>
           <button class="nav-link" data-page="library">
-            <span class="icon">▦</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2 14 5.3 8 8.4 2 5.3z"/><path d="M2 8.4 8 11.5l6-3.1"/><path d="M2 11.4 8 14.5l6-3.1"/></svg></span>
             <span>Library</span>
             <span class="badge">14</span>
           </button>
           <button class="nav-link" data-page="analysis">
-            <span class="icon">✦</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.2 2h4.6l3 3v9H4.2z"/><path d="M6.4 8.4h4M6.4 11h4"/></svg></span>
             <span>Analysis</span>
           </button>
           <button class="nav-link" data-page="website">
-            <span class="icon">◎</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.8 2.2 1.8 9.8 0 12M8 2c-1.8 2.2-1.8 9.8 0 12"/></svg></span>
             <span>Website</span>
           </button>
           <button class="nav-link" data-page="seo">
-            <span class="icon">⌕</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.6"/><path d="M10.2 10.2 14 14"/></svg></span>
             <span>SEO</span>
           </button>
           <button class="nav-link" data-page="geo">
-            <span class="icon">◈</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8l1.7 4.1 4.1 1.6-4.1 1.6L8 13.2 6.3 9.1 2.2 7.5l4.1-1.6z"/></svg></span>
             <span>GEO</span>
           </button>
           <button class="nav-link" data-page="roas">
-            <span class="icon">€</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12.5l4-4 3 3 5.2-6"/><path d="M10.4 5.5h3.8v3.8"/></svg></span>
             <span>ROAS</span>
           </button>
           <button class="nav-link" data-page="email">
-            <span class="icon">✉</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.2 4h11.6v8H2.2z"/><path d="m2.2 4.6 5.8 3.9 5.8-3.9"/></svg></span>
             <span>E-mail</span>
           </button>
           <button class="nav-link" data-page="report">
@@ -191,17 +183,32 @@
             <span>Rapport</span>
           </button>
           <button class="nav-link" data-page="methodology">
-            <span class="icon">⚖</span>
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.6v10.8"/><path d="M4 5.4h8"/><path d="M4 5.4 2.3 9.3h3.4z"/><path d="M12 5.4l-1.7 3.9h3.4z"/></svg></span>
             <span>Methodology</span>
           </button>
+          <button class="nav-link" data-page="bronnen">
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="8" cy="3.8" rx="5" ry="2"/><path d="M3 3.8v8.4c0 1.1 2.2 2 5 2s5-.9 5-2V3.8"/><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/></svg></span>
+            <span>Bronnen</span>
+          </button>
 
-          <div class="nav-section" style="margin-top:14px;">Connectors</div>
+          <div class="nav-section" style="margin-top:14px;">Koppelingen</div>
           <div id="connectors-list"></div>
         </div>
 
-        <div id="sidebar-brand-sub" style="font-size:10px; color:var(--fg-muted); letter-spacing:0.06em; padding:0 6px;">—</div>
         <!-- Signatuur: één SVG met wordmark, beacon en tagline als vectoren, dus
              geen font te laden. De donkere variant wisselt in dark mode. -->
+        <div class="sidebar-foot">
+          <div class="brand-pill">
+            <span aria-hidden="true" style="width:6px; height:6px; border-radius:50%; background:var(--positive);"></span>
+            <span id="sidebar-brand">Klant: —</span>
+          </div>
+          <div id="sidebar-context" class="brand-pill" style="display:none;" title="Merkcontext zoals opgegeven bij handmatige upload">
+            <span aria-hidden="true" style="width:6px; height:6px; border-radius:50%; background:var(--accent);"></span>
+            <span>Merkcontext: <span id="sidebar-context-count">—</span></span>
+          </div>
+          <div id="sidebar-brand-sub">—</div>
+        </div>
+
         <div class="mayday-credit">
           <div class="lockup">
             <img class="on-light" src="assets/mayday-lockup.svg"
@@ -388,6 +395,16 @@
                periode uit de topbar; de opbouw staat in renderWebsite() in app.js. -->
           <div id="page-website" class="dash-page" style="display:none;">
             <div id="website-content"></div>
+          </div>
+
+          <!-- ========== BRONNEN PAGE ==========
+               Welke data het dashboard gebruikt: per bron wat hij voedt, hoe vers
+               hij is en waarvoor hij níet dient. Bewust zonder id's in beeld —
+               één service-account en één API-sleutel bedienen álle klanten, dus
+               een sheet- of map-id op het scherm is een risico. Opbouw:
+               renderBronnen() in app.js. -->
+          <div id="page-bronnen" class="dash-page" style="display:none;">
+            <div id="bronnen-content"></div>
           </div>
 
           <!-- ========== SEO PAGE ========== -->

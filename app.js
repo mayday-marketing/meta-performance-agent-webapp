@@ -78,6 +78,9 @@
     websiteError: null,
     websiteKey: null,                 // klant+periode waarvoor de tab geladen is (lazy refresh)
     websiteCompare: "prev",           // 'prev' (vorige periode) | 'yoy' (vorig jaar)
+    websiteTab: "overzicht",          // actief sub-blad van de Website-tab
+    roasTab: "blended",               // actief sub-blad van de ROAS-tab
+    bronnenTab: "bronnen",            // actief sub-blad van de Bronnen-tab
     websiteLandingQuery: "",          // zoekterm in de landingspagina-tabel (alleen deze sessie)
     // SEO-tab — eigen keywordlijst, géén periode (zoekvolume is een maandcijfer).
     seo: null,                        // volumes-respons: { items, keywords, cost, ... }
@@ -448,7 +451,7 @@
     if (!el) {
       el = document.createElement("div");
       el.id = "login-error";
-      el.style.cssText = "color:#c0392b; font-size:12px; margin-top:8px; min-height:16px;";
+      el.style.cssText = "color:var(--negative); font-size:12px; margin-top:8px; min-height:16px;";
       $("#login-button").insertAdjacentElement("beforebegin", el);
     }
     el.textContent = msg || "";
@@ -578,7 +581,7 @@
 
   // Pagina's met een eigen rapportkop dragen hun titel zelf; dan verdwijnt de
   // topbar-titel, anders staan er twee koppen van 40px boven elkaar.
-  const REPORT_PAGES = new Set(["overview"]);
+  const REPORT_PAGES = new Set(["overview", "website", "roas", "bronnen"]);
 
   function switchPage(page) {
     state.page = page;
@@ -596,6 +599,7 @@
       roas:        { title: "ROAS",        crumbs: ["Dashboard", "ROAS"] },
       report:      { title: "Rapport",     crumbs: ["Dashboard", "Rapport"] },
       methodology: { title: "Methodology", crumbs: ["Dashboard", "Methodology"] },
+      bronnen:     { title: "Bronnen",     crumbs: ["Dashboard", "Bronnen"] },
     };
     const t = titles[page] || titles.overview;
     $(".page-title").textContent = t.title;
@@ -618,6 +622,8 @@
     // Rapport heeft een eigen periode en haalt zelf op wat de gekozen blokken
     // nodig hebben; hier alleen de configurator tekenen.
     if (page === "report" && window.__report) window.__report.open();
+    // Bronnen leest alleen wat de app al weet; geen eigen fetch.
+    if (page === "bronnen") renderBronnen();
   }
 
   // Spring vanuit de Analyse naar een specifieke advertentie in de Library: filter op
@@ -1057,9 +1063,9 @@
     const timeseries = {
       weeks: trendWeeks.map((w, i) => `wk ${i + 1}`),
       series: [
-        { label: "Instagram", color: "#ff683b", values: trendIG },
-        { label: "Facebook", color: "#351f69", values: trendFB },
-        { label: "Meta Ads", color: "#1f9b8a", values: trendAds },
+        { label: "Instagram", values: trendIG },
+        { label: "Facebook", values: trendFB },
+        { label: "Meta Ads", values: trendAds },
       ],
     };
 
@@ -1370,11 +1376,27 @@
 
     const erCur = curAgg.reach ? (curAgg.interactions / curAgg.reach) * 100 : 0;
 
+    // VERGELIJKINGSPERIODE — getDashboard stuurt hem mee sinds de datasheet ook
+    // de vorige periode kan leveren. Kwam er niets terug (API-klant met een
+    // trage connector, of een sheet die niet zo ver terugloopt), dan blijft het
+    // null en zegt de kaart 'geen vergelijkbare vorige periode' — nooit nul.
+    const prev = raw.previous || {};
+    const prevIg = arrayOrEmpty(prev.instagram?.data).map(normalizeWindsorIgPost).filter(Boolean);
+    const prevFb = arrayOrEmpty(prev.fbOrganic?.data).map(normalizeWindsorFbPost).filter(Boolean);
+    const prevAdsRows = arrayOrEmpty(prev.ads?.data).map(normalizeWindsorAdRow).filter(Boolean);
+    const heeftVergelijking = prevIg.length || prevFb.length || prevAdsRows.length;
+    const prvAgg = heeftVergelijking ? aggregatePosts([...prevIg, ...prevFb]) : null;
+    const adsReachPrv = prevAdsRows.reduce((s, r) => s + (r.reach || 0), 0);
+    const adsClicksPrv = prevAdsRows.reduce((s, r) => s + (r.clicks || 0), 0);
+    const erPrv = prvAgg && prvAgg.reach ? (prvAgg.interactions / prvAgg.reach) * 100 : null;
+
     const kpis = [
-      buildKpi("Totale reach", curAgg.reach + adsReachCur, null, fmt.k, "pct"),
-      buildKpi("Engagement rate", erCur, null, (n) => fmt.pct(n), "pp"),
-      buildKpi("Posts gepubliceerd", curAgg.count, null, (n) => String(n), "pct"),
-      buildKpi("Clicks", curAgg.clicks + adsClicksCur, null, fmt.k, "pct"),
+      buildKpi("Totale reach", curAgg.reach + adsReachCur,
+        prvAgg ? prvAgg.reach + adsReachPrv : null, fmt.k, "pct"),
+      buildKpi("Engagement rate", erCur, erPrv, (n) => fmt.pct(n), "pp"),
+      buildKpi("Posts gepubliceerd", curAgg.count, prvAgg ? prvAgg.count : null, (n) => String(n), "pct"),
+      buildKpi("Clicks", curAgg.clicks + adsClicksCur,
+        prvAgg ? prvAgg.clicks + adsClicksPrv : null, fmt.k, "pct"),
     ];
 
     const startDate = raw.period.startDate;
@@ -1400,9 +1422,9 @@
     const timeseries = {
       weeks: trendWeeks.map((w, i) => `wk ${i + 1}`),
       series: [
-        { label: "Instagram", color: "#ff683b", values: trendIG },
-        { label: "Facebook",  color: "#351f69", values: trendFB },
-        { label: "Meta Ads",  color: "#1f9b8a", values: trendAds },
+        { label: "Instagram", values: trendIG },
+        { label: "Facebook", values: trendFB },
+        { label: "Meta Ads", values: trendAds },
       ],
     };
 
@@ -1617,6 +1639,277 @@
     renderLibrary();
   }
 
+
+  /* ==========================================================
+     Bronnen — welke data dit dashboard gebruikt
+     ==========================================================
+     Deze pagina doet géén eigen fetch: hij leest wat de app al in handen heeft.
+     Dat heeft één gevolg dat expliciet moet zijn: een tab die je nog niet hebt
+     geopend, is 'nog niet opgehaald' — niet 'niet geconfigureerd'. Onbekend is
+     iets anders dan afwezig, en dat verschil bepaalt of je gaat zoeken.
+
+     Er staan bewust geen id's in beeld. Eén service-account en één DataForSEO-
+     sleutel bedienen álle klanten, dus een sheet- of map-id op het scherm is een
+     risico en geen hulpmiddel.
+     ========================================================== */
+
+  const BRON_TABS = [
+    { key: "bronnen", label: "Bronnen" },
+    { key: "dekking", label: "Dekking" },
+    { key: "toegang", label: "Toegang" },
+  ];
+
+  window.__bronTab = (k) => { state.bronnenTab = k; renderBronnen(); };
+
+  function bronKaart(o) {
+    const led = o.staat === "ok" ? "fresh" : (o.staat === "wacht" ? "aging" : "stale");
+    const rijen = (o.rijen || []).map(([k, v]) =>
+      `<div style="display:flex; justify-content:space-between; gap:14px; padding:6px 0;
+        border-top:1px solid var(--border); font-size:12px; line-height:1.5;">
+        <span style="color:var(--fg-muted); flex:none;">${escapeHtml(k)}</span>
+        <span style="text-align:right;">${v}</span>
+      </div>`).join("");
+    return `<div class="kpi-card" style="gap:0;">
+      <div style="display:flex; align-items:center; gap:9px; margin-bottom:4px;">
+        <span class="led ${led}" aria-hidden="true" style="width:8px; height:8px; border-radius:50%;
+          background:var(${o.staat === "ok" ? "--positive" : o.staat === "wacht" ? "--warning" : "--negative"});"></span>
+        <span style="font-size:14px; font-weight:600;">${escapeHtml(o.naam)}</span>
+      </div>
+      <p style="margin:0 0 12px 17px; font-size:11.5px; color:var(--fg-muted); line-height:1.5;">${escapeHtml(o.rol)}</p>
+      ${rijen}
+      <p style="margin:13px 0 0; padding-top:11px; border-top:1px solid var(--border);
+        font-size:11.5px; color:var(--fg-muted); line-height:1.55;">
+        <b style="color:var(--fg); font-weight:600;">Niet:</b> ${escapeHtml(o.niet)}</p>
+    </div>`;
+  }
+
+  function renderBronnen() {
+    const root = $("#bronnen-content");
+    if (!root) return;
+    const tab = state.bronnenTab || "bronnen";
+    const s = state.session || {};
+    const w = state.website, r = state.roas;
+    const nogNiet = `<span style="color:var(--fg-muted);">nog niet opgehaald</span>`;
+
+    const kaarten = [];
+
+    kaarten.push(bronKaart({
+      naam: "Windsor.ai — live", staat: s.hasWindsor ? "ok" : "uit",
+      rol: "Advertentie- en kanaaldata rechtstreeks uit de API",
+      rijen: [
+        ["Voedt", "Overzicht, ROAS"],
+        ["Periode", escapeHtml(periodLabel() || "—")],
+        ["Advertenties", state.overview ? (state.overview.adsLoading ? "laden…" : `${(state.overview.adsCampaigns || []).length} campagnes`) : nogNiet],
+      ],
+      niet: "advertenties per stuk over meer dan 35 dagen — Meta loopt dan vast.",
+    }));
+
+    const ds = w?.dataSheet;
+    kaarten.push(bronKaart({
+      naam: "Windsor-datasheet", staat: !w ? "wacht" : (ds?.used ? "ok" : (ds?.configured ? "wacht" : "uit")),
+      rol: "Nachtelijke export, per tabblad gelezen",
+      rijen: [
+        ["Voedt", "Website: kanalen, bronnen, dagreeks"],
+        ["Ingesteld", !w ? nogNiet : (ds?.configured ? "ja" : "nee, alles gaat live")],
+        ["Gebruikt", !w ? nogNiet : (ds?.used ? "ja, voor deze periode" : "nee — zie Dekking")],
+      ],
+      niet: "unieke gebruikers — die zijn niet over dagen op te tellen.",
+    }));
+
+    const dc = state.driveContext;
+    kaarten.push(bronKaart({
+      naam: "Google Drive — kennisbank", staat: s.hasDrive ? (dc ? "ok" : "wacht") : "uit",
+      rol: "Merkcontext en ruwe bestanden voor de AI",
+      rijen: [
+        ["Voedt", "AI-analyse en de chat"],
+        ["Gekoppeld", s.hasDrive ? "ja" : "nee"],
+        ["Bestanden", dc ? `${(dc.files || []).length} in het geheugen` : nogNiet],
+      ],
+      niet: "cijfers voor het dashboard — alleen context voor de agents.",
+    }));
+
+    const brand = s.brand;
+    kaarten.push(bronKaart({
+      naam: "Klantsheet", staat: brand ? "ok" : "wacht",
+      rol: "Instellingen die het dashboard vormgeven",
+      rijen: [
+        ["Config", brand ? "merkkleur, logo, account-id's, drempels" : nogNiet],
+        ["Merkkleur", brand?.accent ? `<span style="display:inline-block; width:10px; height:10px; border-radius:3px;
+            background:var(--accent); vertical-align:middle;"></span> uit de Config-tab` : "standaard"],
+        ["Merknaam", escapeHtml(s.brandName || "—")],
+      ],
+      niet: "meetdata — geen enkel cijfer op het scherm komt hieruit.",
+    }));
+
+    const seoAan = state.seo || state.seoSettings;
+    kaarten.push(bronKaart({
+      naam: "DataForSEO", staat: state.seoError || state.geoSourcesError ? "uit" : (seoAan ? "ok" : "wacht"),
+      rol: "Zoekvolumes, posities en AI-vermeldingen",
+      rijen: [
+        ["Voedt", "SEO, en Sources in GEO"],
+        ["Keywords", state.seo ? `${(state.seo.items || []).length} met data` : nogNiet],
+        ["Posities", state.seoRanks ? "opgehaald" : "alleen op knopdruk"],
+      ],
+      niet: "automatisch verversen — elke positiecheck kost geld.",
+    }));
+
+    const an = Object.keys(state.analysisCache || {}).length;
+    kaarten.push(bronKaart({
+      naam: "De twee AI-agents", staat: "ok",
+      rol: "Analyse eenmalig, chat eenmalig, geen gereedschap",
+      rijen: [
+        ["Analyse", an ? `${an} periode${an === 1 ? "" : "s"} in het geheugen` : "nog niet gedraaid"],
+        ["Chat", `${(state.chatMessages || []).length} berichten deze sessie`],
+        ["Context", "het samengevatte dashboard plus de Drive-context"],
+      ],
+      niet: "zelf data ophalen — ze zien alleen wat wij meesturen.",
+    }));
+
+    root.innerHTML = subtabBar(BRON_TABS, tab, "__bronTab", datastampHtml(state.period?.end, "Periode t/m"))
+      + `<div class="report-head">
+          <p class="eyebrow">Databronnen · ${escapeHtml(new Date().toLocaleString("nl-NL", { dateStyle: "long", timeStyle: "short" }))}</p>
+          <h2 class="report-title">Elk cijfer op dit dashboard komt uit <b>één van deze zes bronnen</b></h2>
+          <p class="report-lede">Wat elke bron voedt, hoe vers hij is, en waarvoor hij níet dient. Deze pagina leest
+          alleen wat de app al heeft: een tab die je nog niet opende staat op <i>nog niet opgehaald</i> — dat is iets
+          anders dan niet geconfigureerd.</p>
+        </div>`
+      + subpane("bronnen", tab,
+          `<div class="bron-grid">${kaarten.join("")}</div>` + renderBronnenConnectors())
+      + subpane("dekking", tab, renderBronnenDekking())
+      + subpane("toegang", tab, renderBronnenToegang());
+  }
+
+  function renderBronnenConnectors() {
+    const r = state.roas;
+    const ov = state.overview;
+    const rijen = [];
+    const rij = (conn, waarvoor, account, laatste, kleur, staat) => rijen.push(`<tr>
+      <td style="font-family:var(--font-mono); font-size:11.5px;">${escapeHtml(conn)}</td>
+      <td>${escapeHtml(waarvoor)}</td>
+      <td style="color:var(--fg-muted);">${escapeHtml(account)}</td>
+      <td>${escapeHtml(laatste)}</td>
+      <td><span style="color:${kleur}; font-weight:600;">${escapeHtml(staat)}</span></td>
+    </tr>`);
+
+    // Alleen de laatste vier tekens van een account: genoeg om te herkennen,
+    // te weinig om ergens anders te gebruiken.
+    const mask = (v) => {
+      const t = String(v || "");
+      return t.length > 4 ? "••••" + t.slice(-4) : (t || "—");
+    };
+
+    if (ov) {
+      rij("instagram", "Instagram organiek", "uit de Config-tab",
+        state.period?.end || "—", "var(--positive)", "gekoppeld");
+      const camps = (ov.adsCampaigns || []).length;
+      rij("facebook", "Meta Ads", "uit de Config-tab", state.period?.end || "—",
+        camps ? "var(--positive)" : "var(--warning)", camps ? "gekoppeld" : "geen campagnes");
+    }
+    if (r && r.channels && r.current) {
+      for (const c of r.channels) {
+        const d = (r.current.channels || {})[c.key] || {};
+        const heeftSpend = (d.spend || 0) > 0;
+        const geenOmzet = d.platformRevenueAvailable === false && d.ga4Available === false;
+        rij(c.key, c.label, heeftSpend ? mask(d.accountId) : "—",
+          heeftSpend ? (state.period?.end || "—") : "—",
+          !heeftSpend ? "var(--fg-muted)" : (geenOmzet ? "var(--warning)" : "var(--positive)"),
+          !heeftSpend ? "niet geconfigureerd" : (geenOmzet ? "geen omzetveld" : "gekoppeld"));
+      }
+    }
+    if (!rijen.length) {
+      return `<p class="source-line" style="margin-top:22px;">Open eerst het Overzicht of de ROAS-tab; deze pagina leest
+        wat die tabs hebben opgehaald en verzint niets bij.</p>`;
+    }
+    return `<div class="report-table">
+      <table>
+        <thead><tr><th>Connector</th><th>Waarvoor</th><th>Account</th><th>Laatste data</th><th>Status</th></tr></thead>
+        <tbody>${rijen.join("")}</tbody>
+      </table>
+    </div>
+    <p class="source-line">Een kanaal verschijnt zodra er een account-id voor in de Config-tab staat. Van een account
+    staan alleen de laatste vier tekens in beeld.</p>`;
+  }
+
+  function renderBronnenDekking() {
+    const w = state.website;
+    if (!w) {
+      return `<p class="source-line">Open eerst de Website-tab: de dekkingscontrole gebeurt daar, per tabblad van de datasheet.</p>`;
+    }
+    const cov = w.current?.sheetCoverage || {};
+    const labels = {
+      ga4Daily: "Google Analytics 4 — dag", ga4Channel: "GA4 — kanalen",
+      ga4Landing: "GA4 — landingspagina's", gscDaily: "Search Console — dag",
+      gscQuery: "Search Console — zoekopdrachten",
+    };
+    const blokken = Object.entries(labels).map(([k, label]) => {
+      const c = cov[k];
+      if (!c) return "";
+      const pct = (c.days != null && c.expected) ? Math.round((c.days / c.expected) * 100) : (c.ok ? 100 : 0);
+      const tekst = c.ok
+        ? `${c.days != null ? `${c.days} van de ${c.expected} dagen` : "volledig"} · ${c.rows != null ? `${c.rows} rijen` : ""}`
+        : escapeHtml(c.reason || "niet gebruikt");
+      return `<div style="margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
+          <span style="font-size:12.5px; font-weight:600;">${escapeHtml(label)}</span>
+          <span style="font-size:11.5px; color:var(--fg-muted);">${tekst}</span>
+        </div>
+        <div style="display:flex; height:14px; border-radius:4px; overflow:hidden; gap:1px; background:var(--surface-strong);">
+          <span style="width:${pct}%; background:var(--s2);"></span>
+          ${pct < 100 ? `<span style="flex-grow:1; background:var(--negative-bg);"></span>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+
+    return `<div class="report-split">
+      <div>
+        <p class="eyebrow">Dekking</p>
+        <h2 class="report-title" style="font-size:25px;">Niet alleen begin en eind — <b>ook de gaten ertussen</b></h2>
+        <div class="chart-tub" style="margin-top:18px; padding-bottom:8px;">${blokken || `<p class="source-line" style="margin:0;">Geen datasheet ingesteld voor deze klant.</p>`}</div>
+        <p class="source-line">Een lopende backfill levert losse dagen over een jaar: eerste en laatste dag zien er dan
+        goed uit terwijl de helft ontbreekt, en het totaal zou stilzwijgend te laag worden. Daarom wordt dag per dag geteld,
+        met een marge per bron — GA4 twee dagen, Search Console vier.</p>
+      </div>
+      <div class="callouts">
+        ${callout("info", "↗", "Waarom dit bestaat",
+          `Een sheet-tab lezen duurt 0,3 tot 2,3 seconden; een koude API-aanroep over 90 dagen bijna 18 seconden met
+           13 tot 21 aanroepen. De sheet wordt alleen gebruikt als hij de hele periode dekt.`)}
+        ${callout("watch", "!", "Deel een datasheet nooit met een klant",
+          `Windsor schrijft mislukte runs inclusief de volledige aanroep-URL naar de Queries-tab, mét API-sleutel.
+           Die sleutel is gedeeld over meerdere klanten.`)}
+      </div>
+    </div>`;
+  }
+
+  function renderBronnenToegang() {
+    const s = state.session || {};
+    const ses = s.ts ? new Date(Number(s.ts)) : null;
+    const verloopt = ses ? new Date(ses.getTime() + 10 * 3600 * 1000) : null;
+    return `<div class="report-split">
+      <div>
+        <p class="eyebrow">Toegang</p>
+        <h2 class="report-title" style="font-size:25px;">Wie dit dashboard ziet, en <b>hoe lang</b></h2>
+        <div class="report-table" style="margin-top:18px;">
+          <table><tbody>
+            <tr><td>Klant</td><td>${escapeHtml(s.brandName || "—")}</td></tr>
+            <tr><td>Klantcode</td><td>${escapeHtml(s.clientId || "—")}</td></tr>
+            <tr><td>Sessie verloopt</td><td>${verloopt ? escapeHtml(verloopt.toLocaleString("nl-NL", { dateStyle: "short", timeStyle: "short" })) : "binnen 10 uur"}</td></tr>
+            <tr><td>Windsor gekoppeld</td><td>${s.hasWindsor ? "ja" : "nee"}</td></tr>
+            <tr><td>Metricool gekoppeld</td><td>${s.hasMetricool ? "ja" : "nee"}</td></tr>
+            <tr><td>Drive gekoppeld</td><td>${s.hasDrive ? "ja" : "nee"}</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      <div class="callouts">
+        ${callout("watch", "!", "Wat hier bewust niet staat",
+          `Geen sheet-id's, map-id's of sleutels. Eén service-account en één API-sleutel bedienen álle klanten,
+           dus een id op het scherm is een risico en geen hulpmiddel.`)}
+        ${callout("info", "↗", "Hoe de sessie werkt",
+          `Inloggen levert een token dat tien uur geldig is en aan deze klantcode vastzit. Het staat in
+           <b>sessionStorage</b>, dus een nieuw tabblad vraagt opnieuw om inloggen.`)}
+      </div>
+    </div>`;
+  }
+
   /* ---------- Rapportkop, stempel en callouts ----------
      De kop is een bewering, dus die wordt uit de cijfers afgeleid en niet uit een
      vaste tekst. Datzelfde geldt voor de callouts: ze staan op berekende feiten
@@ -1644,24 +1937,47 @@
     const som = (label) => ts.series.find(x => x.label === label)?.values || [];
     const org = ts.weeks.map((_, i) => (som("Instagram")[i] || 0) + (som("Facebook")[i] || 0));
     const paid = ts.weeks.map((_, i) => som("Meta Ads")[i] || 0);
-    const helft = (arr) => {
+    // Gemiddelde per week, niet de som: bij een oneven aantal weken zit er één
+    // week meer in de tweede helft, en dan toont een vlakke reeks +17%.
+    const helften = (arr) => {
       const mid = Math.floor(arr.length / 2);
       if (mid < 1) return null;
-      const a = arr.slice(0, mid).reduce((x, y) => x + y, 0);
-      const b = arr.slice(mid).reduce((x, y) => x + y, 0);
-      if (!a) return b ? Infinity : null;
-      return (b - a) / a;
+      const gem = (xs) => (xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : 0);
+      return { a: gem(arr.slice(0, mid)), b: gem(arr.slice(mid)) };
     };
-    return { orgGroei: helft(org), paidGroei: helft(paid),
-             orgTotaal: org.reduce((a, b) => a + b, 0),
-             paidTotaal: paid.reduce((a, b) => a + b, 0) };
+    // Een percentage op een bijna-nul basis is geen cijfer maar een artefact:
+    // een campagne die halverwege start geeft +2194% en dat zegt niets. Onder de
+    // drempel geven we daarom geen groeipercentage terug, maar de vlag 'gestart'.
+    // Boven een verviervoudiging zegt een percentage niets meer: +1866% klinkt
+    // precies maar betekent 'begon bijna op nul'. Onder een vijfde van de tweede
+    // helft geven we daarom een aandeel in plaats van groei.
+    const groei = (h) => {
+      if (!h) return { pct: null, gestart: false };
+      if (!h.a || h.a < h.b * 0.2) return { pct: null, gestart: h.b > 0 };
+      return { pct: (h.b - h.a) / h.a, gestart: false };
+    };
+    const ho = helften(org), hp = helften(paid);
+    return {
+      org: groei(ho), paid: groei(hp),
+      orgTotaal: org.reduce((a, b) => a + b, 0),
+      paidTotaal: paid.reduce((a, b) => a + b, 0),
+    };
   }
 
-  function pctText(v) {
+  // Koppen krijgen hele procenten: één decimaal suggereert een precisie die een
+  // weekbundeling niet heeft.
+  function pctKop(v) {
     if (v == null) return null;
-    if (v === Infinity) return "van nul af";
-    const s = (v * 100).toFixed(1).replace(".", ",");
-    return (v >= 0 ? "+" : "") + s + "%";
+    // Meer dan verdubbeld: dan is een factor leesbaarder dan een percentage.
+    if (v >= 1) return (1 + v).toFixed(1).replace(".", ",") + "× zo hoog";
+    return (v >= 0 ? "+" : "−") + Math.abs(Math.round(v * 100)) + "%";
+  }
+
+  // 'daalt met −7%' leest als een dubbele ontkenning; na een werkwoord dat de
+  // richting al zegt hoort het getal zonder teken.
+  function pctAbs(v) {
+    if (v == null) return null;
+    return Math.abs(Math.round(v * 100)) + "%";
   }
 
   function renderReportHead() {
@@ -1680,15 +1996,22 @@
     const t = trendSplit();
     let tekst = "Bereik en betrokkenheid over deze periode";
     if (t) {
-      const o = pctText(t.orgGroei), b = pctText(t.paidGroei);
-      const vlak = (v) => v != null && v !== Infinity && Math.abs(v) < 0.05;
-      if (t.paidTotaal && b && !vlak(t.paidGroei) && vlak(t.orgGroei)) {
-        tekst = `Betaald bereik ${t.paidGroei >= 0 ? "groeit" : "daalt"} met ${b}, <b>organisch staat vlak</b>`;
-      } else if (t.paidTotaal && o && b) {
-        const sterkste = (t.paidGroei ?? -9) >= (t.orgGroei ?? -9) ? "betaald" : "organisch";
-        tekst = `Organisch ${o}, betaald ${b} — <b>${sterkste} trekt de periode</b>`;
-      } else if (o) {
-        tekst = `Organisch bereik ${t.orgGroei >= 0 ? "stijgt" : "daalt"} met <b>${o}</b> over deze periode`;
+      const vlak = (v) => v != null && Math.abs(v) < 0.05;
+      const totaal = t.orgTotaal + t.paidTotaal;
+      const deelBetaald = totaal ? Math.round((t.paidTotaal / totaal) * 100) : 0;
+
+      if (t.paid.gestart) {
+        // Betaald kwam er halverwege bij: dan is een aandeel eerlijker dan groei.
+        tekst = `Betaald bereik kwam er halverwege bij en <b>levert nu ${deelBetaald}% van het totaal</b>`;
+      } else if (t.paid.pct != null && vlak(t.org.pct)) {
+        tekst = `Betaald bereik ${t.paid.pct >= 0 ? "groeit" : "daalt"} met ${pctAbs(t.paid.pct)}, <b>organisch staat vlak</b>`;
+      } else if (t.paid.pct != null && t.org.pct != null) {
+        const sterkste = t.paid.pct >= t.org.pct ? "betaald" : "organisch";
+        tekst = `Organisch ${pctKop(t.org.pct)}, betaald ${pctKop(t.paid.pct)} — <b>${sterkste} trekt de periode</b>`;
+      } else if (t.org.pct != null) {
+        tekst = `Organisch bereik ${t.org.pct >= 0 ? "stijgt" : "daalt"} met <b>${pctAbs(t.org.pct)}</b> in de tweede helft`;
+      } else if (totaal) {
+        tekst = `<b>${fmt.k(totaal)} bereik</b> in deze periode, waarvan ${deelBetaald}% betaald`;
       }
     }
     kop.innerHTML = tekst;
@@ -1750,8 +2073,12 @@
     if (ov.adsLoading) {
       let_op.push("De advertentiecijfers laden nog; de reeks Meta Ads kan nog veranderen.");
     }
-    if (!let_op.length && t && t.orgGroei != null && t.orgGroei < 0) {
-      let_op.push(`Organisch bereik zakt met <b>${pctText(t.orgGroei)}</b> in de tweede helft van de periode.`);
+    if (t && t.org.pct != null && t.org.pct < -0.05) {
+      let_op.push(`Organisch bereik zakt met <b>${pctAbs(t.org.pct)}</b> in de tweede helft van de periode.`);
+    }
+    if (t && t.paid.gestart) {
+      let_op.push(`Betaald bereik startte pas in de tweede helft van deze periode, dus een groeipercentage `
+        + `zou hier een artefact zijn. Daarom staat er een aandeel.`);
     }
     if (let_op.length) {
       kaarten.push(callout("watch", "!", "Waar we op letten", let_op.join("<br><br>")));
@@ -1791,7 +2118,7 @@
     }
     const spend = camps.reduce((a, c) => a + (c.spend || 0), 0);
     const rev = camps.reduce((a, c) => a + (c.revenue || 0), 0);
-    const actief = camps.filter(c => /active|actief/i.test(String(c.status || ""))).length;
+    const metKosten = camps.filter(c => (c.spend || 0) > 0).length;
     if (kop) {
       kop.innerHTML = rev
         ? `€ ${fmt.int(Math.round(spend))} aan advertenties bracht <b>€ ${fmt.int(Math.round(rev))}</b> op`
@@ -1820,7 +2147,7 @@
         <tbody>${rijen}</tbody>
       </table>
     </div>
-    <p class="source-line">Bron: Windsor.ai, connector <b>facebook</b> (Meta Ads) · ${camps.length} campagnes, ${actief} actief`
+    <p class="source-line">Bron: Windsor.ai, connector <b>facebook</b> (Meta Ads) · ${camps.length} campagnes, ${metKosten} met kosten`
       + `${camps.length > 12 ? ` · de twaalf met de hoogste kosten staan hier` : ""}. `
       + `Het oordeel vergelijkt binnen deze periode tegen de mediaan; bij minder dan vijf campagnes zegt dat te weinig.</p>`;
   }
@@ -1856,7 +2183,7 @@
     }
     if (state.overviewError) {
       root.innerHTML = `<div class="panel" style="grid-column:1/-1;">
-        <p style="color:#c0392b; margin:0;">${escapeHtml(state.overviewError)}</p>
+        <p style="color:var(--negative); margin:0;">${escapeHtml(state.overviewError)}</p>
         <button class="btn" style="margin-top:10px;" onclick="window.__refreshOverview()">Opnieuw proberen</button>
       </div>`;
       return;
@@ -1875,8 +2202,16 @@
       let deltaHtml;
       if (k.state === "delta") {
         const arrow = k.direction === "up" ? "↑" : "↓";
-        const dv = k.unit === "pp" ? `${k.delta.toFixed(1)}pp` : `${k.delta.toFixed(1)}%`;
-        deltaHtml = `<div class="delta ${k.direction}">${arrow} ${dv} <span class="vs">${k.vs}</span></div>`;
+        const nl = (n) => n.toFixed(1).replace(".", ",");
+        // Meer dan verdubbeld: een factor leest beter dan '289,3%'. Zelfde regel
+        // als in de conclusiekop, zodat kaart en kop hetzelfde zeggen.
+        const dv = k.unit === "pp"
+          ? `${nl(k.delta)}pp`
+          : (k.delta >= 100 && k.direction === "up"
+              ? `${nl(1 + k.delta / 100)}× zo hoog`
+              : `${nl(k.delta)}%`);
+        const pijl = (k.delta >= 100 && k.direction === "up" && k.unit !== "pp") ? "" : arrow + " ";
+        deltaHtml = `<div class="delta ${k.direction}">${pijl}${dv} <span class="vs">${k.vs}</span></div>`;
       } else if (k.state === "flat") {
         const dv = k.unit === "pp" ? "0,0pp" : "0,0%";
         deltaHtml = `<div class="delta flat">± ${dv} <span class="vs">${k.vs}</span></div>`;
@@ -1885,8 +2220,9 @@
       } else if (k.state === "new") {
         deltaHtml = `<div class="delta new">nieuw <span class="vs">vorige periode geen data</span></div>`;
       } else {
-        // Geen vergelijking is ook context: dan zegt de regel welke periode je ziet.
-        deltaHtml = `<div class="delta none">${escapeHtml(periodLabel())} <span class="vs">· geen vergelijkbare vorige periode</span></div>`;
+        // Geen vergelijking: dan zegt de regel welke periode je ziet. Waaróm er geen
+        // vergelijking is staat één keer in de callout, niet vier keer onder elkaar.
+        deltaHtml = `<div class="delta none">${escapeHtml(periodLabel())}</div>`;
       }
       return `
         <div class="kpi-card">
@@ -1903,12 +2239,15 @@
     const camps = (ov.adsCampaigns || []).filter(c => c && (c.spend || c.impressions || c.reach));
     if (camps.length) {
       const spend = camps.reduce((a, c) => a + (c.spend || 0), 0);
-      const actief = camps.filter(c => /active|actief/i.test(String(c.status || ""))).length;
+      // Windsor's campagnerijen hebben geen statusveld (gecontroleerd op de live
+      // respons), dus '0 actief' zou een bewering zijn over iets wat we niet
+      // meten. Wél meetbaar: hoeveel campagnes er kosten maakten.
+      const metKosten = camps.filter(c => (c.spend || 0) > 0).length;
       root.insertAdjacentHTML("beforeend", `
         <div class="kpi-card">
           <div class="label"><span class="dot" style="background:var(--accent-data)"></span>Campagnes</div>
           <div class="value">${camps.length}</div>
-          <div class="delta none">${actief} actief · € ${fmt.int(Math.round(spend))} aan kosten</div>
+          <div class="delta none">${metKosten} met kosten · € ${fmt.int(Math.round(spend))} totaal</div>
         </div>
       `);
     }
@@ -2439,7 +2778,7 @@
 
     el.innerHTML = rows.map(r => {
       const badge = r.live
-        ? `<span class="badge" style="background:rgba(47,143,95,0.16); color:var(--positive);">Live</span>`
+        ? `<span class="badge" style="background:var(--positive-bg); color:var(--positive);">Live</span>`
         : `<span class="badge">Soon</span>`;
       return `<button class="nav-link" disabled style="opacity:0.7; cursor:default;">
         <span class="icon">${r.live ? "◉" : "◌"}</span>
@@ -2462,7 +2801,7 @@
         missing: [
           ["Facebook organic", "Connector-slug nog niet bevestigd in Windsor — tijdelijk niet opgehaald."],
           ["Retentiecurve organic", "Instagram's API exposeert dit niet voor organic content; alleen gem. kijktijd is beschikbaar."],
-          ["KPI-delta's vs vorige periode", "Vereist een tweede fetch voor de vorige periode — volgt in een latere stap."],
+          ["KPI-delta's vs vorige periode", "Even lange periode direct ervoor. Organisch bereik, interacties, publicaties en kliks; niet op advertentieniveau. Uit de datasheet als die ver genoeg terugloopt, anders live."],
         ],
       };
     }
@@ -2970,7 +3309,7 @@
           <span class="row-thumb thumb-pattern" style="background:${t.bg}; flex:0 0 auto;">${t.imgHtml}</span>
           <div style="flex:1; min-width:0;">
             <button onclick="window.__goToAd('${escapeHtml(a.id)}')" title="Ga naar deze advertentie in de Library"
-              style="background:none; border:none; padding:0; margin:0; color:var(--accent-2,#351f69); font-weight:600; cursor:pointer; text-align:left; text-decoration:underline;">
+              style="background:none; border:none; padding:0; margin:0; color:var(--accent-data); font-weight:600; cursor:pointer; text-align:left; text-decoration:underline;">
               ${escapeHtml((a.caption || "").slice(0, 70) || "Advertentie")}
             </button>
             <div class="muted" style="font-size:12px; margin-top:2px;">${metricLine(a)}</div>
@@ -3128,7 +3467,7 @@
     // Fout bij laatste generatie.
     if (state.analysisError) {
       root.innerHTML = renderAnalysisEmpty(`
-        <p style="color:#c0392b; margin:0;">${escapeHtml(state.analysisError)}</p>
+        <p style="color:var(--negative); margin:0;">${escapeHtml(state.analysisError)}</p>
         <button class="btn primary" style="margin-top:14px;" onclick="window.__generateAnalysis()">Opnieuw proberen</button>
       `) + adsRank;
       return;
@@ -3214,7 +3553,7 @@
   }
   function emailKpiCard(label, value) {
     return `<div class="panel" style="padding:16px 18px;"><div class="muted" style="font-size:12px;">${escapeHtml(label)}</div>
-      <div style="font-size:26px; color:var(--fg); margin-top:4px;">${value}</div></div>`;
+      <div class="value small" style="margin-top:4px;">${value}</div></div>`;
   }
 
   function renderEmail() {
@@ -3229,7 +3568,7 @@
       return;
     }
     if (state.emailError) {
-      root.innerHTML = renderAnalysisEmpty(`<p style="color:#c0392b; margin:0;">${escapeHtml(state.emailError)}</p>
+      root.innerHTML = renderAnalysisEmpty(`<p style="color:var(--negative); margin:0;">${escapeHtml(state.emailError)}</p>
         <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshEmail()">Opnieuw proberen</button>`);
       return;
     }
@@ -3355,7 +3694,7 @@
   function renderEmailKlaviyo(e) {
     const rows = arrayOrEmpty(e.campaigns?.data);
     const err = e.errors?.campaigns;
-    if (err) return renderAnalysisEmpty(`<p style="color:#c0392b;margin:0;">Klaviyo: ${escapeHtml(err)}</p>
+    if (err) return renderAnalysisEmpty(`<p style="color:var(--negative);margin:0;">Klaviyo: ${escapeHtml(err)}</p>
       <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshEmail()">Opnieuw proberen</button>`);
     if (!rows.length) return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen e-mailcampagnes in deze periode.</p>`);
 
@@ -3402,7 +3741,7 @@
   function renderEmailMailerLite(e) {
     const raw = arrayOrEmpty(e.campaigns?.data);
     const err = e.errors?.campaigns;
-    if (err) return renderAnalysisEmpty(`<p style="color:#c0392b;margin:0;">MailerLite: ${escapeHtml(err)}</p>
+    if (err) return renderAnalysisEmpty(`<p style="color:var(--negative);margin:0;">MailerLite: ${escapeHtml(err)}</p>
       <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshEmail()">Opnieuw proberen</button>`);
 
     // stats-object uitpakken (kan object of JSON-string zijn); rate-velden zijn {float,string}.
@@ -3431,10 +3770,11 @@
       .map(x => ({ label: emailDate(x.sent_at), fixed: x.recipients, ov: { open: x.openRate * 100, click: x.clickRate * 100 } }));
     const chart = renderEmailDualChart({
       id: "ml", title: "Ontvangers & engagement", sub: "Per campagne (oud → nieuw) · klik open/click rate aan of uit",
-      points: chartPts, fixedLabel: "Ontvangers", fixedColor: "#351f69", fixedFmt: (v) => fmt.k(v),
+      points: chartPts, fixedLabel: "Ontvangers",
+      fixedColor: Charts.cssVar("--accent-data", "#400745"), fixedFmt: (v) => fmt.k(v),
       overlays: [
-        { key: "open", label: "Open rate", color: "#ff683b", fmt: (v) => v.toFixed(0) + "%" },
-        { key: "click", label: "Click rate", color: "#1f9b8a", fmt: (v) => v.toFixed(1) + "%", dashed: true },
+        { key: "open", label: "Open rate", color: Charts.cssVar("--s2", "#9c7e9e"), fmt: (v) => v.toFixed(0) + "%" },
+        { key: "click", label: "Click rate", color: Charts.cssVar("--chart-3", "#0072b2"), fmt: (v) => v.toFixed(1) + "%", dashed: true },
       ],
     });
 
@@ -3468,7 +3808,7 @@
     const broadcasts = arrayOrEmpty(e.broadcasts?.data);
     const subs = arrayOrEmpty(e.subscribers?.data);
     const bErr = e.errors?.broadcasts, sErr = e.errors?.subscribers;
-    if (bErr && sErr) return renderAnalysisEmpty(`<p style="color:#c0392b;margin:0;">ConvertKit: ${escapeHtml(bErr)}</p>
+    if (bErr && sErr) return renderAnalysisEmpty(`<p style="color:var(--negative);margin:0;">ConvertKit: ${escapeHtml(bErr)}</p>
       <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshEmail()">Opnieuw proberen</button>`);
 
     const byState = subs.reduce((m, x) => { const k = x.subscribers__state || "onbekend"; m[k] = (m[k] || 0) + 1; return m; }, {});
@@ -3710,10 +4050,10 @@
 
   function roasBadge(v) {
     const colors = {
-      good: "background:rgba(47,143,95,0.16); color:var(--positive);",
+      good: "background:var(--positive-bg); color:var(--positive);",
       ok: "background:var(--surface-strong); color:var(--fg);",
-      warn: "background:rgba(214,158,46,0.18); color:#8a6d1f;",
-      bad: "background:rgba(192,57,43,0.14); color:#c0392b;",
+      warn: "background:var(--warning-bg); color:var(--warning);",
+      bad: "background:var(--negative-bg); color:var(--negative);",
       mute: "background:var(--surface-mute); color:var(--fg-muted);",
     };
     return `<span class="badge" style="${colors[v.tone] || colors.mute}">${escapeHtml(v.label)}</span>`;
@@ -3742,7 +4082,7 @@
       return;
     }
     if (state.roasError) {
-      root.innerHTML = periodBar + renderAnalysisEmpty(`<p style="color:#c0392b; margin:0;">${escapeHtml(state.roasError)}</p>
+      root.innerHTML = periodBar + renderAnalysisEmpty(`<p style="color:var(--negative); margin:0;">${escapeHtml(state.roasError)}</p>
         <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshRoas()">Opnieuw proberen</button>`);
       return;
     }
@@ -3756,14 +4096,136 @@
       return;
     }
 
-    root.innerHTML = periodBar
-      + renderRoasHero()
-      + renderRoasDailyChart()
-      + renderRoasGroup("social", "Paid social")
-      + renderRoasGroup("search", "Paid search")
-      + renderRoasBreakEven()
-      + renderRoasAdvice()
-      + renderRoasFootnote();
+    const tab = state.roasTab || "blended";
+    const dagen = r.current?.daily || [];
+    const laatste = dagen.length ? dagen[dagen.length - 1].date : null;
+
+    root.innerHTML = subtabBar(ROAS_TABS, tab, "__roasTab", datastampHtml(laatste, "Data"))
+      + renderRoasHead()
+      + periodBar
+      + subpane("blended", tab,
+          renderRoasHero()
+          + splitBlok(renderRoasDailyChart() + renderRoasAdvice(), renderRoasCallouts()))
+      + subpane("kanalen", tab,
+          renderRoasGroup("social", "Paid social") + renderRoasGroup("search", "Paid search"))
+      + subpane("breakeven", tab, renderRoasBreakEven())
+      + subpane("verantwoording", tab, renderRoasFootnote());
+  }
+
+  const ROAS_TABS = [
+    { key: "blended", label: "Blended" },
+    { key: "kanalen", label: "Kanalen" },
+    { key: "breakeven", label: "Break-even" },
+    { key: "verantwoording", label: "Verantwoording" },
+  ];
+
+  window.__roasTab = (k) => { state.roasTab = k; renderRoas(); };
+
+  // De kanaalregistratie (label, groep) en de meting staan los van elkaar: de
+  // definitie komt uit _channels.js, de cijfers uit de respons. Eén helper die ze
+  // samenvoegt, zodat kop en callouts niet allebei dezelfde fout kunnen maken.
+  function roasChannelRows() {
+    const r = state.roas;
+    if (!r || !r.current) return [];
+    const cur = r.current;
+    return (r.channels || []).map(c => {
+      const d = (cur.channels || {})[c.key] || {};
+      return {
+        label: c.label,
+        group: c.group,
+        spend: d.spend || 0,
+        roas: safeRoas(roasRevenueOf(d), d.spend),
+        ga4: safeRoas(d.ga4Available === false ? null : d.ga4Revenue, d.spend),
+        plat: d.platformRevenueAvailable === false ? null : safeRoas(d.platformRevenue, d.spend),
+        degraded: !!d.degradedReason,
+      };
+    }).filter(c => c.spend > 0);
+  }
+
+  function renderRoasHead() {
+    const r = state.roas;
+    const cur = r.current;
+    const min = roasMinTarget();
+    const spend = cur.totals.spend;
+    const omzet = cur.totals.revenueAvailable === false ? null : cur.totals.revenue;
+    const blended = safeRoas(omzet, spend);
+    const modus = roasMode();
+    const modusLabel = modus === "platform" ? "platform-omzet" : "GA4-omzet";
+    const uitConfig = !state.roasRevenueMode && roasConfigMode();
+
+    let kop = "Kosten en opbrengst van deze maand";
+    if (blended != null && min.value) {
+      const boven = blended >= min.value;
+      // Hoeveel kanalen staan aan de andere kant van de drempel? Dat maakt het
+      // verschil tussen 'het loopt' en 'het loopt, maar niet overal'.
+      const beoordeeld = roasChannelRows().filter(c => c.roas != null);
+      const onder = beoordeeld.filter(c => c.roas < min.value).length;
+      kop = boven
+        ? (onder
+            ? `Boven break-even op ${escapeHtml(modusLabel)}, <b>maar niet op elk kanaal</b>`
+            : `<b>Boven break-even</b> op ${escapeHtml(modusLabel)}, en op elk gemeten kanaal`)
+        : `<b>Onder break-even</b>: ${roasFmt.ratio(blended)} tegen een drempel van ${roasFmt.ratio(min.value)}`;
+    } else if (blended != null) {
+      kop = `Blended ROAS staat op <b>${roasFmt.ratio(blended)}</b>`;
+    } else if (spend) {
+      kop = `${roasFmt.eur(spend)} aan advertenties, <b>omzet nog niet gemeten</b>`;
+    }
+
+    return `<div class="report-head">
+      <p class="eyebrow">Blended MER · ${escapeHtml(roasRange(state.roasPeriod).label)}</p>
+      <h2 class="report-title">${kop}</h2>
+      <p class="report-lede">Twee omzetdefinities, nooit opgeteld: wat GA4 op last click meet, en wat het kanaal zelf claimt.
+      Het oordeel volgt ${escapeHtml(modusLabel)}${uitConfig ? ", zoals in de Config-tab staat" : ""}.</p>
+    </div>`;
+  }
+
+  function renderRoasCallouts() {
+    const r = state.roas;
+    const cur = r.current;
+    const min = roasMinTarget();
+    const kaarten = [];
+    const rijen = roasChannelRows();
+    const beoordeeld = rijen.filter(c => c.roas != null);
+
+    // Wat werkt: het sterkste kanaal boven de drempel.
+    const sterk = beoordeeld.slice().sort((a, b) => (b.roas || 0) - (a.roas || 0))[0];
+    if (sterk && (!min.value || sterk.roas >= min.value)) {
+      kaarten.push(callout("good", "+", "Wat werkt",
+        `<b>${escapeHtml(sterk.label)}</b> haalt ${roasFmt.ratio(sterk.roas)} op ${roasFmt.eur(sterk.spend)} kosten`
+        + `${min.value ? ` — ${((sterk.roas / min.value - 1) * 100).toFixed(0)}% boven de drempel` : ""}.`));
+    }
+
+    // De twee meetlatten: platform claimt meer dan GA4 meet.
+    const ga4 = cur.totals.revenueAvailable === false ? null : safeRoas(cur.totals.revenue, cur.totals.spend);
+    const plat = cur.totals.platformRevenue != null ? safeRoas(cur.totals.platformRevenue, cur.totals.spend) : null;
+    if (ga4 != null && plat != null) {
+      const uiteen = min.value && ((ga4 < min.value) !== (plat < min.value));
+      kaarten.push(callout("watch", "!", uiteen ? "De twee meetlatten liggen uiteen" : "Twee meetlatten",
+        `GA4 meet <b>${roasFmt.ratio(ga4)}</b>, de platforms claimen <b>${roasFmt.ratio(plat)}</b> — die laatste telt view-through mee. `
+        + (uiteen
+          ? `De drempel van ${roasFmt.ratio(min.value)} ligt daartussen, dus welke meetlat je kiest bepaalt het oordeel.`
+          : `Optellen mag nooit; het is dezelfde omzet, twee keer geteld.`)));
+    }
+
+    // Kanalen zonder omzetveld krijgen geen oordeel.
+    const ongemeten = rijen.filter(c => c.roas == null);
+    if (ongemeten.length) {
+      kaarten.push(callout("watch", "!", "Zonder oordeel",
+        `${ongemeten.map(c => `<b>${escapeHtml(c.label)}</b>`).join(", ")} `
+        + `${ongemeten.length === 1 ? "levert" : "leveren"} kosten maar geen gemeten omzet. `
+        + `Een ROAS van 0 zou 'uitzetten' opleveren terwijl er niets gemeten is, dus daar staat een streepje.`));
+    }
+
+    // Hoe de drempel ontstaat.
+    kaarten.push(callout("info", "↗", "Hoe de drempel ontstaat",
+      min.value
+        ? `(1 − korting) ÷ (brutomarge − korting) = <b>${roasFmt.ratio(min.value)}</b>. `
+          + `Pas marge of korting aan op het blad Break-even om een scenario door te rekenen — dat wordt niet bewaard.`
+        : `Zonder <b>Brutomarge</b> in de Config-tab is er geen drempel. Alle ROAS-cijfers blijven staan, maar er komt geen oordeel bij.`));
+
+    return kaarten.join("")
+      + `<p class="callout-foot">Een kanaal verschijnt zodra er een account-id voor in de Config-tab staat. `
+      + `Ontbrekende data is onbekend, nooit nul — daarom streepjes in plaats van nullen.</p>`;
   }
 
   function renderRoasPeriodBar() {
@@ -3848,7 +4310,7 @@
       if (!g || !g.channels.length) {
         return `<div class="kpi-card" style="opacity:0.72;">
           <div class="label"><span class="dot" style="background:var(--fg-muted)"></span>${escapeHtml(label)}</div>
-          <div class="value" style="font-size:22px;">Niet gekoppeld</div>
+          <div class="value compact">Niet gekoppeld</div>
           <div class="muted" style="font-size:11px; margin-top:10px;">Geen ad-account voor dit type in de Config-tab.</div>
         </div>`;
       }
@@ -3909,8 +4371,8 @@
       leftFormat: (v) => v.toFixed(1).replace(".", ",") + "×",
       maxXLabels: 10,
     } : null;
-    return `<section class="panel" style="margin-bottom:16px;">
-      <div class="panel-header">
+    return `<section class="tub-wrap" style="margin-bottom:16px;">
+      <div class="panel-header" style="padding:0 2px;">
         <div>
           <h2 class="panel-title">${hasRevenue ? "Dagelijkse ROAS" : "Advertentiekosten per dag"}</h2>
           <div class="panel-sub">${hasRevenue
@@ -3918,9 +4380,12 @@
             : "Koppel een GA4-property in de Config-tab om hier de omzet en de blended ROAS bij te zien"}</div>
         </div>
       </div>
-      ${chartSvg(specGeld)}
-      ${specRatio ? `<div class="panel-sub" style="margin:14px 0 2px;">Blended ROAS per dag${min.value ? ` · drempel ${roasFmt.ratio(min.value)}` : ""}</div>
-      ${chartSvg(specRatio)}` : ""}
+      <div class="chart-tub">
+        ${chartSvg(specGeld)}
+        ${specRatio ? `<h3 class="label-head" style="margin:18px 0 8px;">Blended ROAS per dag${min.value ? ` · drempel ${roasFmt.ratio(min.value)}` : ""}</h3>
+        ${chartSvg(specRatio)}` : ""}
+      </div>
+      <p class="source-line">Bron: GA4 <b>purchase_revenue</b> per <b>session_source_medium</b>, kosten per kanaal op campagneniveau</p>
     </section>`;
   }
 
@@ -3958,7 +4423,7 @@
       const verdict = roasVerdict(activeRoas, min.value, d.spend, 25);
       const delta = roasFmt.delta(activeRoas, prevRoas);
       const warn = d.error
-        ? `<div class="muted" style="font-size:10px; color:#c0392b;">${escapeHtml(d.error)}</div>`
+        ? `<div class="muted" style="font-size:10px; color:var(--negative);">${escapeHtml(d.error)}</div>`
         : (d.degradedReason ? `<div class="muted" style="font-size:10px;">Platformomzet niet beschikbaar voor deze connector.</div>` : "");
       // De twee attributiebronnen kunnen aan wéérszijden van de drempel uitkomen.
       // Dat is geen detail: het bepaalt of je dit kanaal uitzet of opschaalt, dus
@@ -4186,7 +4651,7 @@
     if (!r.hasGa4) errs.push("Geen GA4-property in de Config-tab — zonder GA4 is er geen blended omzet en geen GA4-ROAS.");
 
     const errHtml = errs.length
-      ? `<div style="margin-top:10px; font-size:11px; color:#c0392b;">${errs.map(e => escapeHtml(e)).join("<br>")}</div>`
+      ? `<div style="margin-top:10px; font-size:11px; color:var(--negative);">${errs.map(e => escapeHtml(e)).join("<br>")}</div>`
       : "";
 
     return `<section class="panel">
@@ -4328,8 +4793,10 @@
   function webGoal() {
     const w = state.website;
     const on = !!(w && w.website && w.website.goalAvailable);
+    // Een doel kan ingesteld zijn terwijl de eventnaam leeg terugkomt; dan is het
+    // label null en viel elke .toLowerCase() erop om.
     const label = on
-      ? (w.website.goalLabel || w.website.goalEvent)
+      ? (w.website.goalLabel || w.website.goalEvent || "Hoofddoel")
       : "Conversies";
     return {
       on,
@@ -4377,6 +4844,40 @@
 
   /* ---------- Render ---------- */
 
+  /* ---------- Sub-tabs voor pagina's die zichzelf hertekenen ----------
+     De Overview-pagina heeft statische panes; de Website- en ROAS-tab bouwen hun
+     HTML per keer opnieuw. Daar is een balk die zichzelf meelevert eenvoudiger dan
+     panes die in leven moeten blijven: het actieve blad staat in state, dus een
+     hertekening houdt hem vast.
+     -------------------------------------------------------------------- */
+
+  function subtabBar(tabs, actief, handler, rechts) {
+    const knoppen = tabs.map(t =>
+      `<button type="button" class="${t.key === actief ? "on" : ""}" aria-selected="${t.key === actief}" `
+      + `onclick="window.${handler}('${t.key}')">${escapeHtml(t.label)}</button>`
+    ).join("");
+    return `<div class="subtabs">${knoppen}<span style="flex-grow:1;"></span>`
+      + `${rechts ? `<span style="padding-bottom:9px;">${rechts}</span>` : ""}</div>`;
+  }
+
+  function subpane(key, actief, html) {
+    return `<div class="subpane ${key === actief ? "on" : ""}" data-subpane="${key}">${html}</div>`;
+  }
+
+  // Het lampje rekent tegen vandaag: groen t/m 1 dag, oranje tot 7, daarna rood.
+  function datastampHtml(laatsteDag, prefix) {
+    if (!laatsteDag) return "";
+    const dagen = Math.max(0, Math.round((Date.now() - new Date(laatsteDag + "T12:00:00").getTime()) / 86400000));
+    const led = dagen <= 1 ? "fresh" : (dagen <= 7 ? "aging" : "stale");
+    const oud = dagen === 0 ? "vandaag bijgewerkt" : (dagen === 1 ? "gisteren bijgewerkt" : `${dagen} dagen achter`);
+    return `<span class="datastamp"><span class="led ${led}" aria-hidden="true"></span>`
+      + `<span><b>${escapeHtml(prefix || "Data")} t/m ${escapeHtml(laatsteDag.split("-").reverse().join("-"))}</b> — ${oud}</span></span>`;
+  }
+
+  function splitBlok(links, callouts) {
+    return `<div class="report-split"><div>${links}</div><div class="callouts">${callouts}</div></div>`;
+  }
+
   function renderWebsite() {
     const root = $("#website-content");
     if (!root) return;
@@ -4391,7 +4892,7 @@
       return;
     }
     if (state.websiteError) {
-      root.innerHTML = bar + renderAnalysisEmpty(`<p style="color:#c0392b; margin:0;">${escapeHtml(state.websiteError)}</p>
+      root.innerHTML = bar + renderAnalysisEmpty(`<p style="color:var(--negative); margin:0;">${escapeHtml(state.websiteError)}</p>
         <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshWebsite()">Opnieuw proberen</button>`);
       return;
     }
@@ -4405,16 +4906,157 @@
       return;
     }
 
-    root.innerHTML = bar
-      + renderWebsiteKpis()
-      + renderWebsiteChart()
-      + renderWebsiteChannels()
-      + renderWebsiteSources()
-      + renderWebsiteLanding()
-      + renderWebsiteFunnel()
-      + renderWebsiteSearch()
-      + renderWebsiteAudience()
-      + renderWebsiteNotes();
+    // Rapportvorm: één balk met bladen, een kop die een conclusie is, en per blad
+    // de blokken die erbij horen. Alles wat er stond blijft bestaan — het staat
+    // alleen niet meer als één lange pagina onder elkaar.
+    const tab = state.websiteTab || "overzicht";
+    const stamp = datastampHtml(webLastDay(), w.current.search?.available ? "Search Console" : "GA4");
+
+    root.innerHTML = subtabBar(WEB_TABS, tab, "__webTab", stamp)
+      + renderWebsiteHead()
+      + renderWebsiteControls()
+      + subpane("overzicht", tab,
+          renderWebsiteKpis()
+          + splitBlok(renderWebsiteChart() + renderWebsiteFunnel(), renderWebsiteCallouts()))
+      + subpane("kanalen", tab, renderWebsiteChannels() + renderWebsiteSources())
+      + subpane("landing", tab, renderWebsiteLanding())
+      + subpane("zoeken", tab, renderWebsiteSearch())
+      + subpane("apparaten", tab, renderWebsiteAudience())
+      + subpane("verantwoording", tab, renderWebsiteNotes());
+  }
+
+  const WEB_TABS = [
+    { key: "overzicht", label: "Overzicht" },
+    { key: "kanalen", label: "Kanalen" },
+    { key: "landing", label: "Landingspagina's" },
+    { key: "zoeken", label: "Zoeken" },
+    { key: "apparaten", label: "Apparaten" },
+    { key: "verantwoording", label: "Verantwoording" },
+  ];
+
+  window.__webTab = (k) => { state.websiteTab = k; renderWebsite(); };
+
+  // De laatste dag met data: Search Console loopt 2–3 dagen achter, GA4 één.
+  function webLastDay() {
+    const cur = state.website?.current;
+    if (!cur) return null;
+    if (cur.search?.available && cur.search.lastDay) return cur.search.lastDay;
+    const dagen = cur.daily || [];
+    return dagen.length ? dagen[dagen.length - 1].date : (state.period?.end || null);
+  }
+
+  function webPct(cur, prev) {
+    if (cur == null || prev == null || !(prev > 0)) return null;
+    return (cur - prev) / prev;
+  }
+
+  // 'vs vorige periode' is het knoplabel; in een lopende zin hoort het zonder 'vs'.
+  function vergelijkNaam() {
+    return String(webCompareLabel() || "").replace(/^vs\s*/i, "de ");
+  }
+
+  function renderWebsiteHead() {
+    const w = state.website;
+    const cur = w.current.totals, base = webBase();
+    const prev = base ? base.totals : null;
+    const goal = webGoal();
+    const dS = webPct(cur.sessions, prev && prev.sessions);
+    const dG = webPct(goal.valueOf(cur), goal.valueOf(prev));
+
+    let kop = "Verkeer en conversie over deze periode";
+    const p = (v) => (v == null ? null : ((v >= 0 ? "+" : "") + (v * 100).toFixed(1).replace(".", ",") + "%"));
+    if (dS != null && dG != null) {
+      if (dS > 0.02 && dG < -0.02) kop = `Meer bezoek, <b>maar ${escapeHtml(goal.label.toLowerCase())} blijft achter</b>`;
+      else if (dS > 0.02 && dG > 0.02) kop = `Bezoek ${p(dS)} en ${escapeHtml(goal.label.toLowerCase())} <b>${p(dG)}</b> — beide omhoog`;
+      else if (dS < -0.02 && dG < -0.02) kop = `Bezoek ${p(dS)}, en <b>${escapeHtml(goal.label.toLowerCase())} zakt mee</b>`;
+      else if (dS < -0.02 && dG > 0.02) kop = `Minder bezoek, <b>maar ${escapeHtml(goal.label.toLowerCase())} stijgt ${p(dG)}</b>`;
+      else kop = `Bezoek en ${escapeHtml(goal.label.toLowerCase())} staan <b>vlak</b> tegenover ${escapeHtml(vergelijkNaam())}`;
+    } else if (dS != null) {
+      kop = `Bezoek ${dS >= 0 ? "stijgt" : "daalt"} met <b>${pctAbs(dS)}</b> tegenover ${escapeHtml(vergelijkNaam())}`;
+    }
+
+    const start = state.period.start, end = state.period.end;
+    const cmp = state.websiteCompare === "yoy" ? roasCompareRange({ start, end }) : webPrevRange(start, end);
+    const soort = w.website.type === "webshop" ? "Webshop" : "Leadgeneratie";
+    const soortBron = w.website.typeSource === "config" ? "uit de Config-tab" : "afgeleid uit de data";
+
+    return `<div class="report-head">
+      <p class="eyebrow">GA4 &amp; Search Console · ${escapeHtml(periodLabel())}</p>
+      <h2 class="report-title">${kop}</h2>
+      <p class="report-lede">Vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}. `
+      + `${escapeHtml(soort)}, ${escapeHtml(soortBron)}. Betaald verkeer staat hier als kanaal, zonder kosten of ROAS — `
+      + `die vraag beantwoordt de ROAS-tab.</p>
+    </div>`;
+  }
+
+  function renderWebsiteControls() {
+    const knoppen = WEB_COMPARE.map(c =>
+      `<button class="${c.key === state.websiteCompare ? "on" : ""}" onclick="window.__webCompare('${c.key}')">${escapeHtml(c.label)}</button>`
+    ).join("");
+    return `<div class="controls-row">
+      <div class="period-toggle" title="Waartegen de veranderingen afgezet worden">${knoppen}</div>
+      <span style="flex-grow:1;"></span>
+      <span class="source-line" style="margin:0;">Beide vergelijkingsperiodes zitten in dezelfde aanroep — de knop hertekent zonder nieuwe fetch.</span>
+      <button class="btn" onclick="window.__refreshWebsite()">Ververs data</button>
+    </div>`;
+  }
+
+  function renderWebsiteCallouts() {
+    const w = state.website;
+    const cur = w.current.totals;
+    const goal = webGoal();
+    const kaarten = [];
+
+    // Wat werkt: het kanaal dat het hardst groeit, anders het grootste kanaal.
+    const chans = (w.current.channels || []).slice();
+    const base = webBase();
+    const prevChans = base ? (base.channels || []) : [];
+    const metGroei = chans.map(c => {
+      const pv = prevChans.find(x => x.label === c.label);
+      return { ...c, groei: webPct(c.sessions, pv && pv.sessions) };
+    }).filter(c => c.groei != null && c.sessions > 0);
+    metGroei.sort((a, b) => b.groei - a.groei);
+    if (metGroei.length && metGroei[0].groei > 0.02) {
+      const c = metGroei[0];
+      kaarten.push(callout("good", "+", "Wat werkt",
+        `<b>${escapeHtml(c.label)}</b> groeit met ${((c.groei * 100).toFixed(1)).replace(".", ",")}% naar `
+        + `${webFmt.int(c.sessions)} sessies — de sterkste stijger van deze periode.`));
+    } else if (chans.length) {
+      const grootste = chans.slice().sort((a, b) => (b.sessions || 0) - (a.sessions || 0))[0];
+      kaarten.push(callout("good", "+", "Wat werkt",
+        `<b>${escapeHtml(grootste.label)}</b> is het grootste kanaal met ${webFmt.int(grootste.sessions)} sessies.`));
+    }
+
+    // Welk doel je ziet: het verschil tussen hoofddoel en alle key events is groot.
+    if (goal.on) {
+      const alle = cur.conversions;
+      kaarten.push(callout("watch", "!", "Welk doel je ziet",
+        `Hierboven staat <b>${webFmt.int(goal.valueOf(cur))} ${escapeHtml(goal.label.toLowerCase())}</b> — het hoofddoel uit de Config-tab. `
+        + (alle != null && alle > 0
+          ? `GA4's eigen 'key events' telt alles samen en komt op <b>${webFmt.int(alle)}</b>. Dat is geen conversieratio en niet te vergelijken.`
+          : `Alle key events samen zouden een hoger, minder bruikbaar cijfer geven.`)));
+    } else {
+      kaarten.push(callout("watch", "!", "Welk doel je ziet",
+        `Je ziet <b>alle key events samen</b>, niet één doel. Zet <b>Conversiedoel</b> in de Config-tab op een GA4-eventnaam `
+        + `om op één doel te sturen — dat scheelt vaak een factor tien.`));
+    }
+
+    // Waar de cijfers vandaan komen: sheet of live.
+    const origin = w.current.origin || {};
+    const labels = { totals: "kerncijfers", channels: "kanalen", landingPages: "landingspagina's", search: "organisch zoeken", queries: "zoekopdrachten" };
+    const uitSheet = Object.keys(labels).filter(k => origin[k] === "sheet").map(k => labels[k]);
+    const uitApi = Object.keys(labels).filter(k => origin[k] === "api").map(k => labels[k]);
+    kaarten.push(callout("info", "↗", "Waar dit vandaan komt",
+      (w.dataSheet && w.dataSheet.configured)
+        ? `${uitSheet.length ? `<b>${escapeHtml(uitSheet.join(", "))}</b> uit de nachtelijke datasheet` : "Niets uit de datasheet"}`
+          + `${uitApi.length ? `, <b>${escapeHtml(uitApi.join(", "))}</b> live uit Windsor` : ""}. `
+          + `De sheet wordt alleen gebruikt als hij de hele periode dekt zonder ontbrekende dagen.`
+        : `Alles live uit Windsor. Voor deze klant staat geen datasheet ingesteld — een sheet maakt de tab twee tot vijftig keer sneller.`));
+
+    const voet = `<p class="callout-foot">Unieke gebruikers zijn niet over dagen op te tellen, dus waar de dagtabel de bron is `
+      + `staan nieuwe gebruikers. De querytabel telt nooit op tot het totaal: Google geeft alleen zoekopdrachten boven een privacydrempel vrij. `
+      + `De volledige verantwoording staat op het laatste blad.</p>`;
+    return kaarten.join("") + voet;
   }
 
   function renderWebsiteBar() {
@@ -4526,15 +5168,18 @@
       leftFormat: Charts.fmt.int,
       maxXLabels: 10,
     } : null;
-    return `<section class="panel" style="margin-bottom:16px;">
-      <div class="panel-header"><div>
-        <h2 class="panel-title">Verkeer per dag</h2>
-        <div class="panel-sub">Sessies${hasConv ? ` en ${escapeHtml(goal.label.toLowerCase())}` : ""} over de gekozen periode</div>
-      </div></div>
+    const origin = state.website?.current?.origin || {};
+    const bron = origin.totals === "sheet"
+      ? "de nachtelijke datasheet, tab <b>Google Analytics 4 — dag</b>"
+      : "Windsor.ai, connector <b>googleanalytics4</b>";
+    return `<div class="chart-tub">
+      <h3 class="label-head">Verkeer per dag</h3>
       ${chartSvg(specSessies)}
-      ${specDoel ? `<div class="panel-sub" style="margin:14px 0 2px;">${escapeHtml(goal.label)} per dag</div>
+      ${specDoel ? `<h3 class="label-head" style="margin:18px 0 8px;">${escapeHtml(goal.label)} per dag</h3>
       ${chartSvg(specDoel)}` : ""}
-    </section>`;
+    </div>
+    <p class="source-line">Bron: ${bron} · ${days.length} dagen`
+      + `${hasConv ? "" : " · geen conversies gemeten in deze periode"}</p>`;
   }
 
   // Sessies, betrokkenheid en conversie per GA4-kanaalgroep. Betaalde kanalen staan
@@ -4865,7 +5510,7 @@
 
     const kpi = (label, value, cur, prev, invert, sub) => `<div class="kpi-card">
       <div class="label"><span class="dot"></span>${escapeHtml(label)}</div>
-      <div class="value" style="font-size:30px;">${value}</div>
+      <div class="value compact">${value}</div>
       ${webDeltaHtml(cur, prev, invert)}
       ${sub ? `<div class="muted" style="font-size:11px;">${escapeHtml(sub)}</div>` : ""}
     </div>`;
@@ -5016,7 +5661,7 @@
     for (const m of (w.dataSheet && w.dataSheet.warnings) || []) add("Datasheet", m);
 
     const errHtml = msgs.length
-      ? `<div style="margin-top:10px; font-size:11px; color:#c0392b;">${msgs.map(m => escapeHtml(m)).join("<br>")}</div>`
+      ? `<div style="margin-top:10px; font-size:11px; color:var(--negative);">${msgs.map(m => escapeHtml(m)).join("<br>")}</div>`
       : "";
 
     const goal = webGoal();
@@ -5344,7 +5989,7 @@
 
     if (state.seoError && !state.seo) {
       root.innerHTML = bar + renderAnalysisEmpty(
-        `<p style="color:#c0392b; margin:0;">${escapeHtml(state.seoError)}</p>
+        `<p style="color:var(--negative); margin:0;">${escapeHtml(state.seoError)}</p>
          <button class="btn primary" style="margin-top:14px;" onclick="window.__seoRefresh()">Opnieuw proberen</button>`);
       return;
     }
@@ -5397,7 +6042,7 @@
         : `Kost ongeveer €0,002 per keyword · maximaal ${maxRank} per run`;
 
     const errLine = state.seoRanksError
-      ? `<div style="font-size:11px; color:#c0392b; margin-top:8px;">${escapeHtml(state.seoRanksError)}</div>`
+      ? `<div style="font-size:11px; color:var(--negative); margin-top:8px;">${escapeHtml(state.seoRanksError)}</div>`
       : "";
 
     return `<section class="panel" style="padding:14px 18px; margin-bottom:16px;">
@@ -5462,7 +6107,7 @@
 
     const card = (label, value, sub, extra) => `<div class="kpi-card">
       <div class="label"><span class="dot"></span>${escapeHtml(label)}</div>
-      <div class="value" style="font-size:30px;">${value}</div>
+      <div class="value compact">${value}</div>
       ${extra || ""}
       ${sub ? `<div class="muted" style="font-size:11px;">${sub}</div>` : ""}
     </div>`;
@@ -5768,7 +6413,7 @@
     }
     if (state.geoError) {
       root.innerHTML = renderAnalysisEmpty(
-        `<p style="color:#c0392b; margin:0;">${escapeHtml(state.geoError)}</p>
+        `<p style="color:var(--negative); margin:0;">${escapeHtml(state.geoError)}</p>
          <button class="btn primary" style="margin-top:14px;" onclick="window.__geoRefresh()">Opnieuw proberen</button>`);
       return;
     }
@@ -5861,7 +6506,7 @@
         const was = prev.find(p => p.label === k.label);
         return `<div class="kpi-card">
           <div class="label"><span class="dot"></span>${escapeHtml(k.label)}</div>
-          <div class="value" style="font-size:30px;">${escapeHtml(k.value)}</div>
+          <div class="value compact">${escapeHtml(k.value)}</div>
           ${k.delta ? `<div class="geo-delta ${escapeHtml(k.tone)}">${escapeHtml(k.delta)}</div>` : ""}
           ${was ? `<div class="muted" style="font-size:11px;">was ${escapeHtml(was.value)} op ${escapeHtml(geoFmt.date(g.previous.auditDate))}</div>` : ""}
           ${k.sub ? `<div class="muted" style="font-size:11px;">${escapeHtml(k.sub)}</div>` : ""}
@@ -6054,7 +6699,7 @@
         Het keyword staat vast in het auditbestand.
       </div>
       ${mismatch}
-      ${state.geoSourcesError ? `<div style="font-size:11px; color:#c0392b; margin-top:8px;">${escapeHtml(state.geoSourcesError)}</div>` : ""}
+      ${state.geoSourcesError ? `<div style="font-size:11px; color:var(--negative); margin-top:8px;">${escapeHtml(state.geoSourcesError)}</div>` : ""}
       ${s ? `<div class="muted" style="font-size:11px; margin-top:8px;">${escapeHtml(
           s.fromCache ? "uit de cache van vandaag" : `zojuist opgehaald${s.cost ? ` ($${s.cost})` : ""}`
         )}${s.totals?.mentions != null ? ` · ${escapeHtml(geoFmt.int(s.totals.mentions))} mentions in de dataset` : ""}</div>` : ""}
@@ -6130,12 +6775,12 @@
     return `<div class="kpi-grid" style="grid-template-columns:repeat(2,1fr); margin-bottom:16px;">
       <div class="kpi-card">
         <div class="label"><span class="dot"></span>Readiness-score</div>
-        <div class="value" style="font-size:30px;">${pass}/${g.readiness.length}</div>
+        <div class="value compact">${pass}/${g.readiness.length}</div>
         <div class="muted" style="font-size:11px;">${fail} gezakt · ${unk} onmeetbaar</div>
       </div>
       <div class="kpi-card">
         <div class="label"><span class="dot"></span>Onmeetbaar</div>
-        <div class="value" style="font-size:30px;">${unk}</div>
+        <div class="value compact">${unk}</div>
         <div class="muted" style="font-size:11px;">Apart geteld: onmeetbaar is geen gezakte check. Zolang een site niet bereikbaar is valt er niets te controleren.</div>
       </div>
     </div>
@@ -6316,7 +6961,7 @@
     if (opener) opener.setAttribute("aria-expanded", String(open));
   }
 
-  function bindNav() {
+  function bindSidebarNav() {
     const root = document.documentElement;
     const toggle = $("#nav-toggle");
     if (toggle) toggle.addEventListener("click", () => {
@@ -6480,7 +7125,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindLogin();
     bindTweaks();
-    bindNav();
+    bindSidebarNav();
     bindOverviewTabs();
     bindManualContext();
 

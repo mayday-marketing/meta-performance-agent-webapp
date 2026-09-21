@@ -210,6 +210,25 @@ module.exports = async (req, res) => {
         const adDateParams = { date_from: adFrom, date_to: endDate };
         const adLevelCapped = adFrom !== startDate;
 
+        // VERGELIJKINGSPERIODE — even lang, direct ervoor. Hij wordt apart
+        // opgehaald en alleen voor de KPI-totalen gebruikt: organisch bereik,
+        // interacties, publicaties en kliks. Bewust niet op advertentieniveau en
+        // zonder de add-ons; die kosten het meest en zeggen over een vorige
+        // periode niets wat een totaal niet al zegt.
+        //
+        // Voor een klant zonder API-sleutel kost dit vrijwel niets: de tabbladen
+        // van de datasheet staan dan al in de procescache, dus het is een tweede
+        // filter over dezelfde rijen. Voor een API-klant zijn het drie extra
+        // aanroepen met een krappere timeout, niet-fataal.
+        const spanDays = rangeDays;
+        const prevEnd = new Date(`${startDate}T12:00:00Z`);
+        prevEnd.setUTCDate(prevEnd.getUTCDate() - 1);
+        const prevStart = new Date(prevEnd);
+        prevStart.setUTCDate(prevStart.getUTCDate() - (spanDays - 1));
+        const prevStartDate = prevStart.toISOString().slice(0, 10);
+        const prevEndDate = prevEnd.toISOString().slice(0, 10);
+        const prevDateParams = { date_from: prevStartDate, date_to: prevEndDate };
+
         const IG_FIELDS = [
           'media_id', 'media_caption', 'media_type', 'media_product_type',
           'timestamp', 'media_thumbnail_url', 'media_url', 'media_permalink',
@@ -273,7 +292,11 @@ module.exports = async (req, res) => {
         // breakdown de functie niet tot 55s gijzelt en de core-data altijd op tijd terugkomt.
         const FETCH_MS = 55000;
         const ADDON_MS = 35000;
-        const [igData, fbOrgData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData] = await Promise.all([
+        const PREV_MS = sheetOnly ? FETCH_MS : 20000;
+        const [
+          igData, fbOrgData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData,
+          igPrev, fbOrgPrev, adsPrev,
+        ] = await Promise.all([
           windsorScoped('instagram', IG_FIELDS, dateParams, FETCH_MS, 'ig'),
           windsorScoped('facebook_organic', FB_ORG_FIELDS, dateParams, FETCH_MS, 'fb-organic'),
           windsorScoped('facebook', ADS_FIELDS, dateParams, FETCH_MS, 'fb-ads'),
@@ -281,6 +304,9 @@ module.exports = async (req, res) => {
           windsorScoped('facebook', ADS_AD_CREATIVE, adDateParams, ADDON_MS, 'fb-ads-creative'),
           windsorScoped('facebook', ADS_AD_VIDEO, adDateParams, ADDON_MS, 'fb-ads-video'),
           windsorScoped('facebook', ADS_AD_CONV, adDateParams, ADDON_MS, 'fb-ads-conv'),
+          windsorScoped('instagram', IG_FIELDS, prevDateParams, PREV_MS, 'ig-prev'),
+          windsorScoped('facebook_organic', FB_ORG_FIELDS, prevDateParams, PREV_MS, 'fb-organic-prev'),
+          windsorScoped('facebook', ADS_FIELDS, prevDateParams, PREV_MS, 'fb-ads-prev'),
         ]);
 
         // Merge alle add-on-velden in de ad-core rows op ad_id (allen no-date → 1 rij per ad).
@@ -308,8 +334,17 @@ module.exports = async (req, res) => {
           ]);
         }
 
+        // Een vergelijkingsblok dat leeg terugkwam sturen we als null mee, niet als
+        // een lege lijst: nul gemeten is iets anders dan niets gemeten, en de UI
+        // moet dat verschil kunnen tonen.
+        const prevOrNull = (d) => (d && Array.isArray(d.data) && d.data.length ? d : null);
         return res.status(200).json({
-          period: { startDate, endDate },
+          period: { startDate, endDate, prevStartDate, prevEndDate },
+          previous: {
+            instagram: prevOrNull(igPrev),
+            fbOrganic: prevOrNull(fbOrgPrev),
+            ads: prevOrNull(adsPrev),
+          },
           // Venster dat de ad-level data écht dekt (kan korter zijn dan de selectie, zie cap).
           adLevelWindow: adLevelCapped ? { startDate: adFrom, endDate, maxDays: AD_LEVEL_MAX_DAYS } : null,
           instagram: igData,
@@ -326,6 +361,8 @@ module.exports = async (req, res) => {
             adsCreative: adsCreativeData && adsCreativeData.__error ? adsCreativeData.__error : null,
             adsVideo: adsVideoData && adsVideoData.__error ? adsVideoData.__error : null,
             adsConv: adsConvData && adsConvData.__error ? adsConvData.__error : null,
+            // Vergelijking faalt niet-fataal: de huidige periode blijft staan.
+            previous: [igPrev, fbOrgPrev, adsPrev].map(d => d && d.__error).filter(Boolean).join(' · ') || null,
           },
         });
       }

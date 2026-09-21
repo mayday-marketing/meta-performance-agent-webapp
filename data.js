@@ -32,51 +32,51 @@ const DATA = {
     ],
     series: [
       {
-        label: "Instagram", color: "#ff683b",
+        label: "Instagram", color: "var(--accent-data)",
         values: [18, 22, 20, 25, 28, 24, 30, 35, 32, 38, 40, 36, 42, 45, 44, 52, 48]
       },
       {
-        label: "Facebook", color: "#351f69",
+        label: "Facebook", color: "var(--s2)",
         values: [12, 11, 13, 10, 12, 11, 10, 9, 11, 10, 9, 8, 9, 8, 7, 9, 8]
       },
       {
-        label: "Meta Ads", color: "#1f9b8a",
+        label: "Meta Ads", color: "var(--chart-3)",
         values: [5, 6, 5, 7, 6, 8, 7, 9, 8, 10, 9, 11, 10, 12, 11, 13, 12]
       }
     ]
   },
 
   channels: [
-    { label: "Instagram", color: "#ff683b", value: 68 },
-    { label: "Facebook", color: "#351f69", value: 20 },
-    { label: "Meta Ads", color: "#1f9b8a", value: 12 }
+    { label: "Instagram", color: "var(--accent-data)", value: 68 },
+    { label: "Facebook", color: "var(--s2)", value: 20 },
+    { label: "Meta Ads", color: "var(--chart-3)", value: 12 }
   ],
 
   topPosts: [
     {
       id: 1, caption: "Behind the scenes van de Lissabon shoot",
       type: "Reel", date: "12 apr", engagement: "11.2%",
-      thumb: "linear-gradient(135deg, #ff683b, #351f69)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 2, caption: "Mira blouse — stylinggids",
       type: "Carrousel", date: "5 apr", engagement: "9.8%",
-      thumb: "linear-gradient(135deg, #351f69, #1f9b8a)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 3, caption: "Capsule launch — nieuwe collectie",
       type: "Reel", date: "1 apr", engagement: "8.4%",
-      thumb: "linear-gradient(135deg, #1f9b8a, #ff683b)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 4, caption: "Materiaaldetails voorjaarsjas",
       type: "Foto", date: "22 mrt", engagement: "5.1%",
-      thumb: "linear-gradient(135deg, #6a3bff, #ff683b)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 5, caption: "Weekend look inspiratie",
       type: "Carrousel", date: "15 mrt", engagement: "4.9%",
-      thumb: "linear-gradient(135deg, #ff683b, #6a3bff)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     }
   ],
 
@@ -98,7 +98,7 @@ const DATA = {
       views: 61400, reach: 48200, likes: 3840, comments: 142, shares: 310, saves: 342,
       engagement: 11.2, ctr: 1.8, performance: "Good",
       retention: { p3: 82, p25: 71, p50: 58, p75: 42, p95: 28 },
-      thumb: "linear-gradient(135deg, #ff683b 0%, #351f69 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 2, caption: "Mira blouse — stylinggids",
@@ -106,7 +106,7 @@ const DATA = {
       views: 39400, reach: 39400, likes: 2870, comments: 98, shares: 201, saves: 289,
       engagement: 9.8, ctr: 2.1, performance: "Good",
       retention: null,
-      thumb: "linear-gradient(135deg, #351f69 0%, #1f9b8a 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 3, caption: "Capsule launch — nieuwe collectie",
@@ -114,7 +114,7 @@ const DATA = {
       views: 68200, reach: 52100, likes: 3100, comments: 187, shares: 445, saves: 421,
       engagement: 8.4, ctr: 1.6, performance: "Good",
       retention: { p3: 78, p25: 64, p50: 51, p75: 38, p95: 22 },
-      thumb: "linear-gradient(135deg, #1f9b8a 0%, #ff683b 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 4, caption: "Materiaaldetails voorjaarsjas",
@@ -122,7 +122,7 @@ const DATA = {
       views: 18700, reach: 18700, likes: 720, comments: 31, shares: 44, saves: 89,
       engagement: 5.1, ctr: 0.9, performance: "Average",
       retention: null,
-      thumb: "linear-gradient(135deg, #6a3bff 0%, #ff683b 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 5, caption: "Weekend look inspiratie",
@@ -130,7 +130,7 @@ const DATA = {
       views: 17200, reach: 17200, likes: 641, comments: 28, shares: 61, saves: 76,
       engagement: 4.9, ctr: 1.1, performance: "Average",
       retention: null,
-      thumb: "linear-gradient(135deg, #ff683b 0%, #6a3bff 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 6, caption: "Achter de naaimachine",
@@ -138,7 +138,7 @@ const DATA = {
       views: 27800, reach: 21400, likes: 1020, comments: 54, shares: 132, saves: 145,
       engagement: 6.2, ctr: 1.3, performance: "Good",
       retention: { p3: 74, p25: 60, p50: 46, p75: 31, p95: 18 },
-      thumb: "linear-gradient(135deg, #351f69 0%, #ff683b 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 7, caption: "How to style: neutrale basics",
@@ -146,7 +146,7 @@ const DATA = {
       views: 25600, reach: 19800, likes: 880, comments: 42, shares: 118, saves: 132,
       engagement: 5.8, ctr: 1.2, performance: "Good",
       retention: { p3: 71, p25: 57, p50: 43, p75: 29, p95: 15 },
-      thumb: "linear-gradient(135deg, #1f9b8a 0%, #351f69 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 8, caption: "Lente editie — lookbook",
@@ -154,7 +154,7 @@ const DATA = {
       views: 16400, reach: 16400, likes: 520, comments: 22, shares: 89, saves: 98,
       engagement: 4.3, ctr: 0.8, performance: "Average",
       retention: null,
-      thumb: "linear-gradient(135deg, #ff683b 0%, #1f9b8a 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 9, caption: "Onze favoriete lentecombo",
@@ -162,7 +162,7 @@ const DATA = {
       views: 11200, reach: 11200, likes: 310, comments: 14, shares: 32, saves: 54,
       engagement: 3.8, ctr: 0.7, performance: "Average",
       retention: null,
-      thumb: "linear-gradient(135deg, #6a3bff 0%, #1f9b8a 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 10, caption: "Nieuwe collectie aankondiging",
@@ -170,7 +170,7 @@ const DATA = {
       views: 12300, reach: 12300, likes: 241, comments: 18, shares: 67, saves: 34,
       engagement: 3.2, ctr: 0.6, performance: "Average",
       retention: null,
-      thumb: "linear-gradient(135deg, #351f69 0%, #6a3bff 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 11, caption: "Facebook wekelijkse update",
@@ -178,7 +178,7 @@ const DATA = {
       views: 8200, reach: 8200, likes: 98, comments: 7, shares: 21, saves: 12,
       engagement: 2.4, ctr: 0.4, performance: "Bad",
       retention: null,
-      thumb: "linear-gradient(135deg, #351f69 0%, #1f9b8a 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 12, caption: "Flash sale — 48 uur",
@@ -186,7 +186,7 @@ const DATA = {
       views: 31000, reach: 31000, likes: 410, comments: 22, shares: 54, saves: 0,
       engagement: 2.1, ctr: 3.8, performance: "Average",
       retention: null,
-      thumb: "linear-gradient(135deg, #ff683b 0%, #6a3bff 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 13, caption: "Spring campaign — brand awareness",
@@ -194,7 +194,7 @@ const DATA = {
       views: 44000, reach: 44000, likes: 520, comments: 31, shares: 78, saves: 0,
       engagement: 1.8, ctr: 2.9, performance: "Average",
       retention: { p3: 62, p25: 44, p50: 28, p75: 14, p95: 6 },
-      thumb: "linear-gradient(135deg, #1f9b8a 0%, #6a3bff 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     },
     {
       id: 14, caption: "Sale retargeting campagne",
@@ -202,7 +202,7 @@ const DATA = {
       views: 28000, reach: 28000, likes: 380, comments: 18, shares: 42, saves: 0,
       engagement: 1.9, ctr: 4.2, performance: "Average",
       retention: { p3: 58, p25: 40, p50: 24, p75: 12, p95: 4 },
-      thumb: "linear-gradient(135deg, #6a3bff 0%, #ff683b 100%)"
+      thumb: "linear-gradient(135deg, var(--accent-50), var(--accent-25))"
     }
   ],
 

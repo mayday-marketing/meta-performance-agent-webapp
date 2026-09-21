@@ -21,6 +21,13 @@
    resource aanwijzen. Keywords zijn de enige uitzondering: dat zijn zoektermen,
    geen resource-ids — ze worden gesaneerd en in aantal begrensd.
 
+   VASTGELEGDE METING GAAT VOOR (sinds 21-09-2026): ligt er een
+   `seo-dashboard.json` in de Drive-map van de klant, dan komen volumes en
+   posities daaruit en gaat er geen enkele call naar DataForSEO. Zie de kop van
+   _seodata.js voor het waarom; kort: een demo-domein dat niet bestaat levert
+   alleen lege posities op, en een klant zonder koppeling heeft soms wél een
+   uitgevoerde keywordanalyse. Bestand weg = tab weer live.
+
    GEVERIFIEERD (docs.dataforseo.com, 20-09-2026):
    - Beide endpoints nemen een ARRAY van taken, maar een live-call mag er maar
      één bevatten. Meerdere keywords ranken = meerdere HTTP-calls (parallel).
@@ -32,6 +39,7 @@
 
 const crypto = require('crypto');
 const { getClientConfig, captureOidcToken } = require('./_config');
+const { getSeoBaseline } = require('./_seodata');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -266,6 +274,32 @@ module.exports = async (req, res) => {
   const settings = await loadSettings(clientId);
   const cid = String(clientId).toLowerCase();
 
+  // Vastgelegde meting uit de Drive-map van de klant. Faalt nooit hard: zonder
+  // bestand komt hier `data: null` terug en blijft alles hieronder live.
+  const baseline = await getSeoBaseline(cid, client?.driveFolderId);
+  const fixed = baseline.data;
+
+  // Het bestand mag domein, markt en taal aanvullen, maar nooit overschrijven:
+  // de Config-tab van de klantsheet blijft de baas over de instellingen.
+  if (fixed) {
+    if (!settings.domain && fixed.domain) settings.domain = fixed.domain;
+    if (settings.locationSource === 'default' && fixed.location) {
+      settings.location = fixed.location;
+      settings.locationSource = 'bestand';
+    }
+    if (settings.languageSource === 'default' && fixed.language) {
+      settings.language = fixed.language;
+      settings.languageSource = 'bestand';
+    }
+    // Staat er geen keywordlijst in de Config-tab, dan is de lijst uit het
+    // bestand de startlijst. Anders zou de tab leeg blijven terwijl de meting
+    // er gewoon ligt.
+    if (!settings.defaultKeywords.length) {
+      settings.defaultKeywords = fixed.items.map(i => i.keyword).slice(0, MAX_VOLUME_KEYWORDS);
+    }
+    settings.warnings = settings.warnings.concat(baseline.warnings || []);
+  }
+
   // Wat de UI mag tonen, ongeacht of er data is. `hasCredentials` = volumes
   // kunnen; `canRank` = posities kunnen (daar is ook een domein voor nodig).
   const meta = {
@@ -275,8 +309,16 @@ module.exports = async (req, res) => {
     locationSource: settings.locationSource,
     languageSource: settings.languageSource,
     defaultKeywords: settings.defaultKeywords,
-    hasCredentials: !!auth,
-    canRank: !!auth && !!settings.domain,
+    // 'hasCredentials' betekent voor de UI: deze tab kán cijfers leveren. Dat
+    // is waar zodra er een koppeling is OF een vastgelegde meting ligt.
+    hasCredentials: !!auth || !!fixed,
+    canRank: (!!auth && !!settings.domain) || !!(fixed && Object.keys(fixed.ranks).length),
+    // Waar de cijfers vandaan komen, zodat de UI het kan tonen en een
+    // rapportage het kan vermelden.
+    source: fixed ? 'drive' : 'api',
+    measuredAt: fixed ? fixed.measuredAt : null,
+    measurementLabel: fixed ? fixed.label : null,
+    sourceFile: fixed ? baseline.file || null : null,
     maxVolumeKeywords: MAX_VOLUME_KEYWORDS,
     maxRankKeywords: MAX_RANK_KEYWORDS,
     warnings: settings.warnings,
@@ -291,9 +333,6 @@ module.exports = async (req, res) => {
 
       /* ---- Zoekvolumes: één call voor de hele lijst ---- */
       case 'volumes': {
-        if (!auth) {
-          return res.status(400).json({ error: 'Geen DataForSEO-koppeling ingesteld.', settings: meta });
-        }
         // Lijst uit het request (de klant mag keywords toevoegen in de tab),
         // anders de standaardlijst uit de Config-tab.
         const wanted = cleanKeywords(
@@ -305,6 +344,27 @@ module.exports = async (req, res) => {
             error: 'Geen keywords. Zet ze in de Config-tab bij "SEO keywords" of voeg ze hier toe.',
             settings: meta,
           });
+        }
+
+        // Vastgelegde meting: geen call, geen kosten, geen dagcache (de module
+        // cachet zelf 5 minuten). Keywords die er niet in staan komen terug als
+        // lege rij — 'geen data' is een antwoord, een ontbrekende rij niet.
+        if (fixed) {
+          const byKeyword = new Map(fixed.items.map(i => [i.keyword, i]));
+          const items = wanted.map(k => byKeyword.get(k) || emptyVolumeItem(k));
+          return res.status(200).json({
+            items,
+            keywords: wanted,
+            cost: 0,
+            origin: 'drive',
+            fetchedAt: fixed.measuredAt ? `${fixed.measuredAt}T00:00:00.000Z` : new Date().toISOString(),
+            settings: meta,
+            fromCache: false,
+          });
+        }
+
+        if (!auth) {
+          return res.status(400).json({ error: 'Geen DataForSEO-koppeling ingesteld.', settings: meta });
         }
 
         const key = `${cid}|vol|${settings.location}|${settings.language}|${keywordKey(wanted)}`;
@@ -332,6 +392,35 @@ module.exports = async (req, res) => {
 
       /* ---- Posities: één SERP-call per keyword, dus achter een eigen knop ---- */
       case 'ranks': {
+        const wanted = cleanKeywords(
+          (Array.isArray(reqKeywords) && reqKeywords.length) ? reqKeywords : settings.defaultKeywords,
+          MAX_RANK_KEYWORDS
+        );
+        if (!wanted.length) {
+          return res.status(400).json({ error: 'Geen keywords om te controleren.', settings: meta });
+        }
+
+        // Vastgelegde meting. Een keyword dat niet in het bestand staat laten we
+        // WEG uit `ranks` — de tabel toont dan 'niet gemeten' in plaats van een
+        // streepje, en dat is het verschil tussen 'staat er niet bij' en 'nooit
+        // gekeken'.
+        if (fixed) {
+          const ranks = {};
+          for (const k of wanted) if (fixed.ranks[k]) ranks[k] = fixed.ranks[k];
+          return res.status(200).json({
+            ranks,
+            keywords: wanted,
+            domain: fixed.domain || settings.domain,
+            depth: fixed.depth,
+            cost: 0,
+            skipped: 0,
+            origin: 'drive',
+            checkedAt: fixed.measuredAt ? `${fixed.measuredAt}T00:00:00.000Z` : new Date().toISOString(),
+            settings: meta,
+            fromCache: false,
+          });
+        }
+
         if (!auth) {
           return res.status(400).json({ error: 'Geen DataForSEO-koppeling ingesteld.', settings: meta });
         }
@@ -340,13 +429,6 @@ module.exports = async (req, res) => {
             error: 'Geen merk-domein. Zet "SEO domein" in de Config-tab van de klantsheet.',
             settings: meta,
           });
-        }
-        const wanted = cleanKeywords(
-          (Array.isArray(reqKeywords) && reqKeywords.length) ? reqKeywords : settings.defaultKeywords,
-          MAX_RANK_KEYWORDS
-        );
-        if (!wanted.length) {
-          return res.status(400).json({ error: 'Geen keywords om te controleren.', settings: meta });
         }
 
         const key = `${cid}|rank|${settings.domain}|${settings.location}|${settings.language}|${keywordKey(wanted)}`;
