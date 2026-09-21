@@ -213,7 +213,14 @@ h1, h2, h3 { line-height: 1.2; text-wrap: balance; }
 h1 { font-family: var(--font-display); font-size: 40px; font-weight: 400; line-height: 1.14; letter-spacing: -0.005em; }
 h2 { font-family: var(--font-display); font-size: 25px; font-weight: 400; letter-spacing: -0.005em; }
 h1 b, h2 b { font-weight: 700; }
-h3 { font-family: var(--font-body); font-size: 12px; font-weight: 600; letter-spacing: 0.11em; text-transform: uppercase; color: var(--fg-muted); }
+h3 { font-family: var(--font-body); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+/* Het kleine kapitaaltje is een aparte rol, geen kaping van h3: analyse, ads en
+   de bronkeuze gebruiken h3 als echte kop. */
+.label-head {
+  font-family: var(--font-body); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.11em; text-transform: uppercase; color: var(--fg-muted);
+  margin: 0 0 12px;
+}
 
 /* Cijfers krijgen tabulaire breedtes, zodat kolommen niet verspringen. */
 .kpi-value {
@@ -513,7 +520,9 @@ a { color: inherit; text-decoration: none; }
    ========================================================== */
 .kpi-grid {
   display: grid; gap: var(--grid-gap);
-  grid-template-columns: repeat(4, 1fr);
+  /* Vier of vijf kaarten, elk minstens 190px — onder die breedte is een KPI
+     met contextregel niet meer te lezen. */
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 .kpi-card {
   background: var(--surface);
@@ -557,9 +566,126 @@ a { color: inherit; text-decoration: none; }
 .kpi-card .delta.flat,
 .kpi-card .delta.new,
 .kpi-card .delta.none { color: var(--fg-muted); font-weight: 500; }
-.kpi-card .delta.none { font-style: italic; }
+.kpi-card .delta.none { font-style: normal; }
 .kpi-card .delta .vs { color: var(--fg-muted); font-weight: 500; margin-left: 4px; }
 .kpi-card .spark { margin-top: 6px; }
+
+
+/* ==========================================================
+   Rapportmodel — kop, grafiekbak, callouts, stempel, tabel
+   ==========================================================
+   De onderdelen waar een pagina in rapportvorm uit bestaat. Eén regel per
+   onderdeel houdt het rapport eerlijk: de kop is een bewering, elk cijfer heeft
+   context, elke grafiek een bron, en een callout heeft een vaste toon per
+   functie in plaats van per afwisseling.
+   ========================================================== */
+
+/* Eyebrow benoemt het onderwerp, de kop de conclusie, de lede de meetlat. */
+.report-head { margin-bottom: var(--gap-controls); }
+.eyebrow {
+  margin: 0 0 9px; font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-muted);
+}
+.report-title {
+  margin: 0 0 11px; font-family: var(--font-display);
+  font-size: 40px; font-weight: 400; line-height: 1.14;
+  letter-spacing: -0.005em; text-wrap: balance;
+}
+.report-title b { font-weight: 700; }
+.report-lede {
+  margin: 0; max-width: 62ch; font-family: var(--font-display);
+  font-size: 15px; line-height: 1.6; color: var(--fg-muted);
+}
+/* De conclusie ís de paginakop, dus de topbar-titel verdwijnt op zo'n pagina. */
+:root[data-report="on"] .topbar h1.page-title { display: none; }
+
+/* De grafiekbak: het enige getinte vlak op de pagina, nooit een kaart. */
+.chart-tub {
+  background: var(--panel);
+  border-radius: var(--radius-panel);
+  padding: 20px 24px 12px;
+}
+.chart-tub .chart-legend { margin-bottom: 10px; }
+.source-line { margin: 11px 2px 0; font-size: 11.5px; color: var(--fg-muted); line-height: 1.6; }
+.source-line b { font-weight: 600; color: var(--fg); }
+
+/* Grafiek links, callouts rechts — onder 900px onder elkaar. */
+.report-split {
+  margin-top: var(--gap-kpi);
+  display: grid; grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px; align-items: start;
+}
+.callouts { display: flex; flex-direction: column; gap: 14px; }
+.callout-card {
+  border-radius: var(--radius-card); padding: 16px 18px;
+  font-size: 13px; line-height: 1.6; color: #1a1a1a;
+}
+.callout-card .ct {
+  display: flex; align-items: center; gap: 9px;
+  font-weight: 700; margin-bottom: 8px; font-size: 13.5px;
+}
+.callout-card .ct .glyph {
+  width: 21px; height: 21px; border-radius: 50%;
+  background: #1a1a1a; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; line-height: 1; flex: none;
+}
+.callout-card.good { background: var(--positive-bg); }
+.callout-card.watch { background: var(--negative-bg); }
+.callout-card.info { background: var(--info-bg); }
+.callout-card .btn { margin-top: 12px; width: 100%; justify-content: center; }
+.callout-foot { margin: 2px 2px 0; font-size: 11.5px; line-height: 1.7; color: var(--fg-muted); }
+
+/* Datastempel: het lampje rekent tegen vandaag, niet tegen het bouwmoment. */
+.datastamp {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 7px 14px 7px 11px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border);
+  font-size: 11.5px; color: var(--fg-muted); line-height: 1.35;
+}
+/* [hidden] verliest van display:inline-flex, dus expliciet. */
+.datastamp[hidden] { display: none; }
+.datastamp b { color: var(--fg); font-weight: 600; }
+.datastamp .led { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.datastamp .led.fresh { background: var(--positive); box-shadow: 0 0 0 3px var(--positive-bg); }
+.datastamp .led.aging { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-bg); }
+.datastamp .led.stale { background: var(--negative); box-shadow: 0 0 0 3px var(--negative-bg); }
+
+/* Tabel in rapportstijl: labels links, cijfers rechts, lopende rij in grijs. */
+.report-table {
+  margin-top: var(--gap-controls); overflow-x: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-card); padding: 6px 14px;
+}
+.report-table table {
+  border-collapse: collapse; width: 100%; font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.report-table th, .report-table td {
+  text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border);
+}
+.report-table th:first-child, .report-table td:first-child { text-align: left; }
+.report-table th {
+  color: var(--fg-muted); font-weight: 600; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+.report-table tbody tr:last-child td { border-bottom: 0; }
+.report-table tr.running td { color: var(--fg-muted); }
+.report-table .pos { color: var(--positive); font-weight: 600; }
+.report-table .neg { color: var(--negative); font-weight: 600; }
+
+/* Panelen binnen een sub-tab */
+.subpane { display: none; }
+.subpane.on { display: block; }
+.controls-row {
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  margin-bottom: var(--gap-controls);
+}
+
+@media (max-width: 900px) {
+  .report-split { grid-template-columns: 1fr; }
+  .report-title { font-size: 30px; }
+}
 
 /* ==========================================================
    Chart panel & generic panels

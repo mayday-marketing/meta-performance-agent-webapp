@@ -576,8 +576,13 @@
     });
   }
 
+  // Pagina's met een eigen rapportkop dragen hun titel zelf; dan verdwijnt de
+  // topbar-titel, anders staan er twee koppen van 40px boven elkaar.
+  const REPORT_PAGES = new Set(["overview"]);
+
   function switchPage(page) {
     state.page = page;
+    document.documentElement.setAttribute("data-report", REPORT_PAGES.has(page) ? "on" : "off");
     $$(".nav-link").forEach((l) => l.classList.toggle("on", l.dataset.page === page));
     $$(".dash-page").forEach((p) => p.style.display = p.id === `page-${page}` ? "block" : "none");
     const titles = {
@@ -589,6 +594,7 @@
       seo:         { title: "SEO",         crumbs: ["Dashboard", "SEO"] },
       geo:         { title: "GEO",         crumbs: ["Dashboard", "GEO"] },
       roas:        { title: "ROAS",        crumbs: ["Dashboard", "ROAS"] },
+      report:      { title: "Rapport",     crumbs: ["Dashboard", "Rapport"] },
       methodology: { title: "Methodology", crumbs: ["Dashboard", "Methodology"] },
     };
     const t = titles[page] || titles.overview;
@@ -609,6 +615,9 @@
     if (page === "seo" && typeof seoFetch === "function") seoFetch();
     // GEO leest een auditbestand uit Drive; ook lui, en ook zonder periode.
     if (page === "geo" && typeof geoFetch === "function") geoFetch();
+    // Rapport heeft een eigen periode en haalt zelf op wat de gekozen blokken
+    // nodig hebben; hier alleen de configurator tekenen.
+    if (page === "report" && window.__report) window.__report.open();
   }
 
   // Spring vanuit de Analyse naar een specifieke advertentie in de Library: filter op
@@ -1596,12 +1605,240 @@
   }
 
   function renderOverview() {
+    renderReportHead();
+    renderDatastamp();
     renderKpis();
     renderTrendChart();
+    renderCallouts();
     renderChannelMix();
     renderTopPosts();
     renderCadence();
+    renderAdsTable();
     renderLibrary();
+  }
+
+  /* ---------- Rapportkop, stempel en callouts ----------
+     De kop is een bewering, dus die wordt uit de cijfers afgeleid en niet uit een
+     vaste tekst. Datzelfde geldt voor de callouts: ze staan op berekende feiten
+     (grootste beweger, ontbrekende vergelijking, het advertentievenster), niet op
+     een LLM-tekst. De analyse-agent kan ze later vullen; dan komt er per callout
+     een bron bij te staan.
+     ---------------------------------------------------------------------- */
+
+  function periodLabel() {
+    const p = state.period || {};
+    if (!p.start || !p.end) return "";
+    const d = (iso) => {
+      const [y, m, dd] = iso.split("-").map(Number);
+      const maand = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"][m - 1];
+      return `${dd} ${maand}`;
+    };
+    return `${d(p.start)} – ${d(p.end)} ${p.end.slice(0, 4)}`;
+  }
+
+  // Organisch = IG + FB, betaald = Meta Ads. Eerste helft van de reeks tegen de
+  // tweede: dat is de enige vergelijking die binnen één periode eerlijk is.
+  function trendSplit() {
+    const ts = state.overview?.timeseries;
+    if (!ts || !ts.series?.length) return null;
+    const som = (label) => ts.series.find(x => x.label === label)?.values || [];
+    const org = ts.weeks.map((_, i) => (som("Instagram")[i] || 0) + (som("Facebook")[i] || 0));
+    const paid = ts.weeks.map((_, i) => som("Meta Ads")[i] || 0);
+    const helft = (arr) => {
+      const mid = Math.floor(arr.length / 2);
+      if (mid < 1) return null;
+      const a = arr.slice(0, mid).reduce((x, y) => x + y, 0);
+      const b = arr.slice(mid).reduce((x, y) => x + y, 0);
+      if (!a) return b ? Infinity : null;
+      return (b - a) / a;
+    };
+    return { orgGroei: helft(org), paidGroei: helft(paid),
+             orgTotaal: org.reduce((a, b) => a + b, 0),
+             paidTotaal: paid.reduce((a, b) => a + b, 0) };
+  }
+
+  function pctText(v) {
+    if (v == null) return null;
+    if (v === Infinity) return "van nul af";
+    const s = (v * 100).toFixed(1).replace(".", ",");
+    return (v >= 0 ? "+" : "") + s + "%";
+  }
+
+  function renderReportHead() {
+    const eyebrow = $("#ov-eyebrow"), kop = $("#ov-conclusion"), lede = $("#ov-lede");
+    if (!kop) return;
+    const per = periodLabel();
+    if (eyebrow) eyebrow.textContent = `Instagram, Facebook & Meta Ads${per ? ` · ${per}` : ""}`;
+
+    if (state.overviewLoading) { kop.textContent = "Cijfers worden opgehaald…"; if (lede) lede.textContent = ""; return; }
+    if (state.overviewError || !state.overview) {
+      kop.textContent = "De cijfers van deze periode zijn niet opgehaald";
+      if (lede) lede.textContent = state.overviewError || "";
+      return;
+    }
+
+    const t = trendSplit();
+    let tekst = "Bereik en betrokkenheid over deze periode";
+    if (t) {
+      const o = pctText(t.orgGroei), b = pctText(t.paidGroei);
+      const vlak = (v) => v != null && v !== Infinity && Math.abs(v) < 0.05;
+      if (t.paidTotaal && b && !vlak(t.paidGroei) && vlak(t.orgGroei)) {
+        tekst = `Betaald bereik ${t.paidGroei >= 0 ? "groeit" : "daalt"} met ${b}, <b>organisch staat vlak</b>`;
+      } else if (t.paidTotaal && o && b) {
+        const sterkste = (t.paidGroei ?? -9) >= (t.orgGroei ?? -9) ? "betaald" : "organisch";
+        tekst = `Organisch ${o}, betaald ${b} — <b>${sterkste} trekt de periode</b>`;
+      } else if (o) {
+        tekst = `Organisch bereik ${t.orgGroei >= 0 ? "stijgt" : "daalt"} met <b>${o}</b> over deze periode`;
+      }
+    }
+    kop.innerHTML = tekst;
+    if (lede) {
+      lede.textContent = "Reach per week, per kanaal. De tweede helft van de periode tegen de eerste — "
+        + "dat is de enige vergelijking die binnen één periode klopt.";
+    }
+  }
+
+  function renderDatastamp() {
+    const el = $("#ov-stamp");
+    if (!el) return;
+    const eind = state.period?.end;
+    if (!eind || state.overviewLoading || !state.overview) { el.hidden = true; return; }
+    const dagen = Math.max(0, Math.round((Date.now() - new Date(eind + "T12:00:00").getTime()) / 86400000));
+    const led = dagen <= 1 ? "fresh" : (dagen <= 7 ? "aging" : "stale");
+    const hoeOud = dagen === 0 ? "vandaag bijgewerkt" : (dagen === 1 ? "gisteren bijgewerkt" : `${dagen} dagen oud`);
+    el.hidden = false;
+    el.innerHTML = `<span class="led ${led}" aria-hidden="true"></span>`
+      + `<span><b>Data t/m ${escapeHtml(eind.split("-").reverse().join("-"))}</b> — ${hoeOud}</span>`;
+  }
+
+  function callout(toon, glyph, titel, tekst, extra) {
+    return `<div class="callout-card ${toon}">
+      <div class="ct"><span class="glyph" aria-hidden="true">${glyph}</span>${escapeHtml(titel)}</div>
+      <div>${tekst}</div>${extra || ""}
+    </div>`;
+  }
+
+  function renderCallouts() {
+    const root = $("#ov-callouts");
+    if (!root) return;
+    if (state.overviewLoading || !state.overview) { root.innerHTML = ""; return; }
+    const ov = state.overview;
+    const kaarten = [];
+
+    // Wat werkt: de KPI met de sterkste stijging, of de grootste reeks.
+    const stijgers = (ov.kpis || []).filter(k => k.state === "delta" && k.direction === "up");
+    stijgers.sort((a, b) => (b.delta || 0) - (a.delta || 0));
+    const t = trendSplit();
+    if (stijgers.length) {
+      const k = stijgers[0];
+      kaarten.push(callout("good", "+", "Wat werkt",
+        `<b>${escapeHtml(k.label)}</b> staat op ${escapeHtml(String(k.value))} — `
+        + `${k.delta.toFixed(1).replace(".", ",")}${k.unit === "pp" ? "pp" : "%"} hoger dan ${escapeHtml(k.vs || "de vorige periode")}.`));
+    } else if (t && t.paidTotaal) {
+      const deel = Math.round((t.paidTotaal / (t.paidTotaal + t.orgTotaal)) * 100);
+      kaarten.push(callout("good", "+", "Wat werkt",
+        `Betaald levert <b>${deel}%</b> van het totale bereik in deze periode.`));
+    }
+
+    // Waar we op letten: de meetvoorbehouden die we kennen.
+    const zonderVergelijking = (ov.kpis || []).filter(k => k.state === "none").length;
+    const let_op = [];
+    if (zonderVergelijking) {
+      let_op.push(`<b>${zonderVergelijking} van de ${ov.kpis.length} cijfers</b> heeft geen vergelijkbare vorige periode, `
+        + `dus daar staat geen verandering bij. Kies een kortere periode om wél te kunnen vergelijken.`);
+    }
+    if (ov.adsLoading) {
+      let_op.push("De advertentiecijfers laden nog; de reeks Meta Ads kan nog veranderen.");
+    }
+    if (!let_op.length && t && t.orgGroei != null && t.orgGroei < 0) {
+      let_op.push(`Organisch bereik zakt met <b>${pctText(t.orgGroei)}</b> in de tweede helft van de periode.`);
+    }
+    if (let_op.length) {
+      kaarten.push(callout("watch", "!", "Waar we op letten", let_op.join("<br><br>")));
+    }
+
+    // Wat je ziet: uitleg bij de grafiek ernaast.
+    kaarten.push(callout("info", "↗", "Wat je ziet",
+      `De grafiek bundelt per week, niet per dag — dagpieken vallen daarmee weg, de trend blijft. `
+      + `Instagram en Facebook zijn organisch bereik, Meta Ads is betaald. Eén eenheid, dus één as.`));
+
+    // De agent: dit was 'Insight van de week'.
+    kaarten.push(callout("good", "✦", "Vraag het de agent",
+      "Een doorgewinterde analyse van deze periode — inclusief de posts en campagnes die hierboven niet passen.",
+      `<button class="btn primary" onclick="window.toggleChat()">Open de agent →</button>`));
+
+    root.innerHTML = kaarten.join("")
+      + `<p class="callout-foot">Reach van organisch en betaald mag je niet optellen: dezelfde persoon kan in beide zitten. `
+      + `De kanaal-mix op het blad Publicaties toont het aandeel, niet de som.</p>`;
+  }
+
+  function renderAdsTable() {
+    const root = $("#ads-table");
+    const kop = $("#ads-conclusion");
+    if (!root) return;
+    const ov = state.overview;
+    const camps = (ov?.adsCampaigns || []).filter(c => c && (c.spend || c.reach || c.impressions));
+    if (!ov || state.overviewLoading) {
+      root.innerHTML = `<div class="skel-line" style="height:200px; border-radius:14px;"></div>`;
+      return;
+    }
+    if (!camps.length) {
+      if (kop) kop.textContent = ov.adsLoading ? "Advertenties worden opgehaald…" : "Geen advertenties in deze periode";
+      root.innerHTML = `<p class="source-line">${ov.adsLoading
+        ? "De campagnes laden nog."
+        : "Er liep geen Meta Ads-campagne in deze periode, of het advertentieaccount staat niet in de Config-tab."}</p>`;
+      return;
+    }
+    const spend = camps.reduce((a, c) => a + (c.spend || 0), 0);
+    const rev = camps.reduce((a, c) => a + (c.revenue || 0), 0);
+    const actief = camps.filter(c => /active|actief/i.test(String(c.status || ""))).length;
+    if (kop) {
+      kop.innerHTML = rev
+        ? `€ ${fmt.int(Math.round(spend))} aan advertenties bracht <b>€ ${fmt.int(Math.round(rev))}</b> op`
+        : `<b>${camps.length} campagnes</b> in deze periode, samen € ${fmt.int(Math.round(spend))}`;
+    }
+    camps.sort((a, b) => (b.spend || 0) - (a.spend || 0));
+    const rijen = camps.slice(0, 12).map(c => {
+      const roas = c.roas != null && c.spend > 0 ? c.roas : null;
+      const oordeel = c.performance === "Good" ? `<span class="pos">sterk</span>`
+        : (c.performance === "Bad" ? `<span class="neg">zwak</span>`
+        : (c.performance ? "gemiddeld" : `<span style="color:var(--fg-muted);">te klein</span>`));
+      return `<tr>
+        <td>${escapeHtml(c.name || "—")}</td>
+        <td>€ ${fmt.int(Math.round(c.spend || 0))}</td>
+        <td>${fmt.int(c.impressions || c.reach || 0)}</td>
+        <td>${c.ctr != null ? c.ctr.toFixed(2).replace(".", ",") + "%" : "—"}</td>
+        <td>${roas != null ? roas.toFixed(1).replace(".", ",") + "×" : "—"}</td>
+        <td>${oordeel}</td>
+      </tr>`;
+    }).join("");
+    root.innerHTML = `<div class="report-table">
+      <table>
+        <thead><tr>
+          <th>Campagne</th><th>Kosten</th><th>Vertoningen</th><th>CTR</th><th>ROAS</th><th>Oordeel</th>
+        </tr></thead>
+        <tbody>${rijen}</tbody>
+      </table>
+    </div>
+    <p class="source-line">Bron: Windsor.ai, connector <b>facebook</b> (Meta Ads) · ${camps.length} campagnes, ${actief} actief`
+      + `${camps.length > 12 ? ` · de twaalf met de hoogste kosten staan hier` : ""}. `
+      + `Het oordeel vergelijkt binnen deze periode tegen de mediaan; bij minder dan vijf campagnes zegt dat te weinig.</p>`;
+  }
+
+  function bindOverviewTabs() {
+    const bar = $("#ov-subtabs");
+    if (!bar) return;
+    bar.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-ovtab]");
+      if (!btn) return;
+      const naam = btn.dataset.ovtab;
+      $$("#ov-subtabs [data-ovtab]").forEach(b => {
+        const on = b === btn;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-selected", String(on));
+      });
+      $$("[data-ovpane]").forEach(p => p.classList.toggle("on", p.dataset.ovpane === naam));
+    });
   }
 
   function renderKpis() {
@@ -1648,7 +1885,8 @@
       } else if (k.state === "new") {
         deltaHtml = `<div class="delta new">nieuw <span class="vs">vorige periode geen data</span></div>`;
       } else {
-        deltaHtml = `<div class="delta none">geen vergelijking <span class="vs">vorige periode ontbreekt</span></div>`;
+        // Geen vergelijking is ook context: dan zegt de regel welke periode je ziet.
+        deltaHtml = `<div class="delta none">${escapeHtml(periodLabel())} <span class="vs">· geen vergelijkbare vorige periode</span></div>`;
       }
       return `
         <div class="kpi-card">
@@ -1659,6 +1897,21 @@
         </div>
       `;
     }).join("");
+
+    // Vijfde kaart: wat er aan advertenties liep. Alleen als er campagnes zijn —
+    // een kaart met een nul erin suggereert dat er gemeten is.
+    const camps = (ov.adsCampaigns || []).filter(c => c && (c.spend || c.impressions || c.reach));
+    if (camps.length) {
+      const spend = camps.reduce((a, c) => a + (c.spend || 0), 0);
+      const actief = camps.filter(c => /active|actief/i.test(String(c.status || ""))).length;
+      root.insertAdjacentHTML("beforeend", `
+        <div class="kpi-card">
+          <div class="label"><span class="dot" style="background:var(--accent-data)"></span>Campagnes</div>
+          <div class="value">${camps.length}</div>
+          <div class="delta none">${actief} actief · € ${fmt.int(Math.round(spend))} aan kosten</div>
+        </div>
+      `);
+    }
   }
 
   function renderTrendChart() {
@@ -1681,6 +1934,11 @@
       leftFormat: (v) => Charts.fmt.k(v),
       maxXLabels: 5,
     });
+    const src = $("#trend-source");
+    if (src) {
+      src.innerHTML = `Bron: Windsor.ai, connectoren <b>instagram</b> en <b>facebook</b> · `
+        + `${ts.weeks.length} weken, gebundeld per week`;
+    }
     const adsLoading = state.overview.adsLoading;
     legend.innerHTML = ts.series.map((s, idx) => {
       const suffix = (s.label === "Meta Ads" && adsLoading) ? ` <em style="opacity:0.55; font-style:normal;">· laden…</em>` : "";
@@ -6128,6 +6386,88 @@
     repaintCharts();
   }
 
+  /* ---------- Rapportbrug ----------
+     De Rapport-tab (report.js) bouwt zijn slides uit precies dezelfde
+     render-functies als het dashboard. Dat is de kern van het ontwerp: één
+     cijfer heeft één herkomst, dus een slide kan nooit iets anders beweren dan
+     de tab waar hij vandaan komt.
+
+     Die renderers lezen allemaal uit `state` en niet uit hun argumenten. Daarom
+     geeft de brug state zélf door, plus `borrow()`: dat zet de state-sleutels
+     synchroon om naar de rapportperiode, roept de renderer aan en zet alles in
+     een finally weer terug. Synchroon is hier de hele veiligheidsgarantie — er
+     mag niets tussen zitten dat await't, anders ziet het dashboard even de
+     rapportdata. Bewust één smal object in plaats van tientallen losse
+     window.__-functies. */
+  window.__reportBridge = {
+    state,
+    escapeHtml,
+    chartSvg,
+    apiPost,
+    windsorCall,
+    webPrevRange,
+    roasCompareRange,
+    buildAnalysisSummary,
+    buildWebsiteSummary,
+    fmt,
+    webFmt,
+    seriesColor: (i) => (window.Charts ? Charts.seriesColor(i) : "#400745"),
+    analysisPeriodKey,
+    periodDays,
+    // Laad-aanzetten. Ze geven niets terug — de tabs zijn fire-and-forget
+    // geschreven en zetten hun resultaat in state. report.js wacht daarom op de
+    // state zelf (zie waitFor), wat ook meteen het geval dekt dat de data er al
+    // stond en er niets te wachten valt.
+    ensure: {
+      overview: () => refreshOverview(),
+      analysis: () => generateAnalysis(),
+      website:  () => websiteFetch(),
+      email:    () => refreshEmail(),
+      seo:      () => seoFetch(),
+      geo:      () => geoFetch(),
+    },
+    // De renderers die een HTML-string teruggeven. De Overview-renderers staan
+    // er bewust niet bij: die schrijven rechtstreeks in DOM-knopen met een vast
+    // id (#kpi-grid, #trend-chart) en geven niets terug, dus report.js bouwt die
+    // vier blokken opnieuw op uit state.overview.
+    render: {
+      analysisInsights:  (a) => renderAnalysisInsights(a),
+      analysisAds:       () => renderAnalysisAdsRanking(),
+      websiteKpis:       () => renderWebsiteKpis(),
+      websiteChart:      () => renderWebsiteChart(),
+      websiteChannels:   () => renderWebsiteChannels(),
+      websiteSources:    () => renderWebsiteSources(),
+      websiteLanding:    () => renderWebsiteLanding(),
+      websiteFunnel:     () => renderWebsiteFunnel(),
+      websiteSearch:     () => renderWebsiteSearch(),
+      websiteAudience:   () => renderWebsiteAudience(),
+      websiteNotes:      () => renderWebsiteNotes(),
+      roasHero:          () => renderRoasHero(),
+      roasDaily:         () => renderRoasDailyChart(),
+      roasGroup:         (grp, title) => renderRoasGroup(grp, title),
+      roasBreakEven:     () => renderRoasBreakEven(),
+      roasAdvice:        () => renderRoasAdvice(),
+      roasFootnote:      () => renderRoasFootnote(),
+      seoKpis:           () => renderSeoKpis(),
+      seoChart:          () => renderSeoChart(),
+      seoTable:          () => renderSeoTable(),
+      seoNotes:          () => renderSeoNotes(),
+      geoOverview:       () => renderGeoOverview(),
+      geoPrompts:        () => renderGeoPrompts(),
+      geoWebsite:        () => renderGeoWebsite(),
+      geoActions:        () => renderGeoActions(),
+      email:             (e) => (e.connector === "klaviyo" ? renderEmailKlaviyo(e)
+                                : e.connector === "mailerlite" ? renderEmailMailerLite(e)
+                                : renderEmailConvertKit(e)),
+    },
+    borrow(patch, fn) {
+      const saved = {};
+      for (const k of Object.keys(patch)) saved[k] = state[k];
+      Object.assign(state, patch);
+      try { return fn(); } finally { Object.assign(state, saved); }
+    },
+  };
+
   /* ---------- Boot ---------- */
 
   function bindLogin() {
@@ -6141,6 +6481,7 @@
     bindLogin();
     bindTweaks();
     bindNav();
+    bindOverviewTabs();
     bindManualContext();
 
     const existing = loadSession();

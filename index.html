@@ -186,6 +186,10 @@
             <span class="icon">✉</span>
             <span>E-mail</span>
           </button>
+          <button class="nav-link" data-page="report">
+            <span class="icon">▤</span>
+            <span>Rapport</span>
+          </button>
           <button class="nav-link" data-page="methodology">
             <span class="icon">⚖</span>
             <span>Methodology</span>
@@ -243,82 +247,110 @@
 
         <section class="page-content">
 
-          <!-- ========== OVERVIEW PAGE ========== -->
+          <!-- ========== OVERVIEW PAGE ==========
+               Rapportvorm: eyebrow + conclusie, KPI-rij met contextregel, de
+               grafiek in de getinte bak met bronregel, en de callouts ernaast.
+               Drie sub-tabs zodat publicaties en advertenties hun eigen blad
+               krijgen in plaats van één lange pagina. -->
           <div id="page-overview" class="dash-page">
-            <div class="kpi-grid" id="kpi-grid"></div>
 
-            <div class="row-2">
-              <section class="panel">
-                <div class="panel-header">
-                  <div>
-                    <h2 class="panel-title">Performance over tijd</h2>
-                    <div class="panel-sub">Wekelijkse reach per kanaal</div>
-                  </div>
-                  <div class="panel-actions">
-                    <div class="period-toggle">
-                      <button class="on">4 mnd</button>
-                      <button>30 dagen</button>
-                      <button>7 dagen</button>
-                    </div>
-                  </div>
-                </div>
-                <div class="chart-legend" id="trend-legend"></div>
-                <div id="trend-chart" style="margin-top:10px;"></div>
-              </section>
-
-              <section class="panel">
-                <div class="panel-header">
-                  <div>
-                    <h2 class="panel-title">Kanaal-mix</h2>
-                    <div class="panel-sub">Aandeel van totale reach</div>
-                  </div>
-                </div>
-                <div id="channel-mix" class="channel-mix"></div>
-
-                <div style="margin-top:24px; padding-top:18px; border-top:1px solid var(--border);">
-                  <div class="info-label" style="font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--fg-muted); font-weight:700; margin-bottom:10px;">Posting cadens</div>
-                  <div id="cadence" class="cadence"></div>
-                  <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:10px; color:var(--fg-muted); letter-spacing:0.06em;">
-                    <span>Minder</span>
-                    <span style="display:inline-flex; gap:3px; align-items:center;">
-                      <span style="width:10px; height:10px; border-radius:3px; background:var(--surface-strong);"></span>
-                      <span style="width:10px; height:10px; border-radius:3px; background:rgba(255,104,59,0.18);"></span>
-                      <span style="width:10px; height:10px; border-radius:3px; background:rgba(255,104,59,0.4);"></span>
-                      <span style="width:10px; height:10px; border-radius:3px; background:rgba(255,104,59,0.7);"></span>
-                      <span style="width:10px; height:10px; border-radius:3px; background:var(--accent);"></span>
-                    </span>
-                    <span>Meer</span>
-                  </div>
-                </div>
-              </section>
+            <div class="subtabs" id="ov-subtabs">
+              <button type="button" class="on" data-ovtab="samenvatting" aria-selected="true">Samenvatting</button>
+              <button type="button" data-ovtab="publicaties" aria-selected="false">Publicaties</button>
+              <button type="button" data-ovtab="advertenties" aria-selected="false">Advertenties</button>
+              <span style="flex-grow:1;"></span>
+              <span style="padding-bottom:9px;"><span class="datastamp" id="ov-stamp" hidden></span></span>
             </div>
 
-            <div class="row-2" style="grid-template-columns: 1.2fr 0.8fr;">
-              <section class="panel">
-                <div class="panel-header">
-                  <div>
-                    <h2 class="panel-title">Top performers</h2>
-                    <div class="panel-sub">Best presterende posts in deze periode</div>
-                  </div>
-                  <button class="btn tiny" onclick="document.querySelector('[data-page=&quot;library&quot;]').click()">Bekijk alle →</button>
-                </div>
-                <div id="top-posts" class="top-posts"></div>
-              </section>
+            <!-- ---------- Samenvatting ---------- -->
+            <div class="subpane on" data-ovpane="samenvatting">
+              <div class="report-head">
+                <p class="eyebrow" id="ov-eyebrow">Instagram, Facebook &amp; Meta Ads</p>
+                <h2 class="report-title" id="ov-conclusion">Cijfers worden opgehaald…</h2>
+                <p class="report-lede" id="ov-lede"></p>
+              </div>
 
-              <section class="panel" style="background:linear-gradient(170deg, var(--accent-10), transparent 70%); border-color:rgba(255,104,59,0.18);">
-                <div class="panel-header">
-                  <div>
-                    <h2 class="panel-title">Insight van de week</h2>
-                    <div class="panel-sub">Komt in een volgende fase</div>
+              <div class="controls-row">
+                <div class="period-toggle">
+                  <button class="on">90 dagen</button>
+                  <button>30 dagen</button>
+                  <button>7 dagen</button>
+                </div>
+                <span style="flex-grow:1;"></span>
+                <button class="btn" onclick="document.querySelector('[data-page=&quot;analysis&quot;]').click()">AI-analyse</button>
+                <button class="btn" onclick="window.__refreshOverview()">Ververs data</button>
+              </div>
+
+              <div class="kpi-grid" id="kpi-grid"></div>
+
+              <div class="report-split">
+                <div>
+                  <div class="chart-tub">
+                    <div class="chart-legend" id="trend-legend"></div>
+                    <div id="trend-chart"></div>
                   </div>
+                  <p class="source-line" id="trend-source"></p>
+                  <div id="ads-summary"></div>
                 </div>
-                <div style="font-size:22px; line-height:1.35; color:var(--fg); letter-spacing:0.005em; text-wrap:pretty;">
-                  Auto-gegenereerde inzichten worden in de volgende fase toegevoegd. Praat ondertussen met de Agent voor een doorgewinterde analyse van deze periode.
+                <div class="callouts" id="ov-callouts"></div>
+              </div>
+            </div>
+
+            <!-- ---------- Publicaties ---------- -->
+            <div class="subpane" data-ovpane="publicaties">
+              <div class="report-head">
+                <p class="eyebrow">Publicaties</p>
+                <h2 class="report-title" id="pub-conclusion">Wat er gepost is, en wat het deed</h2>
+                <p class="report-lede">Beste posts van de periode, het aandeel per kanaal en op welke dagen er gepubliceerd is.</p>
+              </div>
+
+              <div class="report-split">
+                <div>
+                  <div class="panel-header">
+                    <div>
+                      <h3 class="label-head">Top performers</h3>
+                      <div class="panel-sub">Best presterende posts in deze periode</div>
+                    </div>
+                    <button class="btn tiny" onclick="document.querySelector('[data-page=&quot;library&quot;]').click()">Bekijk alle →</button>
+                  </div>
+                  <div id="top-posts" class="top-posts"></div>
                 </div>
-                <button class="btn primary" style="margin-top:18px; width:100%; justify-content:center;" onclick="window.toggleChat()">
-                  Vraag het de Agent →
-                </button>
-              </section>
+
+                <div>
+                  <div class="chart-tub">
+                    <h3 class="label-head">Kanaal-mix</h3>
+                    <div id="channel-mix" class="channel-mix"></div>
+                  </div>
+                  <p class="source-line">Aandeel van de totale reach in deze periode</p>
+
+                  <div class="chart-tub" style="margin-top:22px;">
+                    <h3 class="label-head">Posting cadens</h3>
+                    <div id="cadence" class="cadence"></div>
+                    <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:10px; color:var(--fg-muted); letter-spacing:0.06em;">
+                      <span>Minder</span>
+                      <span style="display:inline-flex; gap:3px; align-items:center;">
+                        <span style="width:10px; height:10px; border-radius:3px; background:var(--surface-strong);"></span>
+                        <span style="width:10px; height:10px; border-radius:3px; background:var(--accent-25);"></span>
+                        <span style="width:10px; height:10px; border-radius:3px; background:var(--accent-50);"></span>
+                        <span style="width:10px; height:10px; border-radius:3px; background:var(--accent-75);"></span>
+                        <span style="width:10px; height:10px; border-radius:3px; background:var(--accent-data);"></span>
+                      </span>
+                      <span>Meer</span>
+                    </div>
+                  </div>
+                  <p class="source-line">Aantal publicaties per dag van de week</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- ---------- Advertenties ---------- -->
+            <div class="subpane" data-ovpane="advertenties">
+              <div class="report-head">
+                <p class="eyebrow">Meta Ads</p>
+                <h2 class="report-title" id="ads-conclusion">Advertenties worden opgehaald…</h2>
+                <p class="report-lede">Campagnes van deze periode, met kosten, bereik en wat ze opleverden.</p>
+              </div>
+              <div id="ads-table"></div>
             </div>
           </div>
 
@@ -389,6 +421,15 @@
             <div id="email-content"></div>
           </div>
 
+          <!-- ========== REPORT PAGE ========== -->
+          <!-- Stelt een presentatie samen uit de blokken van de andere tabs.
+               Eigen periode (niet die van de topbar) en een eigen datalading,
+               zodat het dashboard niet verspringt terwijl je een deck bouwt.
+               Opbouw: report.js. -->
+          <div id="page-report" class="dash-page" style="display:none;">
+            <div id="report-content"></div>
+          </div>
+
           <!-- ========== METHODOLOGY PAGE ========== -->
           <div id="page-methodology" class="dash-page" style="display:none;">
             <div id="methodology-content"></div>
@@ -450,5 +491,6 @@
   <script src="data.js"></script>
   <script src="charts.js"></script>
   <script src="app.js"></script>
+  <script src="report.js"></script>
 </body>
 </html>
