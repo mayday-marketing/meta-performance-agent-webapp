@@ -106,6 +106,8 @@
     roas: null,            // eigen getRoas voor de rapportperiode
     exporting: false,
     exportError: null,
+    ds: null,              // design system uit Drive: { found, name, tokens, dark, ... }
+    dsLoaded: false,
   };
 
   // De keuze blijft per klant bewaard: een rapport maak je elke maand opnieuw,
@@ -718,7 +720,7 @@
           <div>
             <div class="info-label">Presentatie</div>
             <div style="font-size:20px; color:var(--fg); margin-top:2px;">${RS.slides.length} slides · ${esc(periodLabel())}</div>
-            <div class="muted" style="font-size:11px; margin-top:2px;">${esc(RS.notesError ? "Zonder duiding: " + RS.notesError : (RS.withAnalysis ? "Met analyse" : "Zonder analyse"))}</div>
+            <div class="muted" style="font-size:11px; margin-top:2px;">${esc(RS.notesError ? "Zonder duiding: " + RS.notesError : (RS.withAnalysis ? "Met analyse" : "Zonder analyse"))}${dsNote() ? " · " + dsNote() : ""}</div>
           </div>
           <div class="rp-presets">
             <button class="btn tiny" id="rp-back">← Selectie</button>
@@ -805,19 +807,41 @@
     } catch { return fallback; }
   }
 
+  // Eerste familie uit een font-stack: '"Bodoni Moda",serif' → 'Bodoni Moda'.
+  // PowerPoint wil één naam, geen stack. Staat de letter niet op het apparaat
+  // van de lezer, dan kiest PowerPoint zelf een vervanger — de binaries uit
+  // Drive kunnen niet mee in een pptx.
+  function firstFamily(stack, fallback) {
+    if (!stack) return fallback;
+    const first = String(stack).split(",")[0].trim().replace(/^["']|["']$/g, "");
+    return first || fallback;
+  }
+
   function palette() {
     const v = (n, f) => hexOf(getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f, f);
+    // Het design system van de klant wint, per token. Wat het niet levert komt
+    // uit het dashboard — dezelfde gedeeltelijke-invulling-regel als in de CSS.
+    const ds = (RS.ds && RS.ds.found) ? RS.ds : null;
+    const t = ds ? (ds.tokens || {}) : {};
+    const d = ds ? (ds.dark || {}) : {};
+    const dsHex = (val, fallback) => (val ? hexOf(val, fallback) : fallback);
+    if (ds) {
+      PPT.display = firstFamily(t.fontDisplay, PPT.display);
+      PPT.data = firstFamily(t.fontBody, PPT.data);
+    }
     return {
-      ink:    v("--fg", "#1a1a1a"),
-      muted:  v("--fg-muted", "#6b6560"),
-      accent: v("--accent-data", "#400745"),
-      line:   v("--border", "#e3ded6"),
-      soft:   v("--surface-mute", "#f6f3ee"),
-      paper:  v("--bg", "#ffffff"),
+      ink:    dsHex(t.ink,   v("--fg", "#1a1a1a")),
+      muted:  dsHex(t.muted, v("--fg-muted", "#6b6560")),
+      accent: dsHex(t.head,  v("--accent-data", "#400745")),
+      line:   dsHex(t.rule,  v("--border", "#e3ded6")),
+      // Een design system dat 'geen gevulde kaarten' voorschrijft krijgt de
+      // paginakleur als kaartvulling: dan blijft alleen de hairline over.
+      soft:   dsHex(t.surface, v("--surface-mute", "#f6f3ee")),
+      paper:  dsHex(t.surface, v("--bg", "#ffffff")),
       // Titelslide: merkvlak met negatieve tekst. --on-accent is in app.js al
       // omgeklapt naar inkt als het accent te licht is voor wit.
-      accentFlat: v("--accent", "#400745"),
-      onAccent:   v("--on-accent", "#ffffff"),
+      accentFlat: dsHex(d.surface, v("--accent", "#400745")),
+      onAccent:   dsHex(d.ink, v("--on-accent", "#ffffff")),
     };
   }
 
@@ -1057,6 +1081,65 @@
     paint();
   }
 
+  /* ---------- 10b. Design system uit Drive ----------
+     De klant kan een presentatie-design-system in zijn Drive-map hebben. Wat we
+     daaruit halen zijn tokens — kleuren, letters, en de omgekeerde grond voor de
+     titelslide — en die winnen op de slides van onze eigen paneelstijl.
+
+     Bewust geen componenten: twee echte systemen bleken niet hetzelfde formaat
+     te hebben (Just Jane uitgeklapt met React-slides, BAJA één .dc.html zonder
+     enig slidetype), dus een integratie op een component als SlideFrame werkt
+     bij de ene klant en doet bij de andere stil niets. De slide-opbouw die hun
+     systeem beschrijft — hairlines in plaats van kaders, radius 0, geen schaduw,
+     mono eyebrow linksboven — staat daarom als CSS in styles.css en draait op
+     deze tokens. Zie api/_designsystem.js. */
+
+  async function loadDesignSystem() {
+    if (RS.dsLoaded || !state.session) return;
+    RS.dsLoaded = true;
+    try {
+      const q = new URLSearchParams({
+        clientId: state.session.clientId, token: state.session.token, action: "design-system",
+      });
+      const res = await fetch(`/api/drive?${q}`);
+      RS.ds = res.ok ? await res.json() : null;
+    } catch { RS.ds = null; }
+    paint();
+  }
+
+  const DS_VARS = [
+    ["--ds-surface", "surface"], ["--ds-ink", "ink"], ["--ds-head", "head"],
+    ["--ds-muted", "muted"], ["--ds-rule", "rule"], ["--ds-label", "label"],
+    ["--ds-font-display", "fontDisplay"], ["--ds-font-body", "fontBody"],
+    ["--ds-font-label", "fontLabel"],
+  ];
+
+  // Tokens op de deck zetten, niet op :root — het dashboard eromheen houdt zijn
+  // eigen stijl. Een token dat het systeem niet kent wordt niet gezet, zodat de
+  // CSS-terugval op de dashboardwaarde blijft staan.
+  function applyDs() {
+    const deck = $("#rp-deck");
+    if (!deck) return;
+    const ds = RS.ds;
+    if (!ds || !ds.found) { deck.removeAttribute("data-ds"); return; }
+    const t = ds.tokens || {}, d = ds.dark || {};
+    for (const [cssVar, key] of DS_VARS) {
+      if (t[key]) deck.style.setProperty(cssVar, t[key]);
+    }
+    // De titelslide staat op de omgekeerde grond van hún systeem.
+    if (d.surface) deck.style.setProperty("--ds-cover-bg", d.surface);
+    if (d.ink) deck.style.setProperty("--ds-cover-fg", d.ink);
+    deck.setAttribute("data-ds", "on");
+  }
+
+  function dsNote() {
+    const ds = RS.ds;
+    if (!ds) return "";
+    if (!ds.found) return `Eigen opmaak · ${esc(ds.reason || "geen design system gevonden")}`;
+    const mist = DS_VARS.filter(([, k]) => !(ds.tokens || {})[k]).length;
+    return `Design system: ${esc(ds.name)}${mist ? ` · ${mist} token${mist === 1 ? "" : "s"} niet gevonden, daarvoor de dashboardstijl` : ""}`;
+  }
+
   /* ---------- 11. Periode ----------
      Het rapport zet de periode via de datumvelden in de topbar, zodat er maar
      één plek is die de periode bepaalt en alle tabs meebewegen. */
@@ -1120,7 +1203,7 @@
     root.innerHTML = deck ? renderDeck() : renderConfig();
     bind(root);
     pageSize(deck);
-    if (deck) fitSlides();
+    if (deck) { applyDs(); fitSlides(); }
   }
 
   // Het papierformaat geldt per document, niet per element: @page kan niet op
@@ -1178,6 +1261,7 @@
       resizeBound = true;
     }
     paint();
+    loadDesignSystem();
   }
 
   // Ook weghalen als de gebruiker de tab verlaat terwijl de deck open staat;

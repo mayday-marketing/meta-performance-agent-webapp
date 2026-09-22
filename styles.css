@@ -2364,3 +2364,125 @@ th.c, td.c { text-align: center; }
     width: 1280px; height: 720px; box-shadow: none;
   }
 }
+
+
+/* ==========================================================
+   RAPPORT — design system van de klant
+   Staat er een presentatie-design-system in de Drive-map, dan wint dat op de
+   slides. Niet alleen kleur en letter: ook de opbouw. Just Jane's systeem
+   schrijft die letterlijk voor — "het 2px-hairline is het enige structurele
+   middel", "corner radii are 0", "shadows: none", mono eyebrow linksboven —
+   en onze paneelstijl (afronding, schaduw, gevulde kaarten) overtreedt dat.
+   Daarom worden de panelen hier teruggebracht tot hairlines.
+
+   Alles hangt aan --ds-*, die report.js per klant op de deck zet. Een token dat
+   het systeem niet kent wordt niet gezet, dus de var()-terugval pakt dan de
+   dashboardwaarde. Gedeeltelijk is een geldige toestand.
+   ========================================================== */
+
+.rp-deck[data-ds="on"] .rp-slide {
+  background: var(--ds-surface, var(--surface));
+  color: var(--ds-ink, var(--fg));
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  font-family: var(--ds-font-body, var(--font-body));
+}
+
+.rp-deck[data-ds="on"] .rp-head h2,
+.rp-deck[data-ds="on"] .rp-title-body h1,
+.rp-deck[data-ds="on"] .rp-divider-body h1 {
+  font-family: var(--ds-font-display, var(--font-display));
+  color: var(--ds-head, var(--fg));
+}
+
+/* Eyebrow als mono label: hoofdletters, wijde tracking. Dat is de vaste
+   'furniture' linksboven die het systeem voorschrijft. */
+.rp-deck[data-ds="on"] .rp-eyebrow {
+  font-family: var(--ds-font-label, var(--font-mono));
+  color: var(--ds-label, var(--ds-head, var(--accent)));
+  letter-spacing: 0.22em;
+}
+
+.rp-deck[data-ds="on"] .rp-sub,
+.rp-deck[data-ds="on"] .rp-period,
+.rp-deck[data-ds="on"] .rp-made,
+.rp-deck[data-ds="on"] .rp-foot,
+.rp-deck[data-ds="on"] .rp-note li { color: var(--ds-muted, var(--fg-muted)); }
+
+.rp-deck[data-ds="on"] .rp-foot {
+  font-family: var(--ds-font-label, var(--font-mono));
+  letter-spacing: 0.12em;
+}
+
+/* Het hairline is het enige structurele middel: 2px, merkkleur. */
+.rp-deck[data-ds="on"] .rp-head,
+.rp-deck[data-ds="on"] .rp-note { border-top-width: 0; border-bottom: none; }
+.rp-deck[data-ds="on"] .rp-head { border-bottom: 2px solid var(--ds-rule, var(--border)); }
+.rp-deck[data-ds="on"] .rp-note { border-top: 2px solid var(--ds-rule, var(--border)); }
+
+/* Kaarten zijn geen kaarten: geen vulling, geen afronding, geen schaduw — een
+   hairline-begrensd gebied. */
+.rp-deck[data-ds="on"] .kpi-card {
+  background: none;
+  border: none;
+  border-top: 2px solid var(--ds-rule, var(--border));
+  border-radius: 0;
+  box-shadow: none;
+  padding: 12px 0 0;
+}
+.rp-deck[data-ds="on"] .kpi-card .value {
+  font-family: var(--ds-font-display, var(--font-display));
+  color: var(--ds-head, var(--fg));
+}
+.rp-deck[data-ds="on"] .kpi-card .label {
+  font-family: var(--ds-font-label, var(--font-mono));
+  letter-spacing: 0.16em;
+  color: var(--ds-muted, var(--fg-muted));
+}
+/* De gekleurde stip bij een KPI hoort bij ons palet, niet bij het hunne. */
+.rp-deck[data-ds="on"] .kpi-card .dot,
+.rp-deck[data-ds="on"] .spark { display: none; }
+
+.rp-deck[data-ds="on"] .lib-table thead th {
+  font-family: var(--ds-font-label, var(--font-mono));
+  letter-spacing: 0.14em;
+  color: var(--ds-muted, var(--fg-muted));
+  border-bottom: 2px solid var(--ds-rule, var(--border));
+  background: none;
+}
+.rp-deck[data-ds="on"] .lib-table tbody td {
+  border-bottom: 1px solid var(--ds-rule, var(--border));
+  color: var(--ds-ink, var(--fg));
+}
+.rp-deck[data-ds="on"] .lib-table tbody tr:hover { background: none; }
+.rp-deck[data-ds="on"] .panel,
+.rp-deck[data-ds="on"] .geo-callout,
+.rp-deck[data-ds="on"] .geo-action {
+  background: none; border: none; border-radius: 0; box-shadow: none;
+}
+
+/* De titelslide staat op de omgekeerde grond van hún systeem. Kent het systeem
+   die niet, dan is hij server-side afgeleid uit de merkkleur (zie
+   _designsystem.js); ontbreekt ook die, dan blijft het dashboardaccent staan. */
+.rp-deck[data-ds="on"] .rp-slide.cover {
+  background: var(--ds-cover-bg, var(--accent));
+  color: var(--ds-cover-fg, var(--on-accent));
+}
+.rp-deck[data-ds="on"] .rp-slide.cover .rp-eyebrow,
+.rp-deck[data-ds="on"] .rp-slide.cover .rp-title-body h1,
+.rp-deck[data-ds="on"] .rp-slide.cover .rp-period,
+.rp-deck[data-ds="on"] .rp-slide.cover .rp-made,
+.rp-deck[data-ds="on"] .rp-slide.cover .rp-foot {
+  color: var(--ds-cover-fg, var(--on-accent));
+}
+.rp-deck[data-ds="on"] .rp-slide.divider {
+  background: var(--ds-cover-bg, var(--surface-mute));
+  color: var(--ds-cover-fg, var(--fg));
+}
+.rp-deck[data-ds="on"] .rp-slide.divider .rp-eyebrow,
+.rp-deck[data-ds="on"] .rp-slide.divider h1,
+.rp-deck[data-ds="on"] .rp-slide.divider .rp-period,
+.rp-deck[data-ds="on"] .rp-slide.divider .rp-foot {
+  color: var(--ds-cover-fg, var(--fg));
+}

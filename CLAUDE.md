@@ -384,6 +384,45 @@ in de browser (printen = PDF) of als `.pptx` (`#page-report`, nav
 - **De keuze staat in `localStorage` per klant**, niet in de sheet: het is een
   voorkeur van deze browser, en een rapport maak je elke maand opnieuw.
 
+### Design system van de klant (api/_designsystem.js)
+
+Staat er een presentatie-design-system in de Drive-map van de klant, dan wint dat
+op de slides — niet alleen kleur en letter, ook de opbouw.
+
+- **Tokens, geen componenten.** Twee echte systemen hebben niet hetzelfde
+  formaat: Just Jane's map is uitgeklapt (`tokens/colors.css`, `slides/` met
+  negen React-slidetypes, `_ds_bundle.js`), BAJA's is één `.dc.html` met een
+  `<x-dc>`-element en `support.js` — daar komt het woord 'slide' niet in voor en
+  er is geen bundle. Bouwen op een component als `SlideFrame` werkt dus bij één
+  klant en doet bij de ander stil niets. Wat beide wél hebben zijn
+  custom-properties en `@font-face`-regels; die leest `_designsystem.js` uit in
+  beide vormen.
+- **De slide-anatomie staat als CSS in `styles.css`** onder
+  `.rp-deck[data-ds="on"]`, gedreven door `--ds-*`. Just Jane's readme schrijft
+  die letterlijk voor: het 2px-hairline als enige structurele middel, radius 0,
+  geen schaduw, mono eyebrow linksboven met 0,22em tracking. Onze paneelstijl
+  (afronding, schaduw, gevulde kaarten) overtreedt dat, dus de panelen worden op
+  een slide teruggebracht tot hairlines.
+- **`[data-ground="dark"]` draagt de titelslide.** Just Jane's `colors.css`
+  definieert die grond zelf — merkvlak als achtergrond, negatieve tekst — en dat
+  is precies wat een kaft nodig heeft. Kent een systeem hem niet (BAJA), dan
+  leidt `_designsystem.js` hem af uit de merkkleur; ontbreekt ook die, dan blijft
+  het dashboardaccent staan.
+- **Gedeeltelijk is geldig.** Een token dat het systeem niet kent wordt niet
+  gezet, zodat de `var()`-terugval de dashboardwaarde pakt. De deckbalk zegt
+  hoeveel tokens niet gevonden zijn — beter één echt merkveld dan een compleet
+  maar verzonnen palet.
+- **Isolatie: de Config-tab levert een mapNÁÁM, nooit een map-id.** Die tab staat
+  in een sheet dat met de klant gedeeld kan worden; een id accepteren zou een
+  klant het design system van een andere klant laten inladen. Een naam kan alleen
+  iets aanwijzen dat al binnen `CLIENTS[clientId].driveFolderId` staat. Veld:
+  `Design system`; leeg → er wordt gezocht op een map met 'design system' in de
+  naam.
+- **Fonts reizen niet mee.** De binaries staan in Drive en worden niet
+  doorgegeven: de namen werken alleen als de letter op het apparaat staat, en in
+  een pptx kiest PowerPoint zelf een vervanger. `fontFaces` in de respons zegt
+  welke families het systeem zelf laadt.
+
 ## Rapportstijl — één accent, alles afgeleid
 
 De interface volgt één rapportstijl: warm papier tegenover

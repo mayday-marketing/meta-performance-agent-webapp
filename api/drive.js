@@ -1,5 +1,6 @@
 const crypto = require('crypto');
-const { getAccessToken: googleAccessToken, captureOidcToken } = require('./_config');
+const { getAccessToken: googleAccessToken, captureOidcToken, getClientConfig } = require('./_config');
+const { getDesignSystem } = require('./_designsystem');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -172,6 +173,21 @@ module.exports = async (req, res) => {
   const rootId = client.driveFolderId;
 
   try {
+    // ── ACTION: design-system ──────────────────────────────────────
+    // Kleuren en letters van het presentatie-design-system van deze klant, voor
+    // de Rapport-tab. De mapnaam komt uit de Config-tab en wordt alleen BINNEN
+    // de Drive-map van de klant gezocht: het request wijst niets aan, en een
+    // naam kan nooit buiten de eigen map reiken (in tegenstelling tot een id).
+    if (action === 'design-system') {
+      let wantName = null;
+      try {
+        const cfg = await getClientConfig(clientId);
+        wantName = cfg?.designSystem || null;
+      } catch { /* geen Config-tab is geen fout: dan zoeken we op patroon */ }
+      const ds = await getDesignSystem(clientId, rootId, wantName, req.query.force === '1');
+      return res.status(200).json(ds);
+    }
+
     const accessToken = await getAccessToken();
 
     // ── ACTION: load-all ───────────────────────────────────────────

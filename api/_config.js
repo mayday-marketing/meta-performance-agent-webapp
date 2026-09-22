@@ -52,6 +52,15 @@ function normKey(s) {
 
 function okHex(v) { return HEX_RE.test(v) ? v.toLowerCase() : null; }
 
+// Een mapnaam, geen pad en geen id: geen slashes, geen quotes (die zouden de
+// Drive-query kunnen breken), en begrensd op lengte.
+function okFolderName(v) {
+  const s = String(v).trim();
+  if (!s || s.length > 80) return null;
+  if (/["'\\/]/.test(s)) return null;
+  return s;
+}
+
 function okAccount(v) {
   const s = String(v).replace(/^@/, '').trim();
   return ACCOUNT_RE.test(s) ? s : null;
@@ -189,6 +198,14 @@ const CONFIG_FIELDS = {
   steunkleur:        { path: 'support',                    check: okHex },
   tweedekleur:       { path: 'support',                    check: okHex },
   logourl:           { path: 'logoUrl',                    check: v => okHttpsUrl(v, LOGO_HOSTS) },
+  // Naam van de map met het presentatie-design-system, binnen de Drive-map van
+  // deze klant. Bewust een náám en geen map-id: deze tab staat in een sheet dat
+  // met de klant gedeeld kan worden, en een id accepteren zou een klant het
+  // design system van een andere klant laten inladen. Een naam kan alleen iets
+  // aanwijzen dat al in zijn eigen map staat. Leeg → er wordt gezocht op een map
+  // met 'design system' in de naam.
+  designsystem:      { path: 'designSystem',               check: okFolderName },
+  designsysteem:     { path: 'designSystem',               check: okFolderName },
   instagramaccount:  { path: 'accounts.instagram',         check: okAccount },
   facebookaccount:   { path: 'accounts.facebook_organic',  check: okAccount },
   metaadaccount:     { path: 'accounts.facebook',          check: okAccount },
