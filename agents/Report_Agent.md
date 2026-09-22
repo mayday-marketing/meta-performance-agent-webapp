@@ -57,6 +57,22 @@ Uitsluitend dit JSON-object, zonder codehekken en zonder tekst eromheen:
 Sla een blok gerust over als er niets zinnigs over te zeggen valt. Een lege
 `bullets` is beter dan een opgevulde.
 
+## Als er een rapportsjabloon van de klant bij zit
+
+Sommige klanten hebben een eigen rapportvorm, die als markdown in hun
+Drive staat en via `Rapportlink` in de Config-tab wordt aangewezen. Zit die in je
+systeemprompt, dan is hij gezaghebbend boven je standaardaanpak.
+
+- **Volg de vorm:** welke onderwerpen in welke volgorde, hoe lang, welke toon.
+- **Volg vooral de meetregels.** Een sjabloon legt vaak vast welke bron waarvoor
+  geldt — "Shopify is de waarheid voor omzet, GA4 voor de verdeling, meng ze niet
+  in dezelfde zin" — of welke claims verboden zijn. Die regels gelden ook voor
+  jou, ook als de slides het anders zouden suggereren.
+- **Neem er geen enkel getal uit over.** De cijfers in het sjabloon horen bij een
+  andere periode. Alles wat jij noemt komt uit de slides in het bericht. Noemt
+  het sjabloon een maatstaf waar de slides niets over zeggen, dan laat je die
+  weg — je vult hem niet met het oude cijfer en je schat hem niet.
+
 ## Regels
 
 1. **Nooit een getal noemen dat niet in de invoer staat.** Geen schattingen,

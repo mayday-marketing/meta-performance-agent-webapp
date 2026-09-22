@@ -95,6 +95,7 @@
   /* ---------- 2. State ---------- */
 
   const RS = {
+    clientId: null,        // voor welke klant deze state geldt
     picked: null,          // Set van block-ids
     withAnalysis: true,
     view: "config",        // 'config' | 'deck'
@@ -108,6 +109,8 @@
     exportError: null,
     ds: null,              // design system uit Drive: { found, name, tokens, dark, ... }
     dsLoaded: false,
+    tpl: null,             // rapportsjabloon uit Drive: { found, name, template, ... }
+    tplLoaded: false,
   };
 
   // De keuze blijft per klant bewaard: een rapport maak je elke maand opnieuw,
@@ -505,6 +508,8 @@
       period: { startDate: state.period.start, endDate: state.period.end, days: B.periodDays() },
       blocks,
       clientContext: state.session.clientContext || "",
+      template: (RS.tpl && RS.tpl.found) ? RS.tpl.template : "",
+      templateName: (RS.tpl && RS.tpl.found) ? RS.tpl.name : "",
     });
     RS.notes = res.report;
   }
@@ -591,12 +596,9 @@
             <div style="font-size:20px; color:var(--fg); margin-top:2px;">${esc(periodLabel())}</div>
             <div class="muted" style="font-size:11px; margin-top:2px;">Volgt de periode in de topbar — één periode voor het hele rapport.</div>
           </div>
-          <div class="rp-presets">
-            <button class="btn tiny" data-rp-period="prevmonth">Vorige maand</button>
-            <button class="btn tiny" data-rp-period="thismonth">Deze maand</button>
-            <button class="btn tiny" data-rp-period="30">30 dagen</button>
-            <button class="btn tiny" data-rp-period="90">90 dagen</button>
-          </div>
+          <div class="rp-presets">${PRESETS.map(p =>
+            `<button class="btn tiny${activePreset() === p.key ? " on" : ""}" data-rp-period="${esc(p.key)}">${esc(p.label)}</button>`
+          ).join("")}</div>
         </div>
       </section>
 
@@ -608,6 +610,7 @@
           <span>
             <strong>Met analyse</strong>
             <em>Een samenvatting vooraan en per blok een korte duiding. Zonder vinkje bevat het rapport alleen de cijfers.</em>
+            <em class="rp-tpl">${tplNote()}</em>
           </span>
         </label>
         <div class="rp-go">
@@ -619,6 +622,16 @@
       </section>
 
       ${RS.steps.length ? renderSteps() : ""}`;
+  }
+
+  // Wat de duiding als sjabloon volgt. Expliciet, ook als er niets is: anders
+  // zie je niet dat een ingestelde Rapportlink onleesbaar bleek.
+  function tplNote() {
+    const t = RS.tpl;
+    if (!RS.tplLoaded) return "";
+    if (!t) return "Sjabloon niet opgehaald.";
+    if (!t.found) return `Zonder klantsjabloon · ${esc(t.reason || "geen Rapportlink in de Config-tab")}`;
+    return `Volgt het sjabloon ${esc(t.name)}${t.truncated ? " (ingekort)" : ""}`;
   }
 
   function renderSteps() {
@@ -1107,6 +1120,24 @@
     paint();
   }
 
+  // Het rapportsjabloon van deze klant: een markdown in Drive waar de Config-tab
+  // met 'Rapportlink' naar wijst. Die beschrijft zijn eigen secties, definities
+  // en toon — bij één klant staat er letterlijk "Shopify is de waarheid voor
+  // omzet, GA4 voor de verdeling. Meng ze niet in dezelfde zin." Dat hoort de
+  // duiding te volgen, anders schrijft de agent een generiek rapport.
+  async function loadTemplate() {
+    if (RS.tplLoaded || !state.session) return;
+    RS.tplLoaded = true;
+    try {
+      const q = new URLSearchParams({
+        clientId: state.session.clientId, token: state.session.token, action: "report-template",
+      });
+      const res = await fetch(`/api/drive?${q}`);
+      RS.tpl = res.ok ? await res.json() : null;
+    } catch { RS.tpl = null; }
+    paint();
+  }
+
   const DS_VARS = [
     ["--ds-surface", "surface"], ["--ds-ink", "ink"], ["--ds-head", "head"],
     ["--ds-muted", "muted"], ["--ds-rule", "rule"], ["--ds-label", "label"],
@@ -1144,23 +1175,41 @@
      Het rapport zet de periode via de datumvelden in de topbar, zodat er maar
      één plek is die de periode bepaalt en alle tabs meebewegen. */
 
-  function applyPeriod(kind) {
+  const PRESETS = [
+    { key: "prevmonth", label: "Vorige maand" },
+    { key: "thismonth", label: "Deze maand" },
+    { key: "30", label: "30 dagen" },
+    { key: "90", label: "90 dagen" },
+  ];
+
+  function presetRange(kind) {
     const now = new Date();
     const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
     const iso = (yy, mm, dd) => `${yy}-${String(mm + 1).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
     const lastDay = (yy, mm) => new Date(yy, mm + 1, 0).getDate();
-    let start, end;
     if (kind === "prevmonth") {
       const py = m === 0 ? y - 1 : y, pm = m === 0 ? 11 : m - 1;
-      start = iso(py, pm, 1); end = iso(py, pm, lastDay(py, pm));
-    } else if (kind === "thismonth") {
-      start = iso(y, m, 1); end = iso(y, m, d);
-    } else {
-      const days = Number(kind);
-      const s = new Date(y, m, d - (days - 1), 12);
-      start = iso(s.getFullYear(), s.getMonth(), s.getDate());
-      end = iso(y, m, d);
+      return { start: iso(py, pm, 1), end: iso(py, pm, lastDay(py, pm)) };
     }
+    if (kind === "thismonth") return { start: iso(y, m, 1), end: iso(y, m, d) };
+    const days = Number(kind);
+    const st = new Date(y, m, d - (days - 1), 12);
+    return { start: iso(st.getFullYear(), st.getMonth(), st.getDate()), end: iso(y, m, d) };
+  }
+
+  // Welke knop hoort bij de periode die nu geldt. Bewust vergeleken met de
+  // échte state en niet onthouden bij het klikken: de periode kan ook in de
+  // topbar veranderen, en dan moet de markering meebewegen.
+  function activePreset() {
+    const p = PRESETS.find(x => {
+      const r = presetRange(x.key);
+      return r.start === state.period.start && r.end === state.period.end;
+    });
+    return p ? p.key : null;
+  }
+
+  function applyPeriod(kind) {
+    const { start, end } = presetRange(kind);
     const inputs = document.querySelectorAll(".date-filter input[type=date]");
     if (inputs.length < 2) return;
     inputs[0].value = start;
@@ -1171,11 +1220,7 @@
     state.period.end = end;
     inputs[1].dispatchEvent(new Event("change"));
     // Nieuwe periode = de opgehaalde ROAS en de duiding zijn niet meer geldig.
-    RS.roas = null;
-    RS.notes = null;
-    RS.slides = null;
-    RS.steps = [];
-    RS.view = "config";
+    periodChanged();
     paint();
   }
 
@@ -1193,10 +1238,39 @@
     deck.style.setProperty("--rp-h", `${SLIDE_H * scale}px`);
   }
 
+  // Alles in RS hangt aan één klant: de gekozen blokken, de opgehaalde ROAS, de
+  // duiding, de slides en het design system. Blijft dat staan na een wissel, dan
+  // kijkt de nieuwe klant naar de selectie én de cijfers van de vorige — het
+  // ergste dat een multi-tenant dashboard kan doen. De sessie leeft in
+  // sessionStorage en overleeft een nieuwe login in hetzelfde tabblad, dus de
+  // klant-id is hier de enige betrouwbare trigger.
+  function resetIfOtherClient() {
+    const id = state.session?.clientId || null;
+    if (RS.clientId === id) return;
+    RS.clientId = id;
+    RS.picked = null;
+    RS.withAnalysis = true;
+    RS.view = "config";
+    RS.building = false;
+    RS.steps = [];
+    RS.slides = null;
+    RS.notes = null;
+    RS.notesError = null;
+    RS.roas = null;
+    RS.exporting = false;
+    RS.exportError = null;
+    RS.ds = null;
+    RS.dsLoaded = false;
+    RS.tpl = null;
+    RS.tplLoaded = false;
+    pageSize(false);
+  }
+
   function paint() {
     const root = $("#report-content");
     if (!root) return;
     if (!state.session) { root.innerHTML = ""; return; }
+    resetIfOtherClient();
     if (RS.picked === null) RS.picked = loadPicked();
 
     const deck = RS.view === "deck" && RS.slides;
@@ -1260,13 +1334,26 @@
       window.addEventListener("resize", () => { if (state.page === "report") fitSlides(); });
       resizeBound = true;
     }
-    paint();
+    paint();          // reset eerst, zodat dsLoaded klopt voor déze klant
     loadDesignSystem();
+    loadTemplate();
   }
 
   // Ook weghalen als de gebruiker de tab verlaat terwijl de deck open staat;
   // switchPage() roept dit aan via de brug in app.js.
   function close() { pageSize(false); }
 
-  window.__report = { open, close };
+  // De periode kan ook buiten deze tab veranderen (datumvelden of de knoppen in
+  // de topbar). Zonder dit bleef de balk hier de oude periode tonen terwijl het
+  // dashboard al op de nieuwe stond — twee waarheden op één scherm.
+  function periodChanged() {
+    RS.roas = null;
+    RS.notes = null;
+    RS.slides = null;
+    RS.steps = [];
+    RS.view = "config";
+    if (state.page === "report") paint();
+  }
+
+  window.__report = { open, close, periodChanged };
 })();

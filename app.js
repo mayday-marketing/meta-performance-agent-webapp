@@ -530,7 +530,6 @@
 
     renderLibrary();
     renderAnalysis();
-    renderConnectors();   // dynamisch o.b.v. session (Blok D)
     renderMethodology();  // statische pagina o.b.v. PERFORMANCE_CONFIG (Blok E)
     renderChat();
     bindNav();
@@ -564,6 +563,9 @@
       if (state.page === "email") refreshEmail();
       state.websiteKey = null;
       if (state.page === "website") websiteFetch();
+      // De Rapport-tab heeft een eigen opgehaalde set (ROAS, duiding, slides)
+      // die aan deze periode hangt; die moet mee verlopen.
+      if (window.__report) window.__report.periodChanged();
     };
     const presets = [
       { label: "90 dagen", days: 90 },
@@ -662,6 +664,7 @@
         if (state.page === "email") refreshEmail();
         state.websiteKey = null;
         if (state.page === "website") websiteFetch();
+        if (window.__report) window.__report.periodChanged();
       }, 400);
     };
     inputs.forEach((inp) => { inp.onchange = onChange; });
@@ -2764,29 +2767,6 @@
   }
 
   /* ---------- Connectors-paneel (Blok D, dynamisch o.b.v. session) ---------- */
-
-  function renderConnectors() {
-    const el = $("#connectors-list");
-    if (!el) return;
-    const s = state.session || {};
-    const rows = [];
-    if (s.hasWindsor) rows.push({ label: "Windsor.ai", live: true });
-    if (s.hasMetricool && !s.hasWindsor) rows.push({ label: "Metricool", live: true });
-    // Meta Ads komt mee via beide bronnen (Windsor facebook-connector of Metricool).
-    if (s.hasWindsor || s.hasMetricool) rows.push({ label: "Meta Ads", live: true });
-    rows.push({ label: "Google Drive", live: !!s.hasDrive }); // Live indien gekoppeld, anders Soon
-
-    el.innerHTML = rows.map(r => {
-      const badge = r.live
-        ? `<span class="badge" style="background:var(--positive-bg); color:var(--positive);">Live</span>`
-        : `<span class="badge">Soon</span>`;
-      return `<button class="nav-link" disabled style="opacity:0.7; cursor:default;">
-        <span class="icon">${r.live ? "◉" : "◌"}</span>
-        <span>${escapeHtml(r.label)}</span>
-        ${badge}
-      </button>`;
-    }).join("");
-  }
 
   /* ---------- Methodology-tab (Blok E) ---------- */
 

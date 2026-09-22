@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { getAccessToken: googleAccessToken, captureOidcToken, getClientConfig } = require('./_config');
+const { getAccessToken: googleAccessToken, captureOidcToken, getClientConfig, okDriveFile } = require('./_config');
 const { getDesignSystem } = require('./_designsystem');
 
 const SECRET = process.env.AUTH_SECRET;
@@ -186,6 +186,57 @@ module.exports = async (req, res) => {
       } catch { /* geen Config-tab is geen fout: dan zoeken we op patroon */ }
       const ds = await getDesignSystem(clientId, rootId, wantName, req.query.force === '1');
       return res.status(200).json(ds);
+    }
+
+    // ── ACTION: report-template ────────────────────────────────────
+    // Het rapportsjabloon van deze klant: een markdown in Drive die beschrijft
+    // hoe zijn rapport eruitziet — eigen secties, eigen definities, eigen toon.
+    // De Rapport-tab geeft hem mee aan de Report Agent.
+    //
+    // De link komt uit 'Rapportlink' in de Config-tab. Die tab wordt server-side
+    // opgehaald met CLIENTS[clientId].sheetId en geldt daarmee als vertrouwde
+    // bron — anders dan een id uit het request, dat nooit gevolgd wordt.
+    if (action === 'report-template') {
+      let link = null;
+      try {
+        const cfg = await getClientConfig(clientId);
+        link = cfg?.links?.report || null;
+      } catch (e) {
+        return res.status(200).json({ found: false, reason: `Config-tab niet leesbaar: ${e.message}` });
+      }
+      if (!link) {
+        return res.status(200).json({ found: false, reason: "Geen 'Rapportlink' in de Config-tab van deze klant." });
+      }
+      const fileId = okDriveFile(link);
+      if (!fileId) {
+        // Bijvoorbeeld een claude.ai-artifact: een verwijzing voor mensen, geen
+        // bestand dat de server kan lezen. Dat expliciet zeggen is beter dan een
+        // lege respons waarin het op 'niet gevonden' lijkt.
+        return res.status(200).json({ found: false, reason: 'De Rapportlink wijst niet naar een Drive-bestand, dus de server kan hem niet lezen.' });
+      }
+
+      const accessTokenTpl = await getAccessToken();
+      const meta = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType,modifiedTime`,
+        { headers: { Authorization: `Bearer ${accessTokenTpl}` } });
+      if (!meta.ok) {
+        return res.status(200).json({ found: false, reason: `Bestand niet leesbaar (${meta.status}). Staat het gedeeld met het service-account?` });
+      }
+      const info = await meta.json();
+      const text = await downloadText(accessTokenTpl, fileId, info.mimeType);
+      if (!text || !text.trim()) {
+        return res.status(200).json({ found: false, reason: `'${info.name}' is leeg of niet als tekst te lezen.` });
+      }
+      // Ruim, maar begrensd: het sjabloon gaat mee in de prompt en een heel
+      // deck aan tekst zou de cijfers verdringen.
+      const MAX = 24000;
+      return res.status(200).json({
+        found: true,
+        name: info.name,
+        modified: info.modifiedTime,
+        truncated: text.length > MAX,
+        template: text.slice(0, MAX),
+      });
     }
 
     const accessToken = await getAccessToken();

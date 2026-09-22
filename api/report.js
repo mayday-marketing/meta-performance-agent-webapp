@@ -104,7 +104,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { clientId, token, brandName, period, blocks, clientContext } = req.body || {};
+  const { clientId, token, brandName, period, blocks, clientContext, template, templateName } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -130,6 +130,26 @@ module.exports = async (req, res) => {
   }
   if (clientContext?.trim()) {
     systemPrompt += '\n\n---\n\n## KLANTCONTEXT\n\n' + clientContext;
+  }
+  // Rapportsjabloon van deze klant (Drive, via 'Rapportlink' in de Config-tab).
+  // Gezaghebbend boven de standaardaanpak: het beschrijft hoe déze klant zijn
+  // rapport leest — welke secties, welke definities, welke toon. Maar het is een
+  // vorm, geen bron: de cijfers komen uit de slides van déze periode, nooit uit
+  // de voorbeelden in het sjabloon. Dat onderscheid staat er expliciet bij,
+  // anders schrijft het model de voorbeeldcijfers over.
+  if (typeof template === 'string' && template.trim()) {
+    systemPrompt += '\n\n---\n\n## RAPPORTSJABLOON VAN DEZE KLANT\n\n'
+      + `Hieronder staat ${templateName ? `'${String(templateName).slice(0, 120)}'` : 'het sjabloon'}: `
+      + 'een eerder rapport van deze klant dat vastlegt hoe zijn rapportage eruitziet.\n\n'
+      + 'VOLG HIERVAN: de indeling en volgorde van onderwerpen, de toon, het '
+      + 'woordgebruik, en vooral de definities en meetregels die erin staan '
+      + '(welke bron waarvoor geldt, wat wel en niet opgeteld mag worden, welke '
+      + 'claims verboden zijn).\n\n'
+      + 'NEEM HIERUIT GEEN ENKEL GETAL OVER. De cijfers in dit sjabloon horen bij '
+      + 'een andere periode. Alles wat je noemt komt uit de slides die je in het '
+      + 'bericht krijgt. Staat er in het sjabloon een cijfer waar de slides niets '
+      + 'over zeggen, dan laat je het weg.\n\n'
+      + template;
   }
 
   const trimmed = blocks.slice(0, MAX_BLOCKS);

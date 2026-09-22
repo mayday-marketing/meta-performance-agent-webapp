@@ -384,6 +384,31 @@ in de browser (printen = PDF) of als `.pptx` (`#page-report`, nav
 - **De keuze staat in `localStorage` per klant**, niet in de sheet: het is een
   voorkeur van deze browser, en een rapport maak je elke maand opnieuw.
 
+### Rapportsjabloon van de klant
+
+Sommige klanten hebben een eigen rapportvorm. Die staat als markdown in hun
+Drive; `Rapportlink` in de Config-tab wijst hem aan, en `drive.js` action
+`report-template` leest hem.
+
+- **Vorm, geen bron.** Het sjabloon levert de indeling, de toon en vooral de
+  meetregels ("Shopify is de waarheid voor omzet, GA4 voor de verdeling — meng ze
+  niet in dezelfde zin"). De cijfers komen altijd uit de slides van de gevraagde
+  periode. De systeemprompt zegt dat expliciet, anders schrijft het model de
+  voorbeeldcijfers uit het sjabloon over — die horen bij een andere maand.
+- **De Config-tab geldt als vertrouwde bron.** Hij wordt server-side opgehaald
+  met `CLIENTS[clientId].sheetId`, dus een Drive-id daaruit mag gevolgd worden.
+  Dat is iets anders dan een id uit het request, dat nooit vertrouwd wordt — die
+  regel blijft onverkort gelden. (Beslissing van de eigenaar, 22-09-2026; de
+  restrisico blijft dat wie in die sheet kan schrijven, kan bepalen welk
+  Drive-bestand het service-account leest.)
+- **Niet elke link is leesbaar.** `Presentatie` wijst bij één klant naar een
+  claude.ai-artifact: een verwijzing voor mensen, geen bestand dat de server kan
+  openen. De tab zegt dat met zoveel woorden in plaats van stil niets te doen.
+- **Zeg altijd wat er gevolgd wordt.** Onder de analyse-schakelaar staat of er
+  een sjabloon geldt, welk, en anders waaróm niet. Een ingestelde Rapportlink die
+  onleesbaar blijkt, is anders alleen in de console te zien — precies hoe dit
+  probleem ontstond.
+
 ### Design system van de klant (api/_designsystem.js)
 
 Staat er een presentatie-design-system in de Drive-map van de klant, dan wint dat

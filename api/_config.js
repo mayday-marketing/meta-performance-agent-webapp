@@ -52,6 +52,18 @@ function normKey(s) {
 
 function okHex(v) { return HEX_RE.test(v) ? v.toLowerCase() : null; }
 
+// Drive-bestand: een deel-URL of een kaal bestand-id. Geeft altijd het id terug,
+// zodat de rest van de code niet hoeft te weten in welke vorm het genoteerd was.
+// De Config-tab geldt als vertrouwde bron (hij wordt server-side opgehaald met
+// CLIENTS[clientId].sheetId), dus een id hieruit mag gevolgd worden — anders dan
+// een id uit een request, dat nooit vertrouwd wordt.
+function okDriveFile(v) {
+  const s = String(v).trim();
+  const m = /\/d\/([A-Za-z0-9_-]{20,})/.exec(s) || /[?&]id=([A-Za-z0-9_-]{20,})/.exec(s);
+  if (m) return m[1];
+  return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : null;
+}
+
 // Een mapnaam, geen pad en geen id: geen slashes, geen quotes (die zouden de
 // Drive-query kunnen breken), en begrensd op lengte.
 function okFolderName(v) {
@@ -275,6 +287,10 @@ const CONFIG_FIELDS = {
   // dit is een verwijzing, geen bron die de pagina inlaadt.
   presentatie:     { path: 'links.deck',      check: okHttpsUrl },
   presentatielink: { path: 'links.deck',      check: okHttpsUrl },
+  // links.report is niet alleen een verwijzing: staat er een markdown in Drive,
+  // dan leest de Rapport-tab die als sjabloon voor het deck (drive.js, action
+  // 'report-template'). Vandaar okDriveFile in die module om er een bestand-id
+  // uit te halen.
   rapportlink:     { path: 'links.report',    check: okHttpsUrl },
   brandbook:       { path: 'links.brandbook', check: okHttpsUrl },
 };
@@ -574,4 +590,4 @@ async function getClientConfig(clientId) {
 
 // getAccessToken wordt ook door _sheetdata.js gebruikt — één implementatie i.p.v.
 // een derde kopie van hetzelfde JWT-dansje.
-module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets, getAccessToken, captureOidcToken, SHEETS_SCOPE };
+module.exports = { getClientConfig, emptyConfig, parseConfigRows, normKey, roasTargets, getAccessToken, captureOidcToken, okDriveFile, SHEETS_SCOPE };

@@ -398,6 +398,15 @@ a { color: inherit; text-decoration: none; }
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
   padding: 26px 18px; gap: 22px;
+  /* Vaste hoogte: de zijbalk is de navigatie, niet een kolom naast de inhoud.
+     Zonder dit rekt hij mee met de langste pagina (de Rapport-deck is meters
+     lang) en staat het afmelden onderaan een scherm dat niemand bereikt.
+     Sticky in plaats van fixed, zodat de hoofdkolom zijn eigen breedte houdt;
+     align-self voorkomt dat flex hem alsnog uitrekt. Onder 900px neemt de
+     lade-regel (position: fixed) het over. */
+  position: sticky; top: 0;
+  height: 100vh; align-self: flex-start;
+  overflow-y: auto; overscroll-behavior: contain;
 }
 /* Bovenaan staat de klant: zijn logo als dat er is, anders zijn naam. */
 .sidebar .brand {
@@ -1644,7 +1653,6 @@ a { color: inherit; text-decoration: none; }
 :root[data-nav="collapsed"] .sidebar .brand span,
 :root[data-nav="collapsed"] .brand-pill,
 :root[data-nav="collapsed"] .nav-section,
-:root[data-nav="collapsed"] #connectors-list,
 :root[data-nav="collapsed"] #sidebar-brand-sub,
 :root[data-nav="collapsed"] .mayday-credit .lockup { display: none; }
 /* Label visueel weg, maar leesbaar voor een schermlezer: een pictogramknop
@@ -1708,7 +1716,6 @@ a { color: inherit; text-decoration: none; }
   :root[data-nav] .brand-pill { display: flex; }
   :root[data-nav] .sidebar .brand span,
   :root[data-nav] .nav-section,
-  :root[data-nav] #connectors-list,
   :root[data-nav] #sidebar-brand-sub,
   :root[data-nav] .nav-link span:not(.icon),
   :root[data-nav] .logout .label,
@@ -2202,6 +2209,15 @@ th.c, td.c { text-align: center; }
 
 .rp-bar { padding: 14px 18px; margin-bottom: 16px; }
 .rp-presets { display: flex; gap: 8px; flex-wrap: wrap; }
+/* De actieve periodeknop, net als .period-toggle button.on elders in de app. */
+.rp-presets .btn.on {
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+}
+
+/* De zwevende chatknop staat rechtsonder in beeld en dekte de knop
+   'Stel presentatie samen' af. Ruimte onder de pagina, zodat er altijd langs
+   gescrold kan worden. */
+#page-report { padding-bottom: 84px; }
 
 .rp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--grid-gap, 16px); }
 @media (max-width: 1180px) { .rp-grid { grid-template-columns: repeat(2, 1fr); } }
