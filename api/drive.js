@@ -181,8 +181,11 @@ module.exports = async (req, res) => {
     if (action === 'design-system') {
       let wantName = null;
       try {
+        // getClientConfig geeft { config, warnings } terug, niet de config zelf.
+        // Zonder die ene stap bleef wantName altijd null en werd het veld
+        // 'Design system' uit de Config-tab stil genegeerd.
         const cfg = await getClientConfig(clientId);
-        wantName = cfg?.designSystem || null;
+        wantName = cfg?.config?.designSystem || null;
       } catch { /* geen Config-tab is geen fout: dan zoeken we op patroon */ }
       const ds = await getDesignSystem(clientId, rootId, wantName, req.query.force === '1');
       return res.status(200).json(ds);

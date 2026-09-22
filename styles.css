@@ -2478,6 +2478,13 @@ th.c, td.c { text-align: center; }
   background: none; border: none; border-radius: 0; box-shadow: none;
 }
 
+/* De grafiekbak blijft wél een vlak. Dat is geen kaart maar de drager van de
+   data, en een systeem dat er een kleur voor heeft bedoelt hem ook: Spotto's
+   presentatiepalet zet er --chart-vlak (#eaf0ff) achter. report.js zet --panel
+   op de deck, dus de vulling volgt vanzelf; alleen de afronding gaat eraf,
+   want radius 0 hoort bij de slide-anatomie. */
+.rp-deck[data-ds="on"] .chart-tub { border-radius: 0; }
+
 /* De titelslide staat op de omgekeerde grond van hún systeem. Kent het systeem
    die niet, dan is hij server-side afgeleid uit de merkkleur (zie
    _designsystem.js); ontbreekt ook die, dan blijft het dashboardaccent staan. */

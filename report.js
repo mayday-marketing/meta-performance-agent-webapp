@@ -533,7 +533,7 @@
     // de Overview-data.
     await Promise.all(pages.map(p => loadPage(p.key)));
 
-    RS.slides = buildSlides();
+    RS.slides = metDsKleuren(buildSlides);
 
     if (RS.withAnalysis) {
       const step = RS.steps.find(s => s.key === "__notes");
@@ -1145,6 +1145,66 @@
     ["--ds-font-label", "fontLabel"],
   ];
 
+  // Grafiekkleuren liggen anders dan de rest. charts.js leest zijn kleuren met
+  // getComputedStyle(document.documentElement) en bákt ze in de SVG, dus een
+  // waarde op de deck zetten komt te laat: de SVG is dan al getekend. Daarom
+  // gaan deze vijf tijdens het bouwen van de slides even op :root staan
+  // (dsKleuren()) én blijven ze op de deck staan voor wat de CSS live tekent —
+  // het paneelvlak achter een grafiek is CSS, de lijnen erin zijn SVG.
+  function dsChartVars() {
+    const ds = RS.ds;
+    if (!ds || !ds.found || !ds.chart) return [];
+    const c = ds.chart;
+    const uit = [];
+    if (c.panel)   uit.push(["--panel", c.panel]);
+    // Geen eigen raster? Dan de aslijnkleur, zodat raster en as uit hetzelfde
+    // palet komen in plaats van half merk, half dashboard.
+    const raster = c.grid || c.axis;
+    if (raster)    uit.push(["--panel-grid", raster]);
+    if (c.axis)    uit.push(["--panel-axis", c.axis]);
+    if (c.series1) uit.push(["--accent-data", c.series1]);
+    if (c.series2) uit.push(["--s2", c.series2]);
+    return uit;
+  }
+
+  // fn() draaien met de grafiekkleuren van het design system op :root, en ze
+  // daarna terugzetten. Synchroon, net als borrow(): er mag niets tussen zitten
+  // dat await't, anders tekent het dashboard eromheen even in merkkleuren.
+  function metDsKleuren(fn) {
+    const vars = dsChartVars();
+    if (!vars.length) return fn();
+    const root = document.documentElement;
+    const oud = vars.map(([naam]) => [naam, root.style.getPropertyValue(naam)]);
+    vars.forEach(([naam, waarde]) => root.style.setProperty(naam, waarde));
+    try { return fn(); }
+    finally {
+      oud.forEach(([naam, waarde]) => {
+        if (waarde) root.style.setProperty(naam, waarde);
+        else root.style.removeProperty(naam);
+      });
+    }
+  }
+
+  // De echte letters. Alleen de familienaam doorgeven werkt niet: de binaries
+  // staan in Drive, niet op het apparaat van de kijker. _designsystem.js stuurt
+  // ze als data-URL mee, hier worden ze één keer als @font-face ingehangen.
+  function applyDsFonts() {
+    const ds = RS.ds;
+    const id = "rp-ds-fonts";
+    const bestaand = document.getElementById(id);
+    const naam = ds && ds.found ? ds.name : "";
+    if (!ds || !ds.found || !(ds.fonts || []).length) { if (bestaand) bestaand.remove(); return; }
+    if (bestaand && bestaand.dataset.ds === naam) return;
+    if (bestaand) bestaand.remove();
+    const el = document.createElement("style");
+    el.id = id;
+    el.dataset.ds = naam;
+    el.textContent = ds.fonts.map(f =>
+      `@font-face{font-family:${JSON.stringify(f.family)};src:url(${f.dataUrl}) format(${JSON.stringify(f.format)});`
+      + `font-weight:${f.weight || "400"};font-style:normal;font-display:swap;}`).join("\n");
+    document.head.appendChild(el);
+  }
+
   // Tokens op de deck zetten, niet op :root — het dashboard eromheen houdt zijn
   // eigen stijl. Een token dat het systeem niet kent wordt niet gezet, zodat de
   // CSS-terugval op de dashboardwaarde blijft staan.
@@ -1152,11 +1212,15 @@
     const deck = $("#rp-deck");
     if (!deck) return;
     const ds = RS.ds;
+    applyDsFonts();   // ook als er géén systeem is: dan haalt hij een oude <style> weg
     if (!ds || !ds.found) { deck.removeAttribute("data-ds"); return; }
     const t = ds.tokens || {}, d = ds.dark || {};
     for (const [cssVar, key] of DS_VARS) {
       if (t[key]) deck.style.setProperty(cssVar, t[key]);
     }
+    // Wat de CSS live tekent (het vlak achter een grafiek) hoort ook op de deck;
+    // de SVG-kleuren zijn tijdens buildSlides() al gebakken.
+    dsChartVars().forEach(([naam, waarde]) => deck.style.setProperty(naam, waarde));
     // De titelslide staat op de omgekeerde grond van hún systeem.
     if (d.surface) deck.style.setProperty("--ds-cover-bg", d.surface);
     if (d.ink) deck.style.setProperty("--ds-cover-fg", d.ink);
