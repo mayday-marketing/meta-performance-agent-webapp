@@ -35,6 +35,13 @@ const DEFAULT_NAME_RE = /design\s*system/i;
 // dragen wat we nodig hebben; de rest mag ontbreken.
 const TOKEN_FILES = ['colors.css', 'typography.css', 'fonts.css', 'layout.css', 'spacing.css'];
 
+// Hoe diep een design-systemmap onder de klantmap mag zitten, en hoeveel
+// gelijknamige mappen we hoogstens natrekken. Spotto zit op drie niveaus
+// (02_MERKEXPRESSIE/2.3_Visuele-Expressie/…); zes hops is ruim genoeg en houdt
+// het aantal Drive-calls begrensd.
+const MAX_ANCESTOR_HOPS = 6;
+const GLOBAL_HITS_MAX = 10;
+
 const MAX_BYTES = 400 * 1024;   // een .dc.html van BAJA is ~58 KB
 const cache = new Map();        // clientId -> { data, ts }
 const TTL_MS = 10 * 60 * 1000;
@@ -43,10 +50,20 @@ const TTL_MS = 10 * 60 * 1000;
 
 async function driveList(accessToken, q, fields) {
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}`
-    + `&fields=${encodeURIComponent(fields)}&orderBy=modifiedTime desc`;
+    + `&fields=${encodeURIComponent(fields)}&orderBy=modifiedTime desc`
+    + `&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) throw new Error(`Drive ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return (await res.json()).files || [];
+}
+
+// De ouders van één bestand. Alleen nodig voor de ouderketen-toets hieronder.
+async function driveParents(accessToken, fileId) {
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}`
+    + `?fields=parents&supportsAllDrives=true`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) return [];
+  return (await res.json()).parents || [];
 }
 
 async function downloadText(accessToken, fileId) {
@@ -61,16 +78,57 @@ async function downloadText(accessToken, fileId) {
 const children = (accessToken, parentId) => driveList(
   accessToken, `'${parentId}' in parents and trashed=false`, 'files(id,name,mimeType,modifiedTime)');
 
+// Hangt `folderId` ergens ónder `rootId`? We lopen de ouderketen omhoog in
+// plaats van de boom omlaag: dat kost één call per niveau in plaats van één per
+// map. Een map die niet binnen MAX_ANCESTOR_HOPS bij de klantmap uitkomt geldt
+// als 'niet van deze klant' — fail closed.
+async function isInside(accessToken, folderId, rootId) {
+  let cur = folderId;
+  for (let i = 0; i < MAX_ANCESTOR_HOPS && cur; i++) {
+    if (cur === rootId) return true;
+    const parents = await driveParents(accessToken, cur);
+    cur = parents[0] || null;
+  }
+  return false;
+}
+
 // De mapnaam uit de Config-tab exact matchen, anders op patroon. Beide zoeken
 // alleen binnen de klantmap, dus buiten die map valt niets aan te wijzen.
 async function findSystemFolder(accessToken, rootId, wantName) {
+  // 1. Direct onder de klantmap. De goedkoopste vorm — één call — en die van
+  //    Just Jane.
   const kids = await children(accessToken, rootId);
   const folders = kids.filter(f => f.mimeType === 'application/vnd.google-apps.folder');
   if (wantName) {
     const exact = folders.find(f => f.name.trim().toLowerCase() === wantName.trim().toLowerCase());
     if (exact) return exact;
+  } else {
+    const byPattern = folders.find(f => DEFAULT_NAME_RE.test(f.name));
+    if (byPattern) return byPattern;
   }
-  return folders.find(f => DEFAULT_NAME_RE.test(f.name)) || null;
+
+  // 2. Dieper in de klantmap. Spotto's systeem staat in
+  //    02_MERKEXPRESSIE/2.3_Visuele-Expressie — dat is de mapconventie, niet de
+  //    uitzondering. De boom aflopen zou tientallen Drive-calls kosten, dus we
+  //    zoeken op naam over alles wat het service-account ziet en TOETSEN daarna
+  //    de ouderketen.
+  //
+  //    ISOLATIE: die toets is het hele punt. Het service-account kan bij élke
+  //    klantmap, dus zonder isInside() zou een gelijknamige map van een andere
+  //    klant hier binnenkomen. Alleen een map die écht onder driveFolderId hangt
+  //    telt; de naam uit de Config-tab kan nooit iets buiten die map aanwijzen.
+  const naam = String(wantName || '').replace(/['\\]/g, '').trim();
+  const q = `mimeType = 'application/vnd.google-apps.folder' and trashed = false and `
+    + (naam ? `name = '${naam}'` : `name contains 'design system'`);
+
+  let hits;
+  try { hits = await driveList(accessToken, q, 'files(id,name,mimeType,modifiedTime)'); }
+  catch { return null; }
+
+  for (const f of hits.slice(0, GLOBAL_HITS_MAX)) {
+    if (await isInside(accessToken, f.id, rootId)) return f;
+  }
+  return null;
 }
 
 /* ---------- CSS-custom-properties ---------- */
@@ -84,6 +142,11 @@ const GROUND_RE = /\[data-ground\s*=\s*["']?dark["']?\]/i;
 
 function parseBlocks(css) {
   const root = {}, dark = {};
+  // Commentaar er eerst uit. De selector is alles sinds de vorige '}', dus een
+  // kopcommentaar bóven het eerste :root-blok ging mee in de selector en liet de
+  // test hieronder falen — Spotto's colors.css opent met vier regels uitleg en
+  // leverde daardoor géén enkel kleurtoken op.
+  css = String(css).replace(/\/\*[\s\S]*?\*\//g, '');
   // Naïef maar genoeg: custom properties staan nooit genest in deze bestanden.
   const blockRe = /([^{}]+)\{([^{}]*)\}/g;
   let m;
@@ -116,21 +179,35 @@ function resolve(vars, value, depth = 0) {
 // merkveld dan een compleet maar verzonnen palet.
 const WANT = {
   surface:     ['--surface-page', '--surface', '--background', '--bg', '--page', '--cream'],
-  ink:         ['--text-body', '--body', '--ink', '--fg', '--foreground', '--text'],
-  head:        ['--text-head', '--heading', '--primary', '--accent', '--brand'],
+  // --text-ink vóór --text-body: in een systeem met een typografische schaal is
+  // --text-body de lettergrootte en niet de kleur. Spotto zegt dat zelf in
+  // colors.css; de volgorde hier maakt dat we de kleur pakken, de isColor-toets
+  // hieronder vangt de gevallen waarin ook dat niet helpt.
+  ink:         ['--text-ink', '--text-body', '--body', '--ink', '--fg', '--foreground', '--text'],
+  head:        ['--text-head', '--heading', '--text-strong', '--primary', '--accent', '--brand'],
   muted:       ['--text-muted', '--muted', '--ink-60'],
-  rule:        ['--rule', '--border', '--hairline', '--divider'],
+  rule:        ['--rule', '--border', '--border-default', '--hairline', '--divider'],
   label:       ['--text-label', '--label'],
   fontDisplay: ['--font-display', '--font-heading', '--font-head', '--font-serif'],
-  fontBody:    ['--font-body', '--font-sans', '--font-text'],
+  // --font-serif als laatste: bij Spotto is de serif de lopende tekst; een
+  // systeem dat --font-body kent wordt daar niet door geraakt.
+  fontBody:    ['--font-body', '--font-sans', '--font-text', '--font-serif'],
   fontLabel:   ['--font-label', '--font-mono', '--font-monospace'],
 };
 
-function pick(vars, names) {
+// Ziet dit eruit als een kleur? Een systeem mag dezelfde naam voor een maat en
+// een kleur gebruiken (--text-label is bij Spotto 13px), en een '13px' in een
+// kleurtoken levert geen foutmelding maar een onzichtbare slide.
+const COLOR_RE = /^(#|rgb|hsl|hwb|lab|lch|oklab|oklch|color\(|[a-z]+$)/i;
+const isColor = (v) => COLOR_RE.test(String(v).trim()) && !/\d(px|em|rem|%|ch|vh|vw)$/i.test(String(v).trim());
+
+const FONT_KEYS = new Set(['fontDisplay', 'fontBody', 'fontLabel']);
+
+function pick(vars, names, ok) {
   for (const n of names) {
     if (vars[n] != null) {
       const v = resolve(vars, vars[n]);
-      if (v) return v;
+      if (v && (!ok || ok(v))) return v;
     }
   }
   return null;
@@ -141,10 +218,11 @@ function tokensFrom(css) {
   const all = { ...root };                 // aliassen oplossen tegen :root
   const out = { light: {}, dark: {} };
   for (const [key, names] of Object.entries(WANT)) {
-    out.light[key] = pick(all, names);
+    const ok = FONT_KEYS.has(key) ? null : isColor;
+    out.light[key] = pick(all, names, ok);
     // De donkere grond overschrijft alleen wat hij zelf noemt.
     const merged = { ...all, ...dark };
-    const d = pick({ ...merged }, names);
+    const d = pick({ ...merged }, names, ok);
     out.dark[key] = dark && Object.keys(dark).length ? d : null;
   }
   // Lettertypefamilies die het systeem zelf laadt. De binaries staan in Drive en
