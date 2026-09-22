@@ -394,9 +394,14 @@ module.exports = async (req, res) => {
 
       /* ---- Posities: één SERP-call per keyword, dus achter een eigen knop ---- */
       case 'ranks': {
+        // De krappe grens van 25 bestaat omdat elke positie een betaalde
+        // SERP-call is. Komt de meting uit een bestand, dan wordt er niets
+        // opgevraagd en zou die grens gemeten posities verbergen achter een
+        // vraagteken — 'niet gemeten' terwijl ze wél gemeten zijn.
+        const rankLimit = fixed ? MAX_VOLUME_KEYWORDS : MAX_RANK_KEYWORDS;
         const wanted = cleanKeywords(
           (Array.isArray(reqKeywords) && reqKeywords.length) ? reqKeywords : settings.defaultKeywords,
-          MAX_RANK_KEYWORDS
+          rankLimit
         );
         if (!wanted.length) {
           return res.status(400).json({ error: 'Geen keywords om te controleren.', settings: meta });

@@ -1,0 +1,190 @@
+{
+  "brandName": "Spotto",
+  "auditDate": "2026-09-11",
+  "label": "Meting 11-09-2026 · Google AI (BE/nl)",
+  "promptCount": 33,
+  "passNote": "Drie metingen met een eigen datum: Google AI-mentions 11-09-2026 (databasetelling, geen promptset), ChatGPT-scraper 100 vragen 14-09-2026, bevroren promptset van 33 prompts over 4 engines 10-08-2026 (131 antwoorden).",
+  "method": "Mentions en bronnen uit de DataForSEO AI Optimization API (LLM Mentions), location Belgium, language nl, platform google — dat is de Belgische database: Google AI Overviews en AI Mode. ChatGPT, Claude, Perplexity en Gemini zitten daar niet in; het ChatGPT-blok komt uit de ChatGPT Scraper, die chatgpt.com live bevraagt met Belgische locatie (100 vragen, web search geforceerd). De promptmatrix komt uit de LLM Response API over vier modellen. Readiness via on_page_instant_pages op spotto.be/nl/home plus directe controle van robots.txt en llms.txt. AI-verkeer uit GA4-property Spotto - V2 via Windsor.ai. Bronvermeldingen en merkvermeldingen zijn twee metingen en niet optelbaar.",
+
+  "status": {
+    "level": "warn",
+    "title": "Entiteit bestaat, extractability ontbreekt",
+    "text": "Google AI kent Spotto en citeert de site: 306 bronvermeldingen en 208 merkvermeldingen. Maar het aandeel daalt (bron 5,1% naar 4,2%, merk 3,4% naar 2,7%) en Immoscoop is voorbijgestoken — Spotto staat zesde en laatste van zes. De oorzaak zit in fase 1: de homepage telt 173 woorden, heeft geen JSON-LD en llms.txt geeft een 404. Een model dat wil weten wat Spotto ís, vindt niets beters om te citeren en beschrijft het merk als 'verzamelsite'."
+  },
+
+  "kpis": [
+    {
+      "label": "Aandeel bronvermeldingen",
+      "value": "4,2%",
+      "tone": "bad",
+      "delta": "−0,9 pp t.o.v. 10 aug",
+      "sub": "306 van 7.308 vermeldingen · plaats 6 van 6 · absolute telling steeg van 278 naar 306"
+    },
+    {
+      "label": "Aandeel merkvermeldingen",
+      "value": "2,7%",
+      "tone": "bad",
+      "delta": "−0,8 pp t.o.v. 10 aug",
+      "sub": "208 van 7.807 antwoorden noemen de merknaam · plaats 6 van 6"
+    },
+    {
+      "label": "ChatGPT · 100 vragen",
+      "value": "11 van 100",
+      "tone": "bad",
+      "delta": "nulmeting 14-09-2026",
+      "sub": "spotto.be 10× als bron; zimmo.be in 70 antwoorden, immoweb.be in 60"
+    },
+    {
+      "label": "AI-verkeer in GA4",
+      "value": "5.085 sessies",
+      "tone": "neutral",
+      "delta": "1,9% van alle sessies",
+      "sub": "98,7% via chatgpt.com · 3.124 users · periode 14 aug – 10 sep 2026"
+    }
+  ],
+
+  "engines": [
+    {
+      "name": "Google AI",
+      "shareOfVoicePct": 4.2,
+      "topCompetitor": "Immoweb",
+      "sourceType": "kennisartikelen + zoekpagina's per gemeente",
+      "note": "Databasetelling via LLM Mentions (BE/nl, platform google), 11-09-2026: 306 bronvermeldingen. Geen promptset, dus geen mention rate — vergelijk tussen merken, niet met scores uit een andere tool."
+    },
+    {
+      "name": "ChatGPT · 100 longtail",
+      "runs": 100,
+      "mentionRatePct": 11,
+      "topCompetitor": "Zimmo",
+      "sourceType": "spotto.be 10× als bron",
+      "note": "ChatGPT Scraper, BE/nl, web search geforceerd, 14-09-2026. Zimmo in 70 antwoorden, Immoweb 60, Immoscoop 26. Goed voor 98,7% van het gemeten AI-verkeer."
+    },
+    {
+      "name": "ChatGPT · 33 prompts",
+      "mentionRatePct": 0,
+      "note": "Bevroren set, 10-08-2026 (gpt-5.5, web_search aan): 0× genoemd, 0× geciteerd."
+    },
+    {
+      "name": "Claude",
+      "mentionRatePct": 0,
+      "note": "Bevroren set, 10-08-2026 (sonnet-4-6): 0× genoemd, 3× geciteerd."
+    },
+    {
+      "name": "Gemini",
+      "mentionRatePct": 0,
+      "note": "Bevroren set, 10-08-2026 (3.5-flash): 0× genoemd, 0× geciteerd."
+    },
+    {
+      "name": "Perplexity",
+      "mentionRatePct": 0,
+      "note": "Bevroren set, 10-08-2026 (sonar-pro): 0× genoemd, 2× geciteerd."
+    }
+  ],
+
+  "byType": [
+    { "type": "Categorie (beste site)", "ratePct": 0, "note": "0 genoemd, 0 geciteerd — Immoweb/Zimmo in ~100%" },
+    { "type": "Financiering & aankoopkosten", "ratePct": 0, "note": "0 genoemd, 0 geciteerd — overheid, bank en notaris" },
+    { "type": "Verkopen", "ratePct": 0, "note": "0 genoemd, 0 geciteerd — Immoweb/Zimmo genoemd én geciteerd" },
+    { "type": "Schatting", "ratePct": 0, "note": "0 genoemd, 0 geciteerd — Immoweb/Zimmo-tools domineren" },
+    { "type": "Attesten & renovatie", "ratePct": 0, "note": "0 genoemd, 2× geciteerd (renovatieplicht, bodemattest)" },
+    { "type": "Emotioneel / levenssituatie", "ratePct": 0, "note": "0 genoemd, 3× geciteerd (samen kopen, alleen wonen, gezin)" }
+  ],
+
+  "competitors": [
+    { "name": "Immoweb", "note": "34,1% van de bronvermeldingen (2.490) · 22× genoemd in de promptset · in 60 van de 100 ChatGPT-antwoorden" },
+    { "name": "Zimmo", "note": "29,0% van de bronvermeldingen (2.121) · 20× genoemd in de promptset · in 70 van de 100 ChatGPT-antwoorden" },
+    { "name": "Immovlan", "note": "17,0% van de bronvermeldingen (1.243) · 8× genoemd in de promptset" },
+    { "name": "Realo", "note": "10,5% van de bronvermeldingen (768) · 11× genoemd in de promptset" },
+    { "name": "Immoscoop", "note": "5,2% van de bronvermeldingen (380) · 11× genoemd · in september voorbij Spotto (306)" }
+  ],
+
+  "phases": [
+    { "n": "0", "title": "Basis", "gate": "Entity bestaat: Google AI kent de naam en citeert de site", "here": false },
+    { "n": "1", "title": "Extractability", "gate": "Schema, llms.txt en tekst op de homepage ontbreken", "here": true },
+    { "n": "2", "title": "Categorie", "gate": "Bij 'huis kopen' en 'woning verkopen' niet in beeld", "here": false },
+    { "n": "3", "title": "Attributen", "gate": "Gemeten: AI noemt Spotto een 'verzamelsite'", "here": false },
+    { "n": "4", "title": "Bewijs", "gate": "7 bronnen citeren concurrenten, Spotto niet", "here": false },
+    { "n": "5", "title": "Selectie", "gate": "Genoemd worden als antwoord, niet als voetnoot", "here": false }
+  ],
+
+  "readiness": [
+    { "check": "HTTPS", "status": "pass", "note": "Volledige site op https" },
+    { "check": "Canonical", "status": "pass", "note": "Aanwezig op de homepage" },
+    { "check": "robots.txt laat AI-crawlers toe", "status": "pass", "note": "Aanwezig; geen enkele AI-crawler geblokkeerd" },
+    { "check": "Sitemap", "status": "pass", "note": "spotto.be/sitemap.xml, opgegeven in robots.txt" },
+    { "check": "Heading-hiërarchie", "status": "fail", "note": "Zwak, niet gezakt — één H1, maar die luidt enkel 'Spotto'" },
+    { "check": "Meta title", "status": "fail", "note": "Zwak, niet gezakt — 'Welkom bij Spotto', 17 tekens, geen categoriewoord" },
+    { "check": "Meta description", "status": "fail", "note": "Zwak, niet gezakt — aanwezig, maar omschrijft niet wat Spotto is" },
+    { "check": "Server rendering", "status": "fail", "note": "Zwak, niet gezakt — 65 HTML-parseerfouten (niet-sluitende tags)" },
+    { "check": "llms.txt", "status": "fail", "note": "404 — bestand ontbreekt" },
+    { "check": "Schema / JSON-LD", "status": "fail", "note": "0 blokken op de homepage" },
+    { "check": "FAQ-schema", "status": "fail", "note": "Niet aanwezig" },
+    { "check": "BLUF-content", "status": "fail", "note": "173 woorden op de homepage, tekstaandeel 0,4%" }
+  ],
+
+  "actions": [
+    {
+      "priority": "P1",
+      "effort": "M",
+      "skill": "grounding-page + geo-schema-entity",
+      "title": "Homepage als grounding page herschrijven",
+      "text": "De homepage telt 173 woorden met een tekstaandeel van 0,4%, en de H1 luidt enkel 'Spotto'. Daardoor beschrijft AI het merk als 'verzamelsite die vastgoedaanbod van makelaars bundelt' — de aggregator-framing, niet de eigen positionering. Zet er een categoriezin, de doelgroep en de differentiatoren in, in citeerbare zinnen (situatie + antwoord in één zin).",
+      "done": "AI beschrijft Spotto met de eigen categoriezin in plaats van met 'verzamelsite'."
+    },
+    {
+      "priority": "P1",
+      "effort": "S",
+      "skill": "geo-schema-entity",
+      "title": "llms.txt en JSON-LD publiceren",
+      "text": "llms.txt geeft een 404 en de homepage bevat nul JSON-LD-blokken; FAQ-schema ontbreekt overal. Dat zijn de drie goedkoopste extractability-checks en ze staan alle drie op rood.",
+      "done": "llms.txt bereikbaar, Organization- en WebSite-schema valideren, FAQ-schema op de kennisartikelen."
+    },
+    {
+      "priority": "P1",
+      "effort": "S",
+      "skill": "geo-page-rewrite",
+      "title": "Meta title en H1 met categoriewoord",
+      "text": "'Welkom bij Spotto' is 17 tekens zonder categoriewoord, en de meta description zegt niet wat Spotto is. Een model dat de entiteit moet plaatsen heeft daar niets aan.",
+      "done": "Title, H1 en description bevatten alle drie het categoriewoord en de markt."
+    },
+    {
+      "priority": "P2",
+      "effort": "L",
+      "skill": "geo-site-scale",
+      "title": "Zoekpagina's per gemeente uitbouwen",
+      "text": "Bewezen hefboom: bij 'kortrijk huis te koop' (4.400 volume) staat /nl/te-koop/8500-kortrijk/immo/overzicht op bronpositie 1, vóór Immoweb, Immovlan en Zimmo. En /nl/te-huur/2018-antwerpen/kot-kamer/overzicht haalt het hoogste AI-volume van alle geciteerde pagina's (960). In augustus haalde nog geen enkele zoekpagina het.",
+      "done": "Meer dan één gemeentepagina in de top-3 bronposities op lokale koop- en huurvragen."
+    },
+    {
+      "priority": "P2",
+      "effort": "L",
+      "skill": "geo-page-rewrite",
+      "title": "Categoriecontent voor 'huis kopen' en 'woning verkopen'",
+      "text": "De twee grootste categorieën leveren samen 1.776 vermeldingen, en Spotto staat in geen van beide top tienen. De vermeldingen die er zijn zitten volledig in lokale longtail (94 van de 100 gesamplede queries zijn 'gemeente + te koop/te huur').",
+      "done": "Spotto in de top 10 van bronvermeldingen op minstens één van beide categorieën."
+    },
+    {
+      "priority": "P3",
+      "effort": "M",
+      "skill": "geo-live-data",
+      "title": "ChatGPT apart blijven meten",
+      "text": "ChatGPT is goed voor 98,7% van het AI-verkeer in GA4, maar zit niet in de Belgische DataForSEO-database — die dekt alleen Google AI Overviews en AI Mode. De 11-van-100-meting via de scraper is de enige zichtlijn op de engine die er het meest toe doet, en kost geld per call.",
+      "done": "Herhaalmeting op dezelfde 100 vragen, zodat de 11 een trend wordt in plaats van een momentopname."
+    }
+  ],
+
+  "sources": {
+    "keyword": "immo",
+    "platform": "google",
+    "location": "Belgium",
+    "language": "nl"
+  },
+
+  "previous": {
+    "auditDate": "2026-08-10",
+    "kpis": [
+      { "label": "Aandeel bronvermeldingen", "value": "5,1%" },
+      { "label": "Aandeel merkvermeldingen", "value": "3,4%" }
+    ]
+  }
+}
