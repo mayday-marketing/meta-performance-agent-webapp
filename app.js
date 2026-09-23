@@ -1,5 +1,5 @@
 /* ==========================================================
-   Social Performance Agent — App logic
+   mayday marketing Performance Dashboard — App logic
    Stap 3: echte auth + live Metricool data voor Overview
    ========================================================== */
 
@@ -204,8 +204,11 @@
   // want de formules hebben een ander eindpunt in dark mode.
   function applyDerivedTokens(accent) {
     const root = document.documentElement;
-    const hex = accent || state.session?.brand?.accent;
     DERIVED_PROPS.forEach(prop => root.style.removeProperty(prop));
+    // Zonder klantaccent (loginscherm, klant zonder Config-accent) toch afleiden
+    // van de standaard: anders blijft #400745 in dark mode de onleesbare datakleur.
+    const hex = accent || state.session?.brand?.accent
+      || getComputedStyle(root).getPropertyValue("--accent").trim();
     if (!hex) return;
     const tokens = deriveBrandTokens(hex, root.getAttribute("data-theme") === "dark");
     if (!tokens) return;
@@ -462,6 +465,8 @@
     const clientId = $("#brand-input").value.trim();
     const password = $("#code-input").value.trim();
     if (!clientId || !password) {
+      if (!clientId) $("#brand-input").setAttribute("aria-invalid", "true");
+      if (!password) $("#code-input").setAttribute("aria-invalid", "true");
       setLoginError("Vul zowel klantcode als wachtwoord in.");
       return;
     }
@@ -7202,10 +7207,15 @@
   /* ---------- Boot ---------- */
 
   function bindLogin() {
-    const loginBtn = $("#login-button");
-    if (loginBtn) loginBtn.addEventListener("click", login);
-    const form = $("#code-input");
-    if (form) form.addEventListener("keypress", (e) => { if (e.key === "Enter") login(e); });
+    // Eén submit-handler: Enter in beide velden en de knop lopen via het formulier.
+    // Vroeger hingen er een onclick én een click-listener aan de knop, waardoor
+    // elke login twee keer naar /api/auth ging.
+    const form = $("#login-form");
+    if (form) form.addEventListener("submit", login);
+    ["#brand-input", "#code-input"].forEach(sel => {
+      const el = $(sel);
+      if (el) el.addEventListener("input", () => el.removeAttribute("aria-invalid"));
+    });
   }
 
   document.addEventListener("DOMContentLoaded", () => {

@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>mayday marketing · Social Performance Agent</title>
+  <title>mayday marketing · Performance Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="stylesheet" href="styles.css">
   <script>
     // Tweak defaults — host can rewrite this block on disk
@@ -16,33 +17,98 @@
 <body>
 
   <!-- ========================== LOGIN ========================== -->
+  <!-- Rapportstijl: papier links met de bewering, één getinte grafiekbak rechts
+       als beeld. Het grafiekje is decoratie (aria-hidden, geen cijfers of assen):
+       een loginscherm mag geen meting suggereren die er niet is. -->
   <div id="login-screen" class="screen on" data-screen-label="Login">
-    <div class="auth-card">
-      <div class="auth-grid">
-        <div class="auth-panel">
-          <div>
-            <div style="opacity:0.85; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; font-weight:600;">mayday marketing</div>
-            <h1 style="margin-top:18px;">Social Performance Agent</h1>
+    <div class="login-shell">
+      <header class="login-top">
+        <img class="on-light" src="assets/mayday-lockup.svg"
+             alt="mayday — marketing agents &amp; automations" width="186" height="24">
+        <img class="on-dark" src="assets/mayday-lockup-dark.svg" alt="" width="186" height="24">
+      </header>
+
+      <main class="login-main">
+        <form id="login-form" class="login-form" novalidate>
+          <p class="login-eyebrow">Performance dashboard</p>
+          <h1>Cijfers, <b>met inzichten erbij.</b></h1>
+          <p class="login-lede">Social, advertising, zoekgedrag en website-inzichten van je merk op één plek — gekoppeld aan je AI-kennisbank, met rapportage in PowerPoint en Google Sheets.</p>
+
+          <div class="login-fields">
+            <div class="field">
+              <label for="brand-input">Klantcode</label>
+              <input id="brand-input" type="text" placeholder="bv. merknaam"
+                     autocomplete="username" autocapitalize="none" spellcheck="false" required>
+            </div>
+            <div class="field">
+              <label for="code-input">Wachtwoord</label>
+              <input id="code-input" type="password" placeholder="••••••••"
+                     autocomplete="current-password" required>
+            </div>
+            <div id="login-error" role="alert" aria-live="polite"></div>
+            <button id="login-button" type="submit">Inloggen</button>
           </div>
-          <p>Log in met je klantcode om de dashboard-data van Metricool en Google Drive te zien.</p>
-        </div>
-        <div class="login-form">
-          <div>
-            <h2>Login</h2>
-            <p class="hint">Vul je merknaam en geheime code in om verder te gaan.</p>
+
+          <p class="login-note">Je sessie blijft 10 uur geldig en toont alleen de data van je eigen merk. Geen login? Mail naar <a href="mailto:wehelpyou@mayday.marketing">wehelpyou@mayday.marketing</a>.</p>
+        </form>
+
+        <!-- Logo's: Simple Icons (CC0), zelf gehost in assets/icons/ en monochroom
+             via een CSS-mask, zodat ze de datakleur en het thema volgen in plaats
+             van vijftien merkkleuren. Klaviyo en Clarity staan niet in Simple Icons:
+             die twee zijn eenkleurig nagetekend op hun officiële app-icoon (de vlag
+             van klaviyo.com, de facetdriehoek van clarity.microsoft.com). Vier rijen
+             van vier / twee van acht: de laatste tegel zegt dat er meer kan. -->
+        <aside class="login-visual">
+          <div class="login-panel">
+            <ul class="login-logos" aria-label="Bronnen in het dashboard">
+              <li class="lc-logo" style="--icon:url(assets/icons/instagram.svg)" title="Instagram"><span>Instagram</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/facebook.svg)" title="Facebook"><span>Facebook</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/linkedin.svg)" title="LinkedIn"><span>LinkedIn</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/tiktok.svg)" title="TikTok"><span>TikTok</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/googleads.svg)" title="Google Ads"><span>Google Ads</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/googleanalytics.svg)" title="Google Analytics"><span>Google Analytics</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/googlesearchconsole.svg)" title="Google Search Console"><span>Google Search Console</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/clarity.svg)" title="Microsoft Clarity"><span>Microsoft Clarity</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/shopify.svg)" title="Shopify"><span>Shopify</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/klaviyo.svg)" title="Klaviyo"><span>Klaviyo</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/mailchimp.svg)" title="Mailchimp"><span>Mailchimp</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/claude.svg)" title="Claude"><span>Claude</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/openai.svg)" title="ChatGPT"><span>ChatGPT</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/googlesheets.svg)" title="Google Sheets"><span>Google Sheets</span></li>
+              <li class="lc-logo" style="--icon:url(assets/icons/microsoftpowerpoint.svg)" title="PowerPoint"><span>PowerPoint</span></li>
+              <li class="lc-logo lc-logo--more" title="En nog veel meer integraties"><span aria-hidden="true">…</span><span>en nog veel meer</span></li>
+            </ul>
+            <svg viewBox="0 0 320 180" preserveAspectRatio="none" class="login-chart" aria-hidden="true">
+              <g class="lc-grid">
+                <line x1="0" y1="45" x2="320" y2="45"/>
+                <line x1="0" y1="90" x2="320" y2="90"/>
+                <line x1="0" y1="135" x2="320" y2="135"/>
+              </g>
+              <g class="lc-bars">
+                <rect x="8"   y="112" width="20" height="68"/>
+                <rect x="40"  y="98"  width="20" height="82"/>
+                <rect x="72"  y="118" width="20" height="62"/>
+                <rect x="104" y="86"  width="20" height="94"/>
+                <rect x="136" y="92"  width="20" height="88"/>
+                <rect x="168" y="70"  width="20" height="110"/>
+                <rect x="200" y="78"  width="20" height="102"/>
+                <rect x="232" y="56"  width="20" height="124"/>
+                <rect x="264" y="62"  width="20" height="118"/>
+                <rect x="296" y="40"  width="20" height="140"/>
+              </g>
+              <polyline class="lc-axis" points="0,179 320,179"/>
+              <polyline class="lc-line" points="18,96 50,88 82,100 114,70 146,74 178,52 210,60 242,38 274,42 306,22"/>
+              <circle class="lc-dot" cx="306" cy="22" r="5"/>
+            </svg>
           </div>
-          <div>
-            <label for="brand-input">Klantcode</label>
-            <input id="brand-input" type="text" placeholder="bv. merknaam" autocomplete="username">
-          </div>
-          <div>
-            <label for="code-input">Wachtwoord</label>
-            <input id="code-input" type="password" placeholder="••••••••" autocomplete="current-password">
-          </div>
-          <button id="login-button" type="button" onclick="login()">Login</button>
-          <p class="helper-note">Beveiligde sessie via Metricool en Google Drive. Sessie verloopt na 10 uur.</p>
-        </div>
-      </div>
+        </aside>
+      </main>
+
+      <footer class="login-foot">
+        <span>mayday marketing</span>
+        <span class="login-beacon"></span>
+        <span>marketing agents &amp; automations</span>
+      </footer>
     </div>
   </div>
 

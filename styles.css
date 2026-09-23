@@ -306,42 +306,171 @@ a { color: inherit; text-decoration: none; }
   text-transform: uppercase;
   font-weight: 600;
 }
-.login-form { display: grid; gap: 18px; padding: 12px 8px; align-content: start; padding-top: 4px; }
-/* Kaarttitel: zelfde schaal als h1 uit §1, zinsvorm i.p.v. kapitalen met
-   sperring. De hint had een negatieve bovenmarge die op de oude letter was
-   afgestemd; met de nieuwe regelhoogte schoof die over de kop heen. */
-.login-form h2 {
-  margin: 0 0 4px;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.022em;
-  text-transform: none;
-  color: var(--fg);
+/* ---- Login — rapportstijl ------------------------------------------------
+   Zelfde grammatica als het dashboard: papier, één getinte grafiekbak, schreef
+   voor de bewering, schreefloos voor wat je afleest. Vóór het inloggen is er nog
+   geen klantaccent, dus hier staat altijd de mayday-standaard.
+   -------------------------------------------------------------------------- */
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 40px 24px;
 }
-.login-form .hint { font-size: 13px; color: var(--fg-muted); margin: 0 0 6px; }
+.login-top img { display: block; height: 24px; width: auto; }
+.login-top .on-dark,
+.login-foot .on-dark { display: none; }
+:root[data-theme="dark"] .login-top .on-light { display: none; }
+:root[data-theme="dark"] .login-top .on-dark { display: block; }
+
+.login-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 72px;
+  align-items: center;
+  padding: var(--gap-section) 0;
+}
+
+.login-form { display: grid; gap: 0; align-content: center; max-width: 440px; }
+.login-eyebrow {
+  margin: 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.login-eyebrow::before {
+  content: ""; display: inline-block; vertical-align: middle;
+  width: 22px; height: 2px; margin-right: 10px;
+  background: var(--accent-data);
+}
+.login-form h1 { margin: 0; font-size: 46px; line-height: 1.08; }
+.login-lede {
+  margin: 18px 0 0; max-width: 38ch;
+  font-size: 15px; line-height: 1.6; color: var(--fg-muted);
+}
+
+.login-fields {
+  display: grid; gap: 18px;
+  margin-top: var(--gap-kpi);
+  padding-top: var(--gap-controls);
+  border-top: 2px solid var(--fg);
+}
 .login-form label {
   display: block; margin-bottom: 8px;
-  font-size: 11px; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--fg-muted); font-weight: 600;
+  font-size: 12px; font-weight: 600;
+  letter-spacing: 0.11em; text-transform: uppercase;
+  color: var(--fg-muted);
 }
 .login-form input {
-  width: 100%; padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
+  width: 100%; padding: 13px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--fg);
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.login-form input:focus { border-color: var(--accent); }
+.login-form input::placeholder { color: color-mix(in oklch, var(--fg-muted) 70%, var(--surface)); }
+.login-form input:focus {
+  border-color: var(--accent-data);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-data) 18%, transparent);
+}
+.login-form input[aria-invalid="true"] { border-color: var(--negative); }
+#login-error { font-size: 13px; color: var(--negative); min-height: 0; }
+#login-error:empty { display: none; }
 .login-form button {
-  margin-top: 8px; width: 100%; padding: 16px;
-  border: none; border-radius: 16px;
-  background: var(--btn-primary); color: #fff;
-  font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
-  transition: transform 0.1s, box-shadow 0.2s;
+  width: 100%; padding: 14px 18px; margin-top: 4px;
+  border: none; border-radius: var(--radius-sm);
+  background: var(--btn-primary); color: var(--on-accent);
+  font-size: 15px; font-weight: 600; letter-spacing: 0.01em;
+  transition: background 0.15s;
 }
-.login-form button:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(var(--heat), 0.35); }
+.login-form button:hover { background: color-mix(in oklch, var(--btn-primary) 86%, black); }
+.login-form button:focus-visible { outline: 2px solid var(--accent-data); outline-offset: 3px; }
+.login-form button:disabled { opacity: 0.7; cursor: progress; }
+.login-note { margin: 22px 0 0; max-width: 42ch; font-size: 12px; line-height: 1.6; color: var(--fg-muted); }
+.login-note a {
+  color: var(--fg); text-decoration: underline;
+  text-decoration-color: var(--marker); text-underline-offset: 3px;
+}
+.login-note a:hover { text-decoration-color: var(--accent-data); }
+
+/* De grafiekbak: getint vlak, geen kaart — geen rand, geen schaduw. */
+.login-panel {
+  background: var(--panel);
+  border-radius: var(--radius-panel);
+  padding: 44px 36px 36px;
+  aspect-ratio: 4 / 3;
+  display: flex; flex-direction: column;
+}
+.login-chart { width: 100%; flex: 1; min-height: 120px; overflow: visible; }
+.lc-grid line { stroke: var(--panel-grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.lc-axis { stroke: var(--panel-axis); stroke-width: 1.5; fill: none; vector-effect: non-scaling-stroke; }
+.lc-bars rect { fill: var(--s2); rx: 3; }
+.lc-line {
+  fill: none; stroke: var(--accent-data); stroke-width: 2.5;
+  stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke;
+}
+.lc-dot { fill: var(--accent-data); stroke: var(--panel); stroke-width: 3; }
+/* Zestien tegels in twee rijen van acht; ze schalen mee met de bak. */
+.login-logos {
+  list-style: none; margin: 0 0 28px; padding: 0;
+  display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px;
+}
+.lc-logo {
+  aspect-ratio: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: var(--surface);
+  position: relative;
+}
+/* Het logo is een mask: de vorm komt uit het bestand, de kleur uit het token. */
+.lc-logo::before {
+  content: ""; width: 46%; height: 46%;
+  background: var(--accent-data);
+  -webkit-mask: var(--icon) center / contain no-repeat;
+          mask: var(--icon) center / contain no-repeat;
+}
+.lc-logo > span:last-child {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+.lc-logo--more { background: transparent; border: 1.5px dashed var(--panel-axis); }
+.lc-logo--more::before { display: none; }
+.lc-logo--more > span[aria-hidden] { font-size: 16px; font-weight: 700; line-height: 1; color: var(--accent-data); transform: translateY(-3px); }
+
+.login-foot {
+  display: flex; align-items: center; gap: 12px;
+  padding-top: 16px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--fg-muted);
+}
+/* De beacon: Candy, net als in de lockup. Decoratie, nooit data. */
+.login-beacon { width: 7px; height: 7px; border-radius: 50%; background: #ed8afa; }
+
+/* De chat heeft een token nodig; vóór het dashboard is de knop een dode knop. */
+body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
+
+/* Ladder: 900 stapelt, 520 laat het beeld vallen. */
+@media (max-width: 900px) {
+  .login-shell { padding: 20px 24px; }
+  .login-main { grid-template-columns: 1fr; gap: var(--gap-kpi); padding: 36px 0; }
+  .login-form { max-width: 520px; }
+  .login-visual { order: -1; }
+  .login-panel { aspect-ratio: auto; height: 300px; padding: 28px 24px 22px; }
+}
+@media (max-width: 520px) {
+  .login-shell { padding: 18px 16px; }
+  .login-visual { order: 0; }
+  .login-panel { height: auto; padding: 18px; }
+  .login-chart { display: none; }
+  .login-logos { margin: 0; gap: 6px; }
+  .login-main { padding: 28px 0; }
+  .login-form h1 { font-size: 36px; }
+  .login-foot span:last-child { display: none; }
+}
 .helper-note { font-size: 12px; color: var(--fg-muted); }
 
 .source-grid { display: grid; gap: 16px; margin-top: 22px; grid-template-columns: 1fr 1fr; }
@@ -1567,7 +1696,6 @@ a { color: inherit; text-decoration: none; }
   background-size: 200px 100%;
 }
 
-#login-error { display: block; }
 
 /* ========== Methodology page (Blok E) ========== */
 #methodology-content .panel-title { font-weight: 400; }
