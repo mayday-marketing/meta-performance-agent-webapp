@@ -1311,7 +1311,14 @@
   function resetIfOtherClient() {
     const id = state.session?.clientId || null;
     if (RS.clientId === id) return;
-    RS.clientId = id;
+    wipe(id);
+  }
+
+  // Alles weg en het scherm leeg. Apart van resetIfOtherClient omdat uitloggen
+  // niet kan wachten tot er iemand tekent: tussen 'uitgelogd' en 'de nieuwe
+  // klant klikt op Rapport' staat de deck van de vorige klant gewoon in de DOM.
+  function wipe(id) {
+    RS.clientId = id === undefined ? null : id;
     RS.picked = null;
     RS.withAnalysis = true;
     RS.view = "config";
@@ -1328,6 +1335,8 @@
     RS.tpl = null;
     RS.tplLoaded = false;
     pageSize(false);
+    const root = $("#report-content");
+    if (root) root.innerHTML = "";
   }
 
   function paint() {
@@ -1419,5 +1428,9 @@
     if (state.page === "report") paint();
   }
 
-  window.__report = { open, close, periodChanged };
+  // Door app.js aangeroepen bij uitloggen. Niet wachten op de volgende paint:
+  // de slides van de vorige klant mogen geen seconde langer in de DOM staan.
+  function reset() { wipe(null); }
+
+  window.__report = { open, close, periodChanged, reset };
 })();

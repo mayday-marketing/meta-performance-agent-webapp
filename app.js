@@ -124,6 +124,17 @@
     state.session = null;
     try { sessionStorage.removeItem(SESSION_KEY); } catch {}
     resetBrandConfig();
+    // De state leegmaken is niet genoeg: de DOM houdt de HTML van de vorige
+    // klant vast tot díé tab opnieuw getekend wordt, en dat gebeurt pas bij een
+    // bezoek. Hier en niet in logout(), want een verlopen sessie (401) komt
+    // alleen langs clearSession — en dat pad moet net zo schoon zijn.
+    clearRenderedData();
+    // report.js houdt zijn eigen state buiten `state`: gekozen blokken,
+    // opgehaalde ROAS, duiding, slides, design system.
+    if (window.__report) window.__report.reset();
+    // Terug naar false, zodat de volgende login initDashboard opnieuw draait en
+    // dus weer op Overview begint in plaats van op de laatst bekeken pagina.
+    dashboardInited = false;
   }
 
   /* ---------- Merkconfig (Config-tab in de klantsheet) ---------- */
@@ -438,7 +449,6 @@
     state.geoSourcesLoading = false;
     state.geoSourcesPlatform = null;
     state.chatMessages = [];
-    dashboardInited = false;
     $("#brand-input").value = "";
     $("#code-input").value = "";
     $("#source-brand").textContent = "—";
@@ -446,6 +456,23 @@
     showScreen("login-screen");
   }
   window.logout = logout;
+
+  // Elk element dat data van één klant toont. Staat er een nieuw id bij een
+  // nieuwe tab, zet het hier ook neer — anders lekt die tab bij een
+  // klantwissel zichtbaar door.
+  const RENDER_TARGETS = [
+    "#kpi-grid", "#trend-chart", "#trend-legend", "#channel-mix", "#cadence",
+    "#top-posts", "#lib-results", "#analysis-content", "#website-content",
+    "#seo-content", "#geo-content", "#roas-content", "#email-content",
+    "#report-content", "#chat-body",
+  ];
+
+  function clearRenderedData() {
+    for (const sel of RENDER_TARGETS) {
+      const el = $(sel);
+      if (el) el.innerHTML = "";
+    }
+  }
 
   /* ---------- Login ---------- */
 
@@ -521,6 +548,10 @@
   function initDashboard() {
     if (dashboardInited) return;
     dashboardInited = true;
+
+    // Altijd op Overview beginnen. Zonder dit blijft de pagina staan waar de
+    // vórige gebruiker was — inclusief wat daar getekend stond.
+    switchPage("overview");
 
     // Default range: last 90 days ending today.
     const today = new Date();

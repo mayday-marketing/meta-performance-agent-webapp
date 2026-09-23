@@ -527,6 +527,29 @@ afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
     setup, NOT the webapp. Do not point the webapp at it; do not "polish" it to fit
     the webapp. It's kept only as the fallback.
 
+## Sessie-einde: state leegmaken is niet genoeg
+
+`clearSession()` is het enige punt waar élke manier waarop een sessie eindigt
+langskomt — de knop Afmelden én een 401 van welk endpoint dan ook. Daar hoort de
+volledige opruiming, niet in `logout()`.
+
+- **De DOM houdt de vorige klant vast.** Elke tab tekent in een vast element
+  (`#website-content`, `#roas-content`, `#report-content`, …) en hertekent pas
+  bij een bezoek. Alleen `state` nullen laat de HTML van klant A staan.
+  `clearRenderedData()` maakt ze allemaal leeg; **staat er een nieuwe tab bij,
+  zet zijn render-doel dan in `RENDER_TARGETS`.**
+- **Na inloggen altijd op Overview.** `initDashboard()` roept
+  `switchPage("overview")` aan. Zonder dat blijft de pagina staan waar de vórige
+  gebruiker was: wie op de Rapport-tab uitlogde, liet de volgende gebruiker
+  rechtstreeks op de deck van het vorige merk landen, vóór één klik.
+- **report.js houdt state buiten `state`.** Gekozen blokken, opgehaalde ROAS,
+  duiding, slides en het design system zitten in zijn eigen `RS`, dus
+  `clearSession()` roept `window.__report.reset()` aan. Dezelfde `wipe()` draait
+  ook bij een klantwissel zonder uitloggen (`resetIfOtherClient()` in `paint()`);
+  die twee wegen zijn allebei nodig — de eerste omdat uitloggen niet kan wachten
+  tot iemand tekent, de tweede voor het geval de sessie wisselt zonder dat
+  clearSession langskwam.
+
 ## Frontend rendering: escape untrusted text
 
 `app.js` renders via `innerHTML`. LLM answers and API text (ad names, captions,
