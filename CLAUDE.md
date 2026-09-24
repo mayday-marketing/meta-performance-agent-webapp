@@ -242,6 +242,19 @@ Gemeten: een sheet-tab lezen duurt 0,3–2,3 s, een koude Windsor-fetch over 90 
   boven een privacydrempel vrij én kapt af op 5.000 rijen per dag. Gemeten: 59.754
   kliks op queryniveau tegenover 146.543 in de dagtabel. Het totaal komt daarom
   altijd uit de dag-tab, nooit uit een som over zoekopdrachten.
+- **Koppen zijn Windsor-weergavenamen, geen veld-id's.** Voor Meta Ads verschillen
+  ze bij 30 van de 51 velden (`spend` → 'Amount Spent', `actions_omni_purchase` →
+  'Omni Purchases'). `FIELD_ALIASES` vangt die op; zonder las BAJA's tab geen kosten.
+- **Waarden komen opgemaakt binnen**, in de landinstelling van het sheet ('0,0513').
+  `cellValue` herkent per tab of komma's decimalen zijn. Id-velden (`*_id`) blijven
+  tekst: een ad_id past niet exact in een JavaScript-getal.
+- **Identiteit verplicht bij een API-terugval.** Vraagt een call `timestamp`,
+  `media_id`, `post_id`, `ad_id` of `post_created_time` en heeft de tab die niet,
+  dan wordt de sheet overgeslagen (`requireFields`). BAJA's Instagram-tab had geen
+  datum: elke week 0 in de trendgrafiek.
+- **Accountcontrole geldt ook voor de sheet.** Heeft een tab `account_id`/
+  `account_name`, dan blijven alleen de rijen van het account uit de Config-tab
+  over. BAJA's Instagram-export bevatte de posts van mayday.marketing.ai.
 - **Let op de API-sleutel in de sheet.** Windsor schrijft mislukte runs inclusief
   de volledige aanroep-URL naar de `Queries`-tab, mét `api_key=`. Die sleutel is
   gedeeld over meerdere klanten. Deel een Windsor.ai-data-sheet dus nooit met een

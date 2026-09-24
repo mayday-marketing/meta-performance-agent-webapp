@@ -131,6 +131,9 @@ module.exports = async (req, res) => {
   // 'sc-domain:merk.be'; zonder deze strip matcht de config nooit en blijft de
   // tab leeg).
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').replace(/^sc-domain:/i, '').toLowerCase();
+  // Velden die een rij identificeren of in de tijd plaatsen. Vraagt een call er
+  // één en heeft de sheettab hem niet, dan kan de sheet die vraag niet beantwoorden.
+  const SHEET_IDENTITY_FIELDS = ['timestamp', 'post_created_time', 'media_id', 'post_id', 'ad_id'];
   // opts.skipSheet: sla de datasheet over. Alleen voor de ad-level terugval in
   // getDashboard: een sheettab zonder ad_id kan geen advertentie-detail leveren.
   async function windsorScoped(connector, fieldsCsv, params, timeout, label, opts = {}) {
@@ -158,9 +161,32 @@ module.exports = async (req, res) => {
     // datasheet hoort per definitie bij één klant, dus daar valt niets te lekken
     // en hoeft er niets geblokkeerd te worden.
     if (client?.dataSheetId && !opts.skipSheet) {
-      const rows = await getConnectorRows(clientId, connector, fieldsCsv, {
+      let rows = await getConnectorRows(clientId, connector, fieldsCsv, {
         from: params?.date_from, to: params?.date_to,
+        // Met een API-sleutel als terugval: een tab zonder publicatiedatum of id
+        // levert rijen die niet te plaatsen of te koppelen zijn (BAJA's Instagram-
+        // tab had geen timestamp → de trendgrafiek toonde elke week 0). Dan live.
+        // Zonder sleutel is een halve tab nog altijd beter dan niets.
+        requireFields: sheetOnly ? [] : SHEET_IDENTITY_FIELDS,
+        extraFields: scopable && wantRaw ? ['account_id', 'account_name'] : [],
       }).catch(e => ({ __error: e.message }));
+
+      if (rows && rows.__missing) {
+        console.warn(`[windsor] datasheet-tab '${rows.__sheet?.tab}' mist ${rows.__missing.join(', ')} → live via Windsor`);
+        rows = null;
+      }
+      // Accountcontrole ook op de sheet. Een export kan het verkeerde account
+      // bevatten (BAJA's Instagram-tab had de posts van mayday.marketing.ai). Heeft
+      // de tab een accountkolom, dan houden we alleen de rijen van déze klant —
+      // precies dezelfde regel als voor de API hieronder.
+      if (rows && Array.isArray(rows.data) && scopable && wantRaw
+          && rows.data.some(r => r && (r.account_id != null || r.account_name != null))) {
+        const want = normId(wantRaw);
+        const voor = rows.data.length;
+        rows.data = rows.data.filter(r => normId(r.account_id) === want || normId(r.account_name) === want);
+        if (rows.data.length < voor) console.warn(`[windsor] datasheet-tab '${rows.__sheet?.tab}': ${voor - rows.data.length} rijen van een ander account weggefilterd`);
+        if (!rows.data.length && voor > 0 && !sheetOnly) rows = null; // alles hoorde bij een ander account → live
+      }
 
       // getConnectorRows kent drie antwoorden, en die moeten uit elkaar blijven:
       //   null        → geen tab voor deze connector in de sheet
@@ -440,7 +466,9 @@ module.exports = async (req, res) => {
           windsorScoped('facebook', ADS_AD_CREATIVE, adDateParams, ADDON_MS, 'fb-ads-creative'),
           windsorScoped('facebook', ADS_AD_VIDEO, adDateParams, ADDON_MS, 'fb-ads-video'),
           windsorScoped('facebook', ADS_AD_CONV, adDateParams, ADDON_MS, 'fb-ads-conv'),
-          windsorScoped('facebook', ADS_AD_TEXT, adDateParams, ADDON_MS, 'fb-ads-text'),
+          // Volle 55 s: bij een koude Windsor-cache liep de tekst-call over 35 s, en
+          // zonder tekst valt het hele creatieblok leeg.
+          windsorScoped('facebook', ADS_AD_TEXT, adDateParams, FETCH_MS, 'fb-ads-text'),
           windsorScoped('instagram', IG_FIELDS, prevDateParams, PREV_MS, 'ig-prev'),
           windsorScoped('facebook_organic', FB_ORG_FIELDS, prevDateParams, PREV_MS, 'fb-organic-prev'),
           windsorScoped('facebook', ADS_FIELDS, prevDateParams, PREV_MS, 'fb-ads-prev'),
@@ -453,13 +481,23 @@ module.exports = async (req, res) => {
 
         // Merge alle add-on-velden in de ad-core rows op ad_id (allen no-date → 1 rij per ad).
         if (adsAdData && Array.isArray(adsAdData.data)) {
+          // Twee regels, allebei voor het geval dat het ad-niveau uit een dagtabel
+          // (sheet) komt, met meerdere rijen per advertentie:
+          //   - alleen de EERSTE rij per ad krijgt de waarden; de frontend telt de
+          //     rijen op, dus op elke dagrij gezet werd een periodetotaal × dagen;
+          //   - alleen invullen wat ontbreekt: staat het veld al in de dagrij (uit
+          //     dezelfde tab), dan blijft die dagwaarde staan.
+          // Via de API is er één rij per ad en verandert er niets.
           const mergeById = (src, keys) => {
             if (!src || !Array.isArray(src.data)) return;
             const idx = {};
             for (const r of src.data) if (r.ad_id != null) idx[r.ad_id] = r;
+            const gezien = new Set();
             for (const r of adsAdData.data) {
               const m = idx[r.ad_id];
-              if (m) for (const k of keys) if (m[k] != null) r[k] = m[k];
+              if (!m || gezien.has(r.ad_id)) continue;
+              gezien.add(r.ad_id);
+              for (const k of keys) if (m[k] != null && r[k] == null) r[k] = m[k];
             }
           };
           // Een sheettab is per dag: één rij per ad per dag, en dan is 'de laatste
@@ -596,6 +634,13 @@ module.exports = async (req, res) => {
           // aankoopvelden (geen omni, zie ADS_DEMO) en zijn dus alleen als aandeel
           // te tonen.
           adsExtra: {
+            // Herkomst per blok: 'sheet', 'api' of null (niets binnengekomen).
+            origin: Object.fromEntries(Object.entries({
+              adLevel: adsAdData, campaign: adsData, conversions: adsConvData, text: adsTextData,
+              video: adsVideoData, creative: adsCreativeData, objective: adsObjectiveData,
+              reach: adsReachData, demographics: adsDemoData, regions: adsRegionData,
+              assets: assetResults.find(d => d && Array.isArray(d.data) && d.data.length) || null,
+            }).map(([k, d]) => [k, !d || d.__error || !Array.isArray(d.data) || !d.data.length ? null : (d.__sheet ? 'sheet' : 'api')])),
             objectives,
             accountReach: accountReach(adsReachData),
             accountReachPrev: accountReach(adsReachPrev),

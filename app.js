@@ -44,6 +44,9 @@
     page: "overview",
     libraryView: "grid",
     libraryFilter: "all",
+    adsDemoGender: "all", // filter boven de doelgroepgrafiek: all / female / male
+    adsSort: { key: "spend", dir: "desc" }, // sortering van de advertentietabel
+    adsShowAll: false,
     librarySearch: "",
     librarySort: { key: "date", dir: "desc" },
     chatMessages: [],
@@ -2228,12 +2231,27 @@
         ? `€ ${fmt.int(Math.round(spend))} aan advertenties bracht <b>€ ${fmt.int(Math.round(rev))}</b> op`
         : `<b>${camps.length} ${camps.some(c => c.isAd) ? "advertenties" : "campagnes"}</b> in deze periode, samen € ${fmt.int(Math.round(spend))}`;
     }
-    camps.sort((a, b) => (b.spend || 0) - (a.spend || 0));
-    const rijen = camps.slice(0, 12).map(c => {
+    // Sorteren op elke kolom. Ontbrekende waarden (— in de cel) staan altijd
+    // onderaan, in beide richtingen: 'geen ROAS' is geen lage ROAS.
+    const { key: sortKey, dir: sortDir } = state.adsSort;
+    const sorted = [...camps].sort((a, b) => {
+      const va = adsSortValue(a, sortKey), vb = adsSortValue(b, sortKey);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      const cmp = typeof va === "string" ? va.localeCompare(vb, "nl") : va - vb;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    const zichtbaar = state.adsShowAll ? sorted : sorted.slice(0, 12);
+    const rijen = zichtbaar.map(c => {
       const roas = c.roas != null && c.spend > 0 ? c.roas : null;
-      const oordeel = c.performance === "Good" ? `<span class="pos">sterk</span>`
-        : (c.performance === "Bad" ? `<span class="neg">zwak</span>`
-        : (c.performance ? "gemiddeld" : `<span style="color:var(--fg-muted);">te klein</span>`));
+      const LABEL = { Good: ["sterk", "good"], Average: ["gemiddeld", "average"], Bad: ["zwak", "bad"] };
+      const [lbl, cls] = LABEL[c.performance] || [];
+      // Een knop, geen losse tekst: klikken opent de agent met deze advertentie
+      // als onderwerp. 'Te klein' heeft geen oordeel en dus ook geen knop.
+      const oordeel = lbl
+        ? `<button type="button" class="perf-button ${cls}" data-ads-ask="${escapeHtml(c.id)}" title="${escapeHtml(perfTooltip(c))} — klik om de agent te vragen waarom">${lbl}</button>`
+        : `<span style="color:var(--fg-muted);" title="${escapeHtml(perfTooltip(c))}">te klein</span>`;
       return `<tr>
         <td>${escapeHtml(c.caption || c.name || "—")}${c.isAd && c.subtitle ? `<br><span class="muted" style="font-size:11px;">${escapeHtml(c.subtitle)}</span>` : ""}</td>
         <td>€ ${fmt.int(Math.round(c.spend || 0))}</td>
@@ -2248,15 +2266,97 @@
     root.innerHTML = `<div class="report-table">
       <table>
         <thead><tr>
-          <th>${camps.some(c => c.isAd) ? "Advertentie" : "Campagne"}</th><th>Kosten</th><th>Vertoningen</th><th>CTR</th><th>ROAS</th><th>Freq.</th><th>Doel</th><th>Oordeel</th>
+          ${ADS_COLS.map(([k, l]) => {
+            const on = sortKey === k;
+            const label = k === "name" ? (camps.some(c => c.isAd) ? "Advertentie" : "Campagne") : l;
+            return `<th aria-sort="${on ? (sortDir === "asc" ? "ascending" : "descending") : "none"}">`
+              + `<button type="button" class="th-sort${on ? " on" : ""}" data-ads-sort="${k}">${label}`
+              + `<span class="sort-arrow" aria-hidden="true">${on ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span></button></th>`;
+          }).join("")}
         </tr></thead>
         <tbody>${rijen}</tbody>
       </table>
     </div>
     <p class="source-line">Bron: Windsor.ai, connector <b>facebook</b> (Meta Ads) · ${camps.length} ${camps.some(c => c.isAd) ? "advertenties" : "campagnes"}, ${metKosten} met kosten`
-      + `${camps.length > 12 ? ` · de twaalf met de hoogste kosten staan hier` : ""}. `
+      + `${camps.length > 12 && !state.adsShowAll ? ` · de eerste twaalf in deze sortering staan hier` : ""}. `
       + `Het oordeel vergelijkt binnen deze periode tegen de mediaan; bij minder dan vijf campagnes zegt dat te weinig. `
-      + `Frequentie = hoe vaak één persoon de advertentie gemiddeld zag; doel = het campagnedoel in Ads Manager.</p>`;
+      + `Frequentie = hoe vaak één persoon de advertentie gemiddeld zag; doel = het campagnedoel in Ads Manager. `
+      + `Klik op een kolomkop om te sorteren, op een oordeel om de agent te vragen waarom.</p>`
+      + (camps.length > 12
+        ? `<button type="button" class="btn tiny" style="margin-top:10px;" data-ads-all>${state.adsShowAll ? "Toon de eerste twaalf" : `Toon alle ${camps.length}`}</button>`
+        : "");
+    bindAdsTable(camps);
+  }
+
+  const ADS_COLS = [
+    ["name", "Advertentie"], ["spend", "Kosten"], ["impressions", "Vertoningen"], ["ctr", "CTR"],
+    ["roas", "ROAS"], ["frequency", "Freq."], ["objective", "Doel"], ["performance", "Oordeel"],
+  ];
+  // Waarde waarop gesorteerd wordt; null = ontbreekt (komt altijd onderaan).
+  function adsSortValue(c, key) {
+    switch (key) {
+      case "name": return (c.caption || c.name || "").toLowerCase() || null;
+      case "spend": return c.spend || 0;
+      case "impressions": return c.impressions || c.reach || 0;
+      case "ctr": return c.ctr != null ? c.ctr : null;
+      case "roas": return c.roas != null && c.spend > 0 ? c.roas : null;
+      case "frequency": return c.frequency;
+      case "objective": return c.objective ? objectiveLabel(c.objective).toLowerCase() : null;
+      case "performance": return { Good: 3, Average: 2, Bad: 1 }[c.performance] || null;
+      default: return null;
+    }
+  }
+
+  function bindAdsTable(camps) {
+    const root = $("#ads-table");
+    if (!root) return;
+    root.querySelectorAll("[data-ads-sort]").forEach(b => {
+      b.onclick = () => {
+        const k = b.dataset.adsSort;
+        // Eerste klik: tekst oplopend (A→Z), cijfers aflopend (groot eerst).
+        const eerst = (k === "name" || k === "objective") ? "asc" : "desc";
+        state.adsSort = state.adsSort.key === k
+          ? { key: k, dir: state.adsSort.dir === "asc" ? "desc" : "asc" }
+          : { key: k, dir: eerst };
+        renderAdsTable();
+      };
+    });
+    const all = root.querySelector("[data-ads-all]");
+    if (all) all.onclick = () => { state.adsShowAll = !state.adsShowAll; renderAdsTable(); };
+    root.querySelectorAll("[data-ads-ask]").forEach(b => {
+      b.onclick = () => askAgentAboutAd(camps.find(c => String(c.id) === b.dataset.adsAsk));
+    });
+  }
+
+  // Opent de agent met deze advertentie als onderwerp. De vraag wordt klaargezet,
+  // niet verstuurd: de gebruiker past hem aan of drukt zelf op Enter. De cijfers
+  // gaan mee in de vraag, want de chat krijgt alleen de top-drie advertenties in
+  // zijn context mee en zou deze anders niet kennen.
+  function askAgentAboutAd(c) {
+    if (!c) return;
+    const LBL = { Good: "sterk", Average: "gemiddeld", Bad: "zwak" };
+    const oordeel = LBL[c.performance] || "zonder oordeel";
+    const doel = c.purchases > 0 ? `${fmt.int(c.purchases)} aankopen` : (c.leads > 0 ? `${fmt.int(c.leads)} leads` : "geen conversies");
+    const feiten = [
+      `kosten € ${fmt.int(Math.round(c.spend || 0))}`,
+      `${fmt.int(c.impressions || 0)} vertoningen`,
+      c.ctr != null ? `CTR ${c.ctr.toFixed(2).replace(".", ",")}%` : null,
+      c.cpm ? `CPM € ${c.cpm.toFixed(2).replace(".", ",")}` : null,
+      c.frequency != null ? `frequentie ${fmtFreq(c.frequency)}` : null,
+      c.objective ? `doel ${objectiveLabel(c.objective)}` : null,
+      doel,
+      c.roas != null ? `ROAS ${c.roas.toFixed(2).replace(".", ",")}×` : null,
+    ].filter(Boolean).join(", ");
+    toggleChatPanel(true);
+    // Platte tekst (geen html:true): de advertentienaam komt uit Meta en is dus
+    // niet door ons geschreven.
+    pushBot({ text: `${c.caption || "Deze advertentie"} scoort ${oordeel}. ${perfTooltip(c)}. Stel hieronder je vraag, of verstuur de voorgestelde.` });
+    const input = $("#chat-input-field");
+    if (input) {
+      input.value = `Waarom scoort de advertentie "${c.caption || ""}" ${oordeel} (${feiten})? Wat zou je aanpassen?`;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
   }
 
   /* ---------- Meta Ads: funnel, creatie en doelgroep ----------
@@ -2463,6 +2563,74 @@
   }
 
   const AGE_ORDER = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"];
+
+  window.__adsDemoGender = (g) => { state.adsDemoGender = g; renderAdsDemo(); };
+
+  // Staafdiagram per leeftijdsgroep: kosten, vertoningen en de doelactie naast
+  // elkaar, als aandeel van het totaal. Wat je zoekt is een doelstaaf die langer
+  // is dan de kostenstaaf — de index rechts zegt hetzelfde in één getal.
+  // HTML in plaats van SVG: de kleuren blijven CSS-variabelen, dus een thema- of
+  // accentwissel werkt zonder hertekenen.
+  function renderDemoBars(demo, doelKey, doelNaam, tot) {
+    const g = state.adsDemoGender || "all";
+    const rows = demo.filter(r => g === "all" || r.gender === g);
+    const share = (n, d) => d > 0 ? (n / d) * 100 : 0;
+    const perAge = new Map();
+    for (const r of rows) {
+      const a = perAge.get(r.age) || { spend: 0, impressions: 0, doel: 0 };
+      a.spend += r.spend || 0; a.impressions += r.impressions || 0; a.doel += r[doelKey] || 0;
+      perAge.set(r.age, a);
+    }
+    const ages = [...perAge.keys()].sort((a, b) => {
+      const ia = AGE_ORDER.indexOf(a), ib = AGE_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    // Vaste volgorde en kleur per maatstaf, ook als een filter iets leeg maakt.
+    const SERIES = [
+      // Oranje en blauw uit het vaste palet: de lichte merkstap (--s2) zakte in de
+      // validator onder de chromavloer — hij las als grijs naast de merkkleur.
+      { key: "spend", label: "Kosten", color: "var(--demo-cost)" },
+      { key: "impressions", label: "Vertoningen", color: "var(--chart-3)" },
+      { key: "doel", label: doelNaam.charAt(0).toUpperCase() + doelNaam.slice(1), color: "var(--accent-data)" },
+    ];
+    const denom = { spend: tot.spend, impressions: tot.impressions, doel: tot.doel };
+    const data = ages.map(age => {
+      const a = perAge.get(age);
+      const v = Object.fromEntries(SERIES.map(sr => [sr.key, share(a[sr.key], denom[sr.key])]));
+      return { age, v, index: v.spend > 0 && tot.doel > 0 ? v.doel / v.spend : null };
+    }).filter(d => d.v.spend >= 0.5 || d.v.doel > 0);
+    const max = Math.max(1, ...data.flatMap(d => SERIES.map(sr => d.v[sr.key])));
+    const scale = [10, 20, 25, 40, 50, 60, 80, 100].find(m => m >= max) || 100;
+    const ticks = scale <= 25 ? [0, scale / 2, scale] : [0, scale / 4, scale / 2, (scale * 3) / 4, scale];
+
+    const chips = [["all", "Alle"], ["female", "Vrouwen"], ["male", "Mannen"]]
+      .filter(([k]) => k === "all" || demo.some(r => r.gender === k))
+      .map(([k, l]) => `<button type="button" class="chip ${g === k ? "on" : ""}" aria-pressed="${g === k}" onclick="window.__adsDemoGender('${k}')">${l}</button>`).join("");
+    const legend = SERIES.map(sr => `<span class="demo-key"><i style="background:${sr.color}"></i>${escapeHtml(sr.label)}</span>`).join("");
+
+    const ageLabel = (a) => a === "Unknown" ? "Onbekend" : a;
+    const rijen = data.map(d => {
+      const tip = SERIES.map(sr => `${sr.label}: ${fmtShare(d.v[sr.key])}`).join(" · ")
+        + (d.index != null ? ` · index ${d.index.toFixed(2).replace(".", ",")}` : "");
+      const bars = SERIES.map(sr => `<span class="demo-bar" style="width:${(d.v[sr.key] / scale) * 100}%; background:${sr.color};"></span>`).join("");
+      // Direct label alleen op de doelstaaf: dat is het getal waar het om draait.
+      const idx = d.index == null ? "—"
+        : `<span class="${d.index >= 1.2 ? "pos" : d.index <= 0.8 ? "neg" : ""}">${d.index.toFixed(2).replace(".", ",")}</span>`;
+      return `<div class="demo-row" tabindex="0" aria-label="${escapeHtml(`${ageLabel(d.age)}: ${tip}`)}">
+        <span class="demo-age">${escapeHtml(ageLabel(d.age))}</span>
+        <span class="demo-bars">${bars}<span class="demo-val" style="left:calc((100% - 44px) * ${(d.v.doel / scale).toFixed(4)});">${fmtShare(d.v.doel)}</span></span>
+        <span class="demo-idx">${idx}</span>
+        <span class="demo-tip" role="tooltip">${escapeHtml(tip)}</span>
+      </div>`;
+    }).join("");
+    const grid = ticks.map(t => `<span class="demo-tick" style="left:${(t / scale) * 100}%;"><em>${t}%</em></span>`).join("");
+
+    return `<div class="chart-tub demo-chart">
+      <div class="demo-controls"><div class="chip-row">${chips}</div><div class="demo-legend">${legend}</div></div>
+      <div class="demo-head"><span></span><span></span><span class="demo-idx">Index</span></div>
+      <div class="demo-plot"><div class="demo-grid" aria-hidden="true"><span></span><span class="demo-grid-inner">${grid}</span><span></span></div>${rijen}</div>
+    </div>`;
+  }
   const GENDER_LABEL = { female: "Vrouwen", male: "Mannen", unknown: "Onbekend" };
 
   function renderAdsDemo() {
@@ -2521,12 +2689,12 @@
     const zichtbaar = rows.filter(r => (r.sSpend || 0) >= 0.5 || (r.sDoel || 0) > 0).slice(0, 14);
     const indexCel = (r) => r.index == null || !tot.doel ? "—"
       : `<span class="${r.index >= 1.2 ? "pos" : r.index <= 0.8 ? "neg" : ""}">${r.index.toFixed(2).replace(".", ",")}</span>`;
-    const tabel = `<div class="report-table"><table>
+    const tabel = `<details class="demo-table"><summary>Tabel per leeftijd en geslacht</summary><div class="report-table"><table>
       <thead><tr><th>Groep</th><th>Kosten</th><th>Vertoningen</th><th>${escapeHtml(doelNaam)}${sampleNote}</th><th>Index</th></tr></thead>
       <tbody>${zichtbaar.map(r => `<tr>
         <td>${escapeHtml(r.label)}</td><td>${fmtShare(r.sSpend)}</td><td>${fmtShare(r.sImpr)}</td>
         <td>${fmtShare(r.sDoel)}</td><td>${indexCel(r)}</td></tr>`).join("")}</tbody>
-    </table></div>`;
+    </table></div></details>`;
 
     // Regio. Meta vult de conversies per regio soms met nullen waar leeftijd/
     // geslacht wel aankopen tonen; dan is 'geen conversies' een meetgat, geen feit.
@@ -2548,6 +2716,8 @@
 
     root.innerHTML = adsBlockHead("Doelgroep", titel, lede)
       + `<p class="source-line" style="margin-top:0;">${perGender}</p>`
+      + renderDemoBars(demo, doelKey, doelNaam, tot)
+      + `<p class="source-line">Per leeftijdsgroep het aandeel in kosten, vertoningen en ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de kostenstaaf, dan levert die groep meer op dan hij kost (index boven 1).${state.adsDemoGender !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%." : ""}</p>`
       + tabel + regioHtml
       + `<p class="source-line">Alles als aandeel van het totaal. Meta staat deze uitsplitsing niet toe met omni-velden, dus de ${doelNaam} hier zijn de gewone (niet-omni) cijfers — daarom geen absolute aantallen naast de totalen hierboven. `
       + `Index = aandeel in de ${doelNaam} gedeeld door aandeel in de kosten: boven 1 levert een groep meer op dan hij kost. Bij een kleine groep volstaat één conversie voor een hoge index. `

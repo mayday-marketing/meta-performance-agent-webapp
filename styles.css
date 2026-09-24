@@ -835,6 +835,16 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
 .report-table tr.running td { color: var(--fg-muted); }
 .report-table .pos { color: var(--positive); font-weight: 600; }
 .report-table .neg { color: var(--negative); font-weight: 600; }
+/* Sorteerbare kop: de hele kop is de knop, zodat het doel groot genoeg is. */
+.report-table .th-sort {
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit;
+}
+.report-table .th-sort:hover, .report-table .th-sort.on { color: var(--fg); }
+.report-table .th-sort:focus-visible { outline: 2px solid var(--accent-data); outline-offset: 2px; border-radius: 3px; }
+.report-table .th-sort .sort-arrow { opacity: 0.35; font-size: 11px; }
+.report-table .th-sort.on .sort-arrow { opacity: 1; }
+.report-table .perf-button { cursor: pointer; }
 
 /* Meta Ads-blokken onder de campagnetabel (funnel, creatie, doelgroep). */
 .ads-block { margin-top: 48px; }
@@ -872,6 +882,60 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
 }
 .creative-stats b { color: var(--fg); font-weight: 600; }
 .creative-card .report-table { margin-top: 0; }
+
+/* Doelgroep: gegroepeerde staven per leeftijd. Drie dunne staven met 2px lucht,
+   afgerond aan het data-eind en recht op de nullijn. Kolommen: label · staven ·
+   index; het raster ligt op dezelfde kolommen zodat de ticks op de staven vallen. */
+.demo-chart { margin-top: var(--gap-controls); --demo-cost: var(--chart-4); }
+/* Het vaste oranje (L 0,75) valt in dark mode net boven de lichtheidsband van de
+   validator (0,48–0,67). Alleen hier een donkerdere stap; --chart-4 zelf blijft
+   ongemoeid omdat andere grafieken erop gevalideerd zijn. Gevalideerd 24-09-2026:
+   #b87c00 · #0072b2 · accent op #1e1e1e, alle checks PASS. */
+:root[data-theme="dark"] .demo-chart { --demo-cost: #b87c00; }
+.demo-controls {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 10px 18px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.demo-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--fg-muted); }
+.demo-key { display: inline-flex; align-items: center; gap: 6px; }
+.demo-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.demo-head, .demo-row, .demo-grid {
+  display: grid; grid-template-columns: 76px minmax(0, 1fr) 52px; column-gap: 14px;
+}
+.demo-head { font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-muted); }
+.demo-plot { position: relative; padding-bottom: 22px; }
+.demo-grid { position: absolute; inset: 0 0 0 0; pointer-events: none; }
+.demo-grid-inner { position: relative; margin-right: 44px; } /* zelfde ruimte als .demo-bars rechts */
+.demo-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--panel-grid); }
+.demo-tick:first-child { border-left-color: var(--panel-axis); }
+.demo-tick em {
+  position: absolute; bottom: 0; transform: translateX(-50%);
+  font-style: normal; font-size: 10.5px; color: var(--fg-muted); font-variant-numeric: tabular-nums;
+}
+.demo-row { position: relative; align-items: center; padding: 7px 0; border-radius: 6px; outline: none; }
+.demo-row:hover, .demo-row:focus-visible { background: color-mix(in oklch, var(--fg) 4%, transparent); }
+.demo-age { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.demo-bars { position: relative; display: flex; flex-direction: column; gap: 2px; padding-right: 44px; }
+.demo-bar { display: block; height: 7px; min-width: 2px; border-radius: 0 4px 4px 0; max-width: 100%; }
+.demo-val {
+  position: absolute; bottom: -3px; margin-left: 6px;
+  font-size: 11px; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.demo-idx { text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.demo-idx .pos { color: var(--positive); font-weight: 600; }
+.demo-idx .neg { color: var(--negative); font-weight: 600; }
+.demo-tip {
+  display: none; position: absolute; left: 90px; bottom: calc(100% + 4px); z-index: 5;
+  background: var(--fg); color: var(--bg, #fff); font-size: 11.5px; line-height: 1.4;
+  padding: 6px 10px; border-radius: 6px; white-space: nowrap; box-shadow: var(--shadow-sm);
+}
+.demo-row:hover .demo-tip, .demo-row:focus-visible .demo-tip { display: block; }
+.demo-table { margin-top: 14px; }
+.demo-table summary { cursor: pointer; font-size: 12px; color: var(--fg-muted); }
+@media (max-width: 520px) {
+  .demo-head, .demo-row, .demo-grid { grid-template-columns: 58px minmax(0, 1fr) 40px; column-gap: 8px; }
+  .demo-tip { left: 0; white-space: normal; max-width: 100%; }
+}
 
 /* Bronkaarten dragen drie regels tekst per stuk: onder 300px worden die
    onleesbaar, dus drie kolommen in plaats van zes. */

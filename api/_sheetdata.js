@@ -506,6 +506,40 @@ const FIELD_ALIASES = {
   conversions: ['keyevents', 'conversions'],
   userengagementduration: ['userengagementduration', 'userengagement'],
   query: ['query', 'searchquery'],
+  // Meta Ads: Windsor schrijft de weergavenaam als kop, niet het veld-id. Voor
+  // 30 van de 51 velden verschillen die (bv. spend → 'Amount Spent'); zonder deze
+  // lijst las de BAJA-tab geen kosten. Namen uit Windsor's get_fields, 24-09-2026.
+  campaignname: ['campaignname', 'campaign'],
+  imageurl: ['imageurl', 'adimageurl'],
+  thumbnailurl: ['thumbnailurl', 'adcreativethumbnailurl'],
+  title: ['title', 'adcreativetitle'],
+  body: ['body', 'bodyofthead'],
+  link: ['link', 'adlinkdestinationurl'],
+  websitedestinationurl: ['websitedestinationurl', 'adwebsitedestinationurl'],
+  effectiveinstagrammediamediatype: ['effectiveinstagrammediamediatype', 'instagrampostmediatype'],
+  effectiveinstagrammediamediaproducttype: ['effectiveinstagrammediamediaproducttype', 'instagrampostmediaproducttype'],
+  objecttype: ['objecttype', 'adcreativeobjecttype'],
+  spend: ['spend', 'amountspent'],
+  actionspostreaction: ['actionspostreaction', 'postreactions'],
+  actionscomment: ['actionscomment', 'postcomments'],
+  actionspost: ['actionspost', 'actionspostshares'],
+  actionsonsiteconversionpostsave: ['actionsonsiteconversionpostsave', 'postsaves'],
+  videoplayactionsvideoview: ['videoplayactionsvideoview', 'videoplays'],
+  videop25watchedactionsvideoview: ['videop25watchedactionsvideoview', 'videowatchedat25percent'],
+  videop50watchedactionsvideoview: ['videop50watchedactionsvideoview', 'videowatchedat50percent'],
+  videop75watchedactionsvideoview: ['videop75watchedactionsvideoview', 'videowatchedat75percent'],
+  videop95watchedactionsvideoview: ['videop95watchedactionsvideoview', 'videoplaysat95percent'],
+  videop100watchedactionsvideoview: ['videop100watchedactionsvideoview', 'videowatchedat100percent'],
+  videoavgtimewatchedactionsvideoview: ['videoavgtimewatchedactionsvideoview', 'videoaverageplaytime'],
+  actionsomniaddtocart: ['actionsomniaddtocart', 'omniaddstocart'],
+  actionvaluesomniaddtocart: ['actionvaluesomniaddtocart', 'omniaddstocartconversionvalue'],
+  actionsinitiatecheckout: ['actionsinitiatecheckout', 'checkoutsinitiated'],
+  actionvaluesinitiatecheckout: ['actionvaluesinitiatecheckout', 'checkoutsinitiatedconversionvalue'],
+  actionsomnipurchase: ['actionsomnipurchase', 'omnipurchases'],
+  actionvaluesomnipurchase: ['actionvaluesomnipurchase', 'purchasesconversionvalue'],
+  actionspurchase: ['actionspurchase', 'actionpurchase'],
+  actionslead: ['actionslead', 'leads'],
+  age: ['age', 'agerange'],
 };
 
 // Kolommen die een tabel fijner maken dan een totaal, gegroepeerd per niveau.
@@ -525,9 +559,11 @@ const DIMENSION_LEVELS = {
   flow:     ['flowname', 'flowid'],
   // Meta Ads-breakdowns: dezelfde cijfers per leeftijd/geslacht, regio of
   // creatieve variant. Zo'n tab mag nooit een totaalvraag beantwoorden.
-  demo:     ['age', 'gender'],
+  // Zowel veld-id als Windsor-weergavenaam ('Age Range', 'Text of the title asset').
+  demo:     ['age', 'agerange', 'gender'],
   geo:      ['region', 'country'],
-  asset:    ['titleassettext', 'bodyassettext', 'calltoactionassetname', 'imageasseturl', 'videoassetvideoname'],
+  asset:    ['titleassettext', 'bodyassettext', 'calltoactionassetname', 'imageasseturl', 'videoassetvideoname',
+             'textofthetitleasset', 'textofbodyasset', 'nameofcalltoactionasset', 'urloftheimageasset', 'nameofthevideoasset'],
 };
 
 // Kolommen waarop we op periode filteren, in volgorde van voorkeur.
@@ -550,9 +586,37 @@ function dayOfCell(v) {
   return isoOf(s.slice(0, 10)) || isoOf(s);
 }
 
-function cellValue(v) {
+// Id-velden blijven tekst: een ad_id als 120252471968590730 is groter dan wat
+// een JavaScript-getal exact kan bewaren, en wordt anders stil een ander id.
+const isIdField = (f) => /(^|_)id$/.test(f);
+
+// Sheets geeft opgemaakte waarden terug, in de landinstelling van het sheet: in
+// een Nederlands sheet is '0,0513' een decimaal en '1.234' duizend-tweehonderd-
+// vierendertig. De tab zegt zelf welke het is (nl = er staat ergens een komma-
+// decimaal in); zonder die keuze werd een CTR van '0,0513' tekst en dus 0.
+function parseLocaleNumber(s, nl) {
+  const t = s.replace(/^[€$£]\s*/, '');
+  if (nl) {
+    if (/^-?\d{1,3}(\.\d{3})*(,\d+)?$/.test(t) || /^-?\d+(,\d+)?$/.test(t)) {
+      const n = parseFloat(t.replace(/\./g, '').replace(',', '.'));
+      return isFinite(n) ? n : null;
+    }
+    return null;
+  }
+  if (/^-?\d{1,3}(,\d{3})*(\.\d+)?$/.test(t) || /^-?\d+(\.\d+)?$/.test(t)) {
+    const n = parseFloat(t.replace(/,/g, ''));
+    return isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function cellValue(v, field, nl) {
   if (v == null || v === '') return null;
+  if (typeof v === 'number') return isIdField(field || '') ? String(v) : v;
   const s = String(v).trim();
+  if (isIdField(field || '')) return s;
+  const n = parseLocaleNumber(s, nl);
+  if (n != null) return n;
   if (/^-?\d+(\.\d+)?$/.test(s)) {
     const n = parseFloat(s);
     if (isFinite(n)) return n;
@@ -565,7 +629,12 @@ function cellValue(v) {
  * verwacht: { data: [ {veld: waarde} ] }. Geeft null terug als de sheet deze vraag
  * niet kan beantwoorden — de aanroeper beslist dan wat er gebeurt.
  */
-async function getConnectorRows(clientId, connector, fieldsCsv, { from, to } = {}) {
+// opts.requireFields: velden zonder welke de tab de vraag niet kan beantwoorden
+//   (een publicatiedatum, een post- of advertentie-id). Ontbreekt er één, dan
+//   null — de aanroeper haalt het dan live op in plaats van halve rijen te tonen.
+// opts.extraFields: meelezen als de tab ze heeft, maar niet meetellen bij de
+//   tabkeuze (account_id/account_name voor de accountcontrole in windsor.js).
+async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requireFields = [], extraFields = [] } = {}) {
   const pattern = CONNECTOR_TABS[connector];
   if (!pattern) return null;
 
@@ -610,6 +679,17 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to } = {
   }
 
   if (!best) return null;
+  const missing = requireFields.filter(f => wanted.includes(f) && best.colOf[f] == null);
+  if (missing.length) return { __missing: missing, __sheet: { tab: best.title } };
+  for (const f of extraFields) {
+    if (best.colOf[f] != null) continue;
+    const cands = headerCandidates(f);
+    const i = best.headers.findIndex(h => cands.has(h));
+    if (i !== -1) best.colOf[f] = i;
+  }
+  // Landinstelling van de tab: staat er ergens een komma-decimaal, dan is het een
+  // Nederlands sheet en zijn punten duizendtallen.
+  const nl = best.rows.slice(1, 200).some(r => r.some(c => typeof c === 'string' && /^-?\d+,\d+$/.test(c.trim())));
 
   const dateCol = DATE_HEADERS.map(h => best.headers.indexOf(h)).find(i => i !== -1);
   const data = [];
@@ -625,7 +705,7 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to } = {
       }
     }
     const row = {};
-    for (const [field, i] of Object.entries(best.colOf)) row[field] = cellValue(r[i]);
+    for (const [field, i] of Object.entries(best.colOf)) row[field] = cellValue(r[i], field, nl);
     data.push(row);
   }
 
