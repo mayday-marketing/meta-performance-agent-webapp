@@ -46,22 +46,43 @@ function resolveDataSheetId(clientId) {
    geconfigureerd hoeft te worden. `_windsor_staging_*` zijn restanten van een
    lopende export en worden overgeslagen. */
 
+// `needs`/`forbid` gaan over de KOLOMMEN, niet over de naam. Twee exporttaken
+// kunnen allebei 'kanaal' heten (bij Spotto: de kanaalexport én de
+// doelgroepexport). Een doelgroeptab als kanaaltab lezen zou de kanaaltotalen
+// te laag maken — GA4 laat kleine leeftijd×geslacht-groepen weg (thresholding) —
+// dus een tab met leeftijd of geslacht mag nooit een totaal- of kanaalvraag
+// beantwoorden, en de doelgroeptab wordt herkend aan die kolommen.
+const DEMO_HEADERS = ['age', 'gender'];
 const TABLES = [
-  { key: 'ga4Daily',   source: /analytics/i,      marker: /(^|[^a-z])dag([^a-z]|$)/i,     lagDays: 2 },
-  { key: 'ga4Channel', source: /analytics/i,      marker: /kanaal|channel/i,              lagDays: 2 },
-  { key: 'ga4Landing', source: /analytics/i,      marker: /landing/i,                     lagDays: 2 },
+  { key: 'ga4Daily',   source: /analytics/i,      marker: /(^|[^a-z])dag([^a-z]|$)/i,     lagDays: 2, forbid: DEMO_HEADERS },
+  { key: 'ga4Channel', source: /analytics/i,      marker: /kanaal|channel/i,              lagDays: 2, forbid: DEMO_HEADERS },
+  { key: 'ga4Landing', source: /analytics/i,      marker: /landing/i,                     lagDays: 2, forbid: DEMO_HEADERS },
+  // Geen naamvereiste: elke GA4-tab met leeftijd of geslacht. Tabs met een
+  // passende naam worden eerst gelezen, zodat we niet elke tab hoeven te openen.
+  { key: 'ga4Demo',    source: /analytics/i,      marker: /./, prefer: /doelgroep|demo|leeftijd|age|gender|kanaal|channel/i,
+    lagDays: 2, needs: DEMO_HEADERS },
   { key: 'gscDaily',   source: /search\s*console/i, marker: /(^|[^a-z])dag([^a-z]|$)/i,   lagDays: 4 },
   { key: 'gscQuery',   source: /search\s*console/i, marker: /quer(y|ies)|zoekopdracht/i,  lagDays: 4 },
 ];
 
+// Per tabel de kandidaat-tabs op naam, in leesvolgorde. Welke het wordt, beslist
+// pas de kopregel (zie `fitsHeaders`).
 function matchTabs(titles) {
   const out = {};
   for (const t of TABLES) {
-    const hit = titles.find(title =>
+    const hits = titles.filter(title =>
       !/^_windsor_staging/i.test(title) && t.source.test(title) && t.marker.test(title));
-    if (hit) out[t.key] = hit;
+    if (t.prefer) hits.sort((a, b) => (t.prefer.test(b) ? 1 : 0) - (t.prefer.test(a) ? 1 : 0));
+    if (hits.length) out[t.key] = hits;
   }
   return out;
+}
+
+function fitsHeaders(table, headerRow) {
+  const h = (headerRow || []).map(normHeader);
+  if (table.forbid && table.forbid.some(x => h.includes(x))) return false;
+  if (table.needs && !table.needs.some(x => h.includes(x))) return false;
+  return true;
 }
 
 /* ---------- Kolomherkenning ----------
@@ -89,6 +110,8 @@ const HEADER_MAP = {
   purchaserevenue: 'revenue',
   transactions: 'transactions',
   sessiondefaultchannelgroup: 'channel',
+  age: 'age',
+  gender: 'gender',
   sessionsourcemedium: 'sourceMedium',
   landingpage: 'page',
   page: 'page',
@@ -218,6 +241,51 @@ function rowsInPeriod(rows, from, to) {
   return { header: rows[0], body, dates: all, idx, goalEvent };
 }
 
+/* ---------- Doelgroep ----------
+   Gedeeld door de sheet en de API-terugval in windsor.js, zodat beide routes
+   dezelfde vorm opleveren. GA4 schrijft leeftijd als '25-34' of 'unknown' en
+   geslacht als 'female'/'male'/'unknown'; we zetten dat recht naar de vorm die
+   het Meta-doelgroepblok al kent ('Unknown', kleine letters voor geslacht). */
+
+function normAge(v) {
+  const s = String(v == null ? '' : v).trim();
+  return !s || /^(unknown|\(not set\)|onbekend)$/i.test(s) ? 'Unknown' : s;
+}
+function normGender(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  return s === 'female' || s === 'male' ? s : 'unknown';
+}
+
+// rows: ruwe rijen; idx: kolomindex (sheet) óf null (API: rijen zijn objecten
+// met Windsor-veldnamen). Geeft { rows, goalAvailable } terug.
+function aggregateDemo(rows, idx, goalKey) {
+  const get = idx
+    ? (r, k) => (idx[k] != null ? r[idx[k]] : null)
+    : (r, k) => r[{ age: 'age', gender: 'gender', channel: 'session_default_channel_group', sessions: 'sessions',
+        engagedSessions: 'engaged_sessions', newUsers: 'newusers', conversions: 'conversions',
+        revenue: 'purchase_revenue', transactions: 'transactions', goal: goalKey }[k]];
+  const hasGoal = idx ? idx.goal != null : !!goalKey;
+  const m = new Map();
+  for (const r of rows) {
+    const age = normAge(get(r, 'age'));
+    const gender = normGender(get(r, 'gender'));
+    const channel = String(get(r, 'channel') || '(onbekend)');
+    const k = `${age}|${gender}|${channel}`;
+    const c = m.get(k) || { age, gender, channel, sessions: 0, engagedSessions: 0, newUsers: 0, conversions: 0, goalConversions: 0, revenue: 0, transactions: 0 };
+    c.sessions += num(get(r, 'sessions'));
+    c.engagedSessions += num(get(r, 'engagedSessions'));
+    c.newUsers += num(get(r, 'newUsers'));
+    c.conversions += num(get(r, 'conversions'));
+    if (hasGoal) c.goalConversions += num(get(r, 'goal'));
+    c.revenue += num(get(r, 'revenue'));
+    c.transactions += num(get(r, 'transactions'));
+    m.set(k, c);
+  }
+  const out = Array.from(m.values()).filter(c => c.sessions > 0 || c.conversions > 0 || c.goalConversions > 0);
+  if (!hasGoal) for (const c of out) c.goalConversions = null;
+  return { rows: out, goalAvailable: hasGoal };
+}
+
 /* ---------- Publieke functie ---------- */
 
 /**
@@ -228,7 +296,7 @@ async function getWebsiteSheetData(clientId, startDate, endDate) {
   const result = {
     available: false, sheetId: null, tabs: {}, coverage: {}, warnings: [],
     totals: null, daily: null, channels: null, landingPages: null, sources: null,
-    search: null, searchDaily: null, queries: null, goalEvent: null,
+    search: null, searchDaily: null, queries: null, goalEvent: null, demographics: null,
   };
 
   const sheetId = resolveDataSheetId(clientId);
@@ -244,30 +312,41 @@ async function getWebsiteSheetData(clientId, startDate, endDate) {
   catch (e) { result.warnings.push(`Datasheet niet leesbaar: ${e.message}`); return result; }
 
   const found = matchTabs(titles);
-  result.tabs = found;
   if (!Object.keys(found).length) {
     result.warnings.push('Geen herkenbare exporttabs in de datasheet.');
     return result;
   }
 
   const load = async (key) => {
-    const title = found[key];
-    if (!title) { result.coverage[key] = { ok: false, reason: 'tab ontbreekt' }; return null; }
-    const lag = (TABLES.find(t => t.key === key) || {}).lagDays || 2;
-    let rows;
-    try { rows = await readTab(clientId, sheetId, title, token); }
-    catch (e) { result.coverage[key] = { ok: false, reason: e.message }; return null; }
+    const table = TABLES.find(t => t.key === key) || {};
+    const candidates = found[key] || [];
+    if (!candidates.length) { result.coverage[key] = { ok: false, reason: 'tab ontbreekt' }; return null; }
+    // Eerste kandidaat waarvan de kopregel past. Leesfouten onthouden we: als geen
+    // enkele tab past, is 'niet leesbaar' een betere reden dan 'ontbreekt'.
+    let title = null, rows = null, readErr = null;
+    for (const t of candidates) {
+      let r;
+      try { r = await readTab(clientId, sheetId, t, token); }
+      catch (e) { readErr = readErr || e.message; continue; }
+      if (fitsHeaders(table, r[0])) { title = t; rows = r; break; }
+    }
+    if (!title) {
+      result.coverage[key] = { ok: false, reason: readErr || (table.needs ? 'geen tab met leeftijd of geslacht' : 'tab ontbreekt') };
+      return null;
+    }
+    result.tabs[key] = title;
+    const lag = table.lagDays || 2;
     const parsed = rowsInPeriod(rows, startDate, endDate);
     if (parsed.noDate) { result.coverage[key] = { ok: false, reason: 'tab heeft geen datumkolom' }; return null; }
     const cov = covers(parsed.dates, startDate, endDate, lag);
     result.coverage[key] = { ...cov, tab: title, rows: parsed.body.length };
     if (!cov.ok) return null;
-    if (parsed.goalEvent && !result.goalEvent) result.goalEvent = parsed.goalEvent;
+    if (parsed.goalEvent && !result.goalEvent && key !== 'ga4Demo') result.goalEvent = parsed.goalEvent;
     return parsed;
   };
 
-  const [daily, channel, landing, gscDaily, gscQuery] = await Promise.all(
-    ['ga4Daily', 'ga4Channel', 'ga4Landing', 'gscDaily', 'gscQuery'].map(load));
+  const [daily, channel, landing, gscDaily, gscQuery, demo] = await Promise.all(
+    ['ga4Daily', 'ga4Channel', 'ga4Landing', 'gscDaily', 'gscQuery', 'ga4Demo'].map(load));
 
   // --- GA4-totalen en dagreeks -------------------------------------------
   // Alles hier is optelbaar. 'Total users' bewust NIET: unieke gebruikers over
@@ -460,6 +539,15 @@ async function getWebsiteSheetData(clientId, startDate, endDate) {
         .filter(q => q.position != null && q.position >= 8 && q.position <= 20 && q.impressions >= 50)
         .sort((a, b) => b.impressions - a.impressions).slice(0, 10),
     };
+  }
+
+  // --- Doelgroep: leeftijd × geslacht × kanaal -----------------------------
+  // Dagrijen optellen per combinatie. Sessies en key events zijn optelbaar;
+  // gebruikers niet (daarom staat totalusers niet in deze export). Een rij die
+  // GA4 wegens de privacydrempel weglaat, ontbreekt hier ook: de som dekt dus
+  // minder sessies dan de dagtab. De UI toont dat dekkingspercentage.
+  if (demo) {
+    result.demographics = aggregateDemo(demo.body.map(({ r }) => r), demo.idx);
   }
 
   result.available = !!(result.totals || result.channels || result.search);
@@ -756,4 +844,4 @@ async function hasConnectorTab(clientId, connector) {
   }
 }
 
-module.exports = { getWebsiteSheetData, matchTabs, headerIndex, covers, getConnectorRows, hasConnectorTab };
+module.exports = { getWebsiteSheetData, matchTabs, headerIndex, covers, getConnectorRows, hasConnectorTab, aggregateDemo };

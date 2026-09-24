@@ -65,6 +65,7 @@
     { id: "website.chart",    page: "website", label: "Verkeer per dag", html: () => web(R.websiteChart) },
     { id: "website.channels", page: "website", label: "Kanalen",         html: () => web(R.websiteChannels) },
     { id: "website.sources",  page: "website", label: "Bronnen",         html: () => web(R.websiteSources) },
+    { id: "website.demo",     page: "website", label: "Doelgroep",       html: () => web(R.websiteDemo) },
     { id: "website.landing",  page: "website", label: "Landingspagina's", html: () => web(R.websiteLanding) },
     { id: "website.funnel",   page: "website", label: "Funnel",          html: () => web(R.websiteFunnel) },
     { id: "website.search",   page: "website", label: "Organisch zoeken", html: () => web(R.websiteSearch) },

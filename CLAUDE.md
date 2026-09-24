@@ -176,6 +176,33 @@ topbar — anders dan de ROAS-tab, die een eigen maandperiode heeft.
   met een id, zodat een aanslag alleen dat blok hertekent — een volledige
   re-render zou het invoerveld vervangen en de focus wegnemen.
 
+### Doelgroep-sub-tab (leeftijd × geslacht × kanaal)
+
+Welke leeftijds- en geslachtsgroep het best converteert en via welk kanaal
+(`renderWebsiteDemo()` + `renderWebsiteDemoMatrix()` in `app.js`, `demographics`
+in de `getWebsite`-respons). Zelfde leesrecept als het Meta-doelgroepblok:
+`renderDemoBars()` is gedeeld en krijgt via `opts` eigen reeksen en een eigen
+geslachtsfilter (`state.webDemoGender`).
+
+- **Nooit per bezoeker.** GA4 geeft leeftijd en geslacht alleen geaggregeerd, via
+  Google Signals, en laat kleine groepen weg onder een privacydrempel. De UI toont
+  daarom twee percentages: hoeveel sessies een bekende leeftijd én geslacht hebben,
+  en hoeveel van alle sessies de uitsplitsing dekt. Onder 10% bekend → waarschuwing
+  dat Google Signals waarschijnlijk uit staat.
+- **Tabherkenning op kolommen, niet op naam.** Bij Spotto heten de kanaalexport én
+  de doelgroepexport allebei 'kanaal'. `TABLES` in `_sheetdata.js` heeft daarom
+  `needs`/`forbid`: een tab met `Age`/`Gender` mag nooit de dag-, kanaal- of
+  landingtab zijn (dan zouden die totalen te laag uitkomen door de drempel), en de
+  doelgroeptab is elke GA4-tab met die kolommen. `getConnectorRows` sluit hem al
+  uit via het `demo`-niveau in `DIMENSION_LEVELS`.
+- **API-terugval** als de sheet de periode niet dekt: `GA4_DEMO` zonder `date` (over
+  de periode geaggregeerd valt minder weg) plus een aparte, niet-fatale call voor
+  `conversions_<doel>`. `aggregateDemo()` in `_sheetdata.js` voedt beide routes, dus
+  sheet en API leveren dezelfde vorm.
+- **Drempels in de UI:** een ratio pas vanaf 50 sessies, en een groep telt pas mee
+  voor 'converteert het best' vanaf 50 sessies én 5 conversies. De matrix kleurt
+  op de index tegenover het gemiddelde (≥ 1,2 groen, ≤ 0,8 rood), nooit op volume.
+
 ## Meta Ads-verrijking (Overview → Advertenties)
 
 Onder de campagnetabel staan drie blokken — funnel, creatie, doelgroep — gevoed

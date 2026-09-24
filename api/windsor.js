@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { getClientConfig, captureOidcToken } = require('./_config');
 const { activeChannels, pendingChannels, matchGa4Channel, ga4GroupOf } = require('./_channels');
-const { getWebsiteSheetData, getConnectorRows, hasConnectorTab } = require('./_sheetdata');
+const { getWebsiteSheetData, getConnectorRows, hasConnectorTab, aggregateDemo } = require('./_sheetdata');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -945,6 +945,11 @@ module.exports = async (req, res) => {
         const GA4_DEVICES   = 'devicecategory,sessions,engaged_sessions,conversions,purchase_revenue';
         const GA4_COUNTRIES = 'country,sessions,conversions';
         const GA4_RETURNING = 'new_vs_returning,sessions,conversions,purchase_revenue';
+        // Doelgroep: leeftijd × geslacht × kanaal. Vergt Google Signals in de
+        // property; zonder komt alles terug als 'unknown'. Geen date erbij: over de
+        // periode in één keer geaggregeerd valt minder weg onder GA4's
+        // privacydrempel dan per dag.
+        const GA4_DEMO      = 'age,gender,session_default_channel_group,sessions,engaged_sessions,newusers,conversions,purchase_revenue,transactions';
         // E-commerce-funnel. item_view_events is item-scoped en combineert niet in
         // elke property met de rest; daarom een minimale fallback (zie fetchFunnel).
         const GA4_FUNNEL     = 'item_view_events,add_to_carts,checkouts,ecommerce_purchases,transactions,purchase_revenue,first_time_purchasers,total_purchasers';
@@ -1024,6 +1029,7 @@ module.exports = async (req, res) => {
           const useSearch   = !!sd.search;
           const useQueries  = detail && !!sd.queries;
           const useSources  = !!sd.sources;
+          const useDemo     = detail && !!sd.demographics;
           const skip = Promise.resolve(EMPTY);
 
           // Bronnen zitten in core en niet bij de add-ons: de tabel toont een
@@ -1046,6 +1052,9 @@ module.exports = async (req, res) => {
             hasGa4 ? fetchFunnel(params, ADDON_MS) : Promise.resolve({ data: EMPTY, degraded: false }),
             useQueries ? skip : gsc(GSC_QUERIES, 'web-gsc-queries', ADDON_MS, pageParams),
             gsc(GSC_PAGES, 'web-gsc-pages', ADDON_MS, pageParams),
+            useDemo ? skip : ga4(GA4_DEMO, 'web-ga4-demo', ADDON_MS),
+            // Doel per groep apart en niet-fataal, om dezelfde reden als goalFields.
+            (useDemo || !goalEvent) ? skip : ga4(`age,gender,session_default_channel_group,conversions_${goalEvent}`, 'web-ga4-demo-goal', ADDON_MS),
           ] : [];
           // De doelkolom zit al in de sheet-tabs; dan is deze losse call overbodig.
           const goalCall = (!useTotals && hasGa4 && goalFields)
@@ -1054,7 +1063,7 @@ module.exports = async (req, res) => {
 
           const [totalsRaw, channelsRaw, gscTotalsRaw, sourcesRaw, goalRaw, ...rest] =
             await Promise.all([...core, goalCall, ...extras]);
-          const [dailyRaw, landingRaw, devicesRaw, countriesRaw, returningRaw, funnelRes, queriesRaw, gscPagesRaw] = rest;
+          const [dailyRaw, landingRaw, devicesRaw, countriesRaw, returningRaw, funnelRes, queriesRaw, gscPagesRaw, demoRaw, demoGoalRaw] = rest;
 
           const errors = {};
           if (errOf(totalsRaw)) errors.ga4Totals = errOf(totalsRaw);
@@ -1262,6 +1271,7 @@ module.exports = async (req, res) => {
               sources: useSources ? 'sheet' : 'api',
               search: useSearch ? 'sheet' : 'api',
               queries: useQueries ? 'sheet' : 'api',
+              demographics: useDemo ? 'sheet' : 'api',
             },
             sheetCoverage: sd.coverage || null,
             sheetWarnings: sd.warnings && sd.warnings.length ? sd.warnings : null,
@@ -1301,6 +1311,29 @@ module.exports = async (req, res) => {
           out.devices = group(rowsOf(devicesRaw), r => String(r.devicecategory || '(onbekend)'), addSession)
             .sort(bySessions)
             .map(c => ({ device: c.key, sessions: c.sessions, engagementRate: div(c.engagedSessions, c.sessions), conversions: c.conversions, conversionRate: div(c.conversions, c.sessions), revenue: c.revenue }));
+
+          // --- Doelgroep --------------------------------------------------------
+          // Uit de sheet, of live: hoofdcall + doel per groep, samengevoegd op
+          // leeftijd|geslacht|kanaal. Mislukt de doelcall, dan blijft de tab op
+          // álle key events staan (goalAvailable:false), net als elders.
+          if (useDemo) {
+            out.demographics = sd.demographics;
+          } else if (errOf(demoRaw)) {
+            errors.ga4Demo = errOf(demoRaw);
+            out.demographics = null;
+          } else {
+            const base = aggregateDemo(rowsOf(demoRaw), null, null);
+            const gk = goalEvent ? `conversions_${goalEvent}` : null;
+            const goalRows = rowsOf(demoGoalRaw);
+            const goalOk = !!(gk && !errOf(demoGoalRaw) && goalRows.some(r => r[gk] != null));
+            if (errOf(demoGoalRaw)) errors.ga4DemoGoal = errOf(demoGoalRaw);
+            if (goalOk) {
+              const g = new Map();
+              for (const r of aggregateDemo(goalRows, null, gk).rows) g.set(`${r.age}|${r.gender}|${r.channel}`, r.goalConversions);
+              for (const r of base.rows) r.goalConversions = g.get(`${r.age}|${r.gender}|${r.channel}`) || 0;
+            }
+            out.demographics = base.rows.length ? { rows: base.rows, goalAvailable: goalOk } : null;
+          }
 
           out.countries = group(rowsOf(countriesRaw), r => String(r.country || '(onbekend)'), addSession)
             .sort(bySessions).slice(0, 8)

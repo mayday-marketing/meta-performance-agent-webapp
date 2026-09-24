@@ -82,6 +82,7 @@
     websiteKey: null,                 // klant+periode waarvoor de tab geladen is (lazy refresh)
     websiteCompare: "prev",           // 'prev' (vorige periode) | 'yoy' (vorig jaar)
     websiteTab: "overzicht",          // actief sub-blad van de Website-tab
+    webDemoGender: "all",             // filter in de Doelgroep-sub-tab: all / female / male
     roasTab: "blended",               // actief sub-blad van de ROAS-tab
     bronnenTab: "bronnen",            // actief sub-blad van de Bronnen-tab
     websiteLandingQuery: "",          // zoekterm in de landingspagina-tabel (alleen deze sessie)
@@ -2571,41 +2572,49 @@
   // is dan de kostenstaaf — de index rechts zegt hetzelfde in één getal.
   // HTML in plaats van SVG: de kleuren blijven CSS-variabelen, dus een thema- of
   // accentwissel werkt zonder hertekenen.
-  function renderDemoBars(demo, doelKey, doelNaam, tot) {
-    const g = state.adsDemoGender || "all";
+  // Gedeeld door het Meta-doelgroepblok en de Doelgroep-sub-tab van Website.
+  // opts.series vervangt kosten/vertoningen door eigen maatstaven (Website:
+  // sessies); de eerste reeks is de noemer van de index. opts.gender/onGender
+  // wijzen de filterstaat en de klikhandler aan, zodat de twee blokken elk hun
+  // eigen filter houden.
+  function renderDemoBars(demo, doelKey, doelNaam, tot, opts = {}) {
+    const g = opts.gender || state.adsDemoGender || "all";
+    const onGender = opts.onGender || "__adsDemoGender";
     const rows = demo.filter(r => g === "all" || r.gender === g);
     const share = (n, d) => d > 0 ? (n / d) * 100 : 0;
+    const doelLabel = doelNaam.charAt(0).toUpperCase() + doelNaam.slice(1);
+    const SERIES = opts.series ? [...opts.series, { key: "doel", field: doelKey, label: doelLabel, color: "var(--accent-data)" }] : [
+      // Oranje en blauw uit het vaste palet: de lichte merkstap (--s2) zakte in de
+      // validator onder de chromavloer — hij las als grijs naast de merkkleur.
+      { key: "spend", field: "spend", label: "Kosten", color: "var(--demo-cost)" },
+      { key: "impressions", field: "impressions", label: "Vertoningen", color: "var(--chart-3)" },
+      { key: "doel", field: doelKey, label: doelLabel, color: "var(--accent-data)" },
+    ];
+    const baseKey = SERIES[0].key;
     const perAge = new Map();
     for (const r of rows) {
-      const a = perAge.get(r.age) || { spend: 0, impressions: 0, doel: 0 };
-      a.spend += r.spend || 0; a.impressions += r.impressions || 0; a.doel += r[doelKey] || 0;
+      const a = perAge.get(r.age) || Object.fromEntries(SERIES.map(sr => [sr.key, 0]));
+      for (const sr of SERIES) a[sr.key] += r[sr.field] || 0;
       perAge.set(r.age, a);
     }
     const ages = [...perAge.keys()].sort((a, b) => {
       const ia = AGE_ORDER.indexOf(a), ib = AGE_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
-    // Vaste volgorde en kleur per maatstaf, ook als een filter iets leeg maakt.
-    const SERIES = [
-      // Oranje en blauw uit het vaste palet: de lichte merkstap (--s2) zakte in de
-      // validator onder de chromavloer — hij las als grijs naast de merkkleur.
-      { key: "spend", label: "Kosten", color: "var(--demo-cost)" },
-      { key: "impressions", label: "Vertoningen", color: "var(--chart-3)" },
-      { key: "doel", label: doelNaam.charAt(0).toUpperCase() + doelNaam.slice(1), color: "var(--accent-data)" },
-    ];
-    const denom = { spend: tot.spend, impressions: tot.impressions, doel: tot.doel };
+    // Vaste volgorde en kleur per maatstaf (SERIES hierboven), ook als een
+    // filter iets leeg maakt. `tot` draagt per reekssleutel de noemer.
     const data = ages.map(age => {
       const a = perAge.get(age);
-      const v = Object.fromEntries(SERIES.map(sr => [sr.key, share(a[sr.key], denom[sr.key])]));
-      return { age, v, index: v.spend > 0 && tot.doel > 0 ? v.doel / v.spend : null };
-    }).filter(d => d.v.spend >= 0.5 || d.v.doel > 0);
+      const v = Object.fromEntries(SERIES.map(sr => [sr.key, share(a[sr.key], tot[sr.key])]));
+      return { age, v, index: v[baseKey] > 0 && tot.doel > 0 ? v.doel / v[baseKey] : null };
+    }).filter(d => d.v[baseKey] >= 0.5 || d.v.doel > 0);
     const max = Math.max(1, ...data.flatMap(d => SERIES.map(sr => d.v[sr.key])));
     const scale = [10, 20, 25, 40, 50, 60, 80, 100].find(m => m >= max) || 100;
     const ticks = scale <= 25 ? [0, scale / 2, scale] : [0, scale / 4, scale / 2, (scale * 3) / 4, scale];
 
     const chips = [["all", "Alle"], ["female", "Vrouwen"], ["male", "Mannen"]]
       .filter(([k]) => k === "all" || demo.some(r => r.gender === k))
-      .map(([k, l]) => `<button type="button" class="chip ${g === k ? "on" : ""}" aria-pressed="${g === k}" onclick="window.__adsDemoGender('${k}')">${l}</button>`).join("");
+      .map(([k, l]) => `<button type="button" class="chip ${g === k ? "on" : ""}" aria-pressed="${g === k}" onclick="window.${onGender}('${k}')">${l}</button>`).join("");
     const legend = SERIES.map(sr => `<span class="demo-key"><i style="background:${sr.color}"></i>${escapeHtml(sr.label)}</span>`).join("");
 
     const ageLabel = (a) => a === "Unknown" ? "Onbekend" : a;
@@ -5637,6 +5646,7 @@
           renderWebsiteKpis()
           + splitBlok(renderWebsiteChart() + renderWebsiteFunnel(), renderWebsiteCallouts()))
       + subpane("kanalen", tab, renderWebsiteChannels() + renderWebsiteSources())
+      + subpane("doelgroep", tab, renderWebsiteDemo())
       + subpane("landing", tab, renderWebsiteLanding())
       + subpane("zoeken", tab, renderWebsiteSearch())
       + subpane("apparaten", tab, renderWebsiteAudience())
@@ -5646,6 +5656,7 @@
   const WEB_TABS = [
     { key: "overzicht", label: "Overzicht" },
     { key: "kanalen", label: "Kanalen" },
+    { key: "doelgroep", label: "Doelgroep" },
     { key: "landing", label: "Landingspagina's" },
     { key: "zoeken", label: "Zoeken" },
     { key: "apparaten", label: "Apparaten" },
@@ -5761,7 +5772,7 @@
 
     // Waar de cijfers vandaan komen: sheet of live.
     const origin = w.current.origin || {};
-    const labels = { totals: "kerncijfers", channels: "kanalen", landingPages: "landingspagina's", search: "organisch zoeken", queries: "zoekopdrachten" };
+    const labels = { totals: "kerncijfers", channels: "kanalen", demographics: "doelgroep", landingPages: "landingspagina's", search: "organisch zoeken", queries: "zoekopdrachten" };
     const uitSheet = Object.keys(labels).filter(k => origin[k] === "sheet").map(k => labels[k]);
     const uitApi = Object.keys(labels).filter(k => origin[k] === "api").map(k => labels[k]);
     kaarten.push(callout("info", "↗", "Waar dit vandaan komt",
@@ -6359,6 +6370,171 @@
     </section>`;
   }
 
+  /* ---------- Doelgroep: leeftijd × geslacht × kanaal (GA4) ----------
+     Zelfde leesrecept als het Meta-doelgroepblok: aandelen en een index, geen
+     absolute aantallen per groep als hoofdcijfer. GA4 kent leeftijd en geslacht
+     alleen via Google Signals, dus een deel van de sessies is 'onbekend', en
+     kleine groepen vallen weg onder de privacydrempel. Beide staan in de kop van
+     het blok, niet alleen in een voetnoot. */
+
+  // Onder deze aantallen is een conversieratio ruis: één formulier meer of
+  // minder verschuift hem dan met procentpunten.
+  const DEMO_MIN_SESSIONS = 50;
+  const DEMO_MIN_DOEL = 5;
+
+  window.__webDemoGender = (g) => { state.webDemoGender = g; renderWebsite(); };
+
+  function renderWebsiteDemo() {
+    const w = state.website;
+    const c = w?.current;
+    if (!c) return "";
+    const d = c.demographics;
+    const goal = webGoal();
+    const panel = (sub, body) => `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Doelgroep</h2>
+        <div class="panel-sub">${sub}</div>
+      </div></div>${body}</section>`;
+
+    if (!d || !d.rows || !d.rows.length) {
+      const err = c.errors?.ga4Demo;
+      return panel("Geen uitsplitsing naar leeftijd en geslacht", `<p class="source-line">${err
+        ? `GA4 gaf een fout: ${escapeHtml(err)}`
+        : "GA4 leverde geen leeftijd of geslacht voor deze periode. Dat vergt Google Signals in de property (Beheer → Gegevensverzameling), en een export met <em>age</em>, <em>gender</em> en <em>session_default_channel_group</em> in de datasheet."}</p>`);
+    }
+
+    // Het doel per groep bestaat alleen als het doelveld óók in deze uitsplitsing
+    // zit. Anders álle key events — met een ander label, want dat is een ander cijfer.
+    const goalOn = goal.on && d.goalAvailable;
+    const doelNaam = goalOn ? goal.label.toLowerCase() : "key events";
+    const gFilter = state.webDemoGender || "all";
+    const rows = d.rows.map(r => ({ ...r, doel: (goalOn ? r.goalConversions : r.conversions) || 0 }));
+    const sum = (list, k) => list.reduce((a, r) => a + (r[k] || 0), 0);
+    const tot = { sessions: sum(rows, "sessions"), doel: sum(rows, "doel") };
+    const rate = (doel, ses) => ses > 0 ? doel / ses : null;
+    const avgRate = rate(tot.doel, tot.sessions);
+    const share = (n, dd) => dd > 0 ? (n / dd) * 100 : null;
+
+    // Hoeveel van het verkeer is überhaupt ingedeeld, en hoeveel van de site dekt
+    // deze tabel? Het tweede is de privacydrempel: wat GA4 weglaat, staat nergens.
+    const known = rows.filter(r => r.age !== "Unknown" && r.gender !== "unknown");
+    const knownShare = tot.sessions ? sum(known, "sessions") / tot.sessions : null;
+    const siteSessions = c.totals?.sessions;
+    const coverage = siteSessions ? Math.min(1, tot.sessions / siteSessions) : null;
+
+    // Groepen leeftijd × geslacht, alleen bekende.
+    const groups = new Map();
+    for (const r of known) {
+      const k = `${r.gender}|${r.age}`;
+      const g = groups.get(k) || { gender: r.gender, age: r.age, sessions: 0, doel: 0 };
+      g.sessions += r.sessions; g.doel += r.doel;
+      groups.set(k, g);
+    }
+    const label = (g) => `${GENDER_LABEL[g.gender] || g.gender} ${g.age}`;
+    const ranked = [...groups.values()]
+      .filter(g => g.sessions >= DEMO_MIN_SESSIONS && g.doel >= DEMO_MIN_DOEL)
+      .map(g => ({ ...g, rate: rate(g.doel, g.sessions) }))
+      .sort((a, b) => b.rate - a.rate);
+    const best = ranked[0];
+    const biggest = [...groups.values()].sort((a, b) => b.doel - a.doel)[0];
+
+    const titel = best && avgRate
+      ? `${escapeHtml(label(best))} converteren het best: <b>${webFmt.pct2(best.rate)}</b> tegenover ${webFmt.pct2(avgRate)} gemiddeld`
+      : `Doelgroep naar leeftijd, geslacht en kanaal`;
+    const lede = biggest && biggest.doel > 0
+      ? `Grootste groep in ${escapeHtml(doelNaam)}: ${escapeHtml(label(biggest))}, ${fmtShare(share(biggest.doel, tot.doel))} van de ${escapeHtml(doelNaam)} bij ${fmtShare(share(biggest.sessions, tot.sessions))} van de sessies.`
+      : "";
+
+    const perGender = ["female", "male", "unknown"].map(gk => {
+      const gr = rows.filter(r => r.gender === gk);
+      const s = sum(gr, "sessions");
+      if (!s) return "";
+      return `${GENDER_LABEL[gk]} ${fmtShare(share(sum(gr, "doel"), tot.doel))} van de ${escapeHtml(doelNaam)}, ${fmtShare(share(s, tot.sessions))} van de sessies (${webFmt.pct2(rate(sum(gr, "doel"), s))})`;
+    }).filter(Boolean).join(" · ");
+
+    const bars = renderDemoBars(rows, "doel", doelNaam, tot, {
+      series: [{ key: "sessions", field: "sessions", label: "Sessies", color: "var(--chart-3)" }],
+      gender: gFilter, onGender: "__webDemoGender",
+    });
+
+    // Waarschuwing vooraan als de uitsplitsing te dun is om op te sturen.
+    const signalsWarn = knownShare != null && knownShare < 0.1
+      ? `<p class="source-line" style="color:var(--negative);">Maar ${webFmt.pct0(knownShare)} van de sessies heeft een leeftijd én geslacht. Staat Google Signals aan in deze GA4-property? Zo niet, dan valt vrijwel alles onder 'onbekend'.</p>`
+      : "";
+
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">${titel}</h2>
+        <div class="panel-sub">${lede}</div>
+      </div></div>
+      ${signalsWarn}
+      <p class="source-line" style="margin-top:0;">${perGender}</p>
+      ${bars}
+      <p class="source-line">Per leeftijdsgroep het aandeel in de sessies en in de ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de sessiestaaf, dan converteert die groep bovengemiddeld (index boven 1).${gFilter !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%." : ""}</p>
+      ${renderWebsiteDemoMatrix(rows.filter(r => gFilter === "all" || r.gender === gFilter), doelNaam, avgRate)}
+      <p class="source-line">
+        ${knownShare != null ? `${webFmt.pct0(knownShare)} van de sessies heeft een bekende leeftijd en geslacht; de rest staat als 'onbekend'. ` : ""}${coverage != null ? `Deze uitsplitsing dekt ${webFmt.pct0(coverage)} van alle sessies: GA4 laat kleine groepen weg onder zijn privacydrempel. ` : ""}Leeftijd en geslacht komen uit Google Signals — ingelogde Google-gebruikers met advertentiepersonalisatie — en zijn geschat, geen opgave van de bezoeker. Lees dit als verdeling, niet als telling. ${goalOn ? `Conversie = ${escapeHtml(goal.label.toLowerCase())} (GA4-event ${escapeHtml(w.website.goalEvent || "")}).` : goal.on ? `Het hoofddoel zit niet in deze uitsplitsing, daarom staan hier álle key events samen — een hoger cijfer dan het hoofddoel elders in de tab.` : "Conversie = alle key events samen; zet een Conversiedoel in de Config-tab om op één doel te sturen."}
+        Een ratio staat er pas vanaf ${DEMO_MIN_SESSIONS} sessies.
+      </p>
+    </section>`;
+  }
+
+  // Leeftijd (rijen) × kanaalgroep (kolommen). De cel toont de conversieratio en
+  // kleurt naar de index tegenover het gemiddelde; het aantal sessies staat er
+  // klein onder, zodat een hoge ratio op dertig sessies niet als een vondst leest.
+  function renderWebsiteDemoMatrix(rows, doelNaam, avgRate) {
+    if (!rows.length || !avgRate) return "";
+    const cols = WEB_GROUPS.filter(g => rows.some(r => webGroupOf(r.channel) === g.key && r.sessions > 0));
+    const ages = [...new Set(rows.map(r => r.age))].sort((a, b) => {
+      const ia = AGE_ORDER.indexOf(a), ib = AGE_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    const cell = new Map();
+    const add = (k, r) => {
+      const c = cell.get(k) || { sessions: 0, doel: 0, channels: new Set() };
+      c.sessions += r.sessions; c.doel += r.doel; c.channels.add(r.channel);
+      cell.set(k, c);
+    };
+    for (const r of rows) {
+      const g = webGroupOf(r.channel);
+      add(`${r.age}|${g}`, r); add(`${r.age}|*`, r); add(`*|${g}`, r); add("*|*", r);
+    }
+    // Beste cel: hoogste ratio boven de drempel, alleen binnen de matrix zelf.
+    let bestKey = null, bestRate = -1;
+    for (const a of ages) for (const g of cols) {
+      const c = cell.get(`${a}|${g.key}`);
+      if (!c || a === "Unknown" || c.sessions < DEMO_MIN_SESSIONS || c.doel < DEMO_MIN_DOEL) continue;
+      const rr = c.doel / c.sessions;
+      if (rr > bestRate) { bestRate = rr; bestKey = `${a}|${g.key}`; }
+    }
+    const td = (k, isTotal) => {
+      const c = cell.get(k);
+      if (!c || !c.sessions) return `<td class="dm-cell dm-empty">—</td>`;
+      const tip = `${fmt.int(c.sessions)} sessies · ${fmt.int(c.doel)} ${doelNaam}${c.channels.size ? ` · ${[...c.channels].join(", ")}` : ""}`;
+      if (c.sessions < DEMO_MIN_SESSIONS) {
+        return `<td class="dm-cell dm-thin" title="${escapeHtml(tip)}"><span class="dm-rate">·</span><span class="dm-n">${fmt.int(c.sessions)}</span></td>`;
+      }
+      const rr = c.doel / c.sessions;
+      const idx = rr / avgRate;
+      // Tint alleen boven of onder het gemiddelde, afgetopt: tekst moet leesbaar
+      // blijven op de celkleur, ook bij een donker merkaccent.
+      const tone = idx >= 1.2 ? "pos" : idx <= 0.8 ? "neg" : "";
+      const strength = Math.min(1, Math.abs(Math.log2(Math.max(idx, 0.01))) / 1.5);
+      const bg = tone ? `style="--dm-a:${Math.round(6 + strength * 18)}%;"` : "";
+      return `<td class="dm-cell ${tone ? `dm-${tone}` : ""}${k === bestKey ? " dm-best" : ""}${isTotal ? " dm-total" : ""}" ${bg} title="${escapeHtml(tip)}">
+        <span class="dm-rate">${webFmt.pct2(rr)}</span><span class="dm-n">${fmt.int(c.sessions)}</span></td>`;
+    };
+    const head = cols.map(g => `<th class="right">${escapeHtml(g.label)}</th>`).join("");
+    const body = ages.map(a => `<tr><th scope="row">${escapeHtml(a === "Unknown" ? "Onbekend" : a)}</th>${cols.map(g => td(`${a}|${g.key}`)).join("")}${td(`${a}|*`, true)}</tr>`).join("");
+    const foot = `<tr class="dm-foot"><th scope="row">Alle leeftijden</th>${cols.map(g => td(`*|${g.key}`, true)).join("")}${td("*|*", true)}</tr>`;
+    return `<h3 class="label-head" style="margin-top:28px;">Conversieratio per leeftijd en kanaal</h3>
+      <div class="dm-wrap"><table class="dm-table">
+        <thead><tr><th></th>${head}<th class="right">Alle kanalen</th></tr></thead>
+        <tbody>${body}${foot}</tbody>
+      </table></div>
+      <p class="source-line">${escapeHtml(doelNaam.charAt(0).toUpperCase() + doelNaam.slice(1))} per sessie, met het aantal sessies eronder. Groen ligt minstens 20% boven het gemiddelde van ${webFmt.pct2(avgRate)}, rood minstens 20% eronder; de omlijnde cel is de beste combinatie. Een punt betekent te weinig sessies voor een ratio. Kanalen zijn samengevat in dezelfde groepen als de donut onder Kanalen.</p>`;
+  }
+
   function renderWebsiteNotes() {
     const w = state.website;
     const e = w.current.errors || {};
@@ -6371,6 +6547,8 @@
     add("GA4-bronnen", e.ga4Sources);
     add("GA4-landingspagina's", e.ga4Landing);
     add("GA4-funnel", e.ga4Funnel);
+    add("GA4-doelgroep", e.ga4Demo);
+    add("GA4-doelgroep (hoofddoel)", e.ga4DemoGoal);
     add("Search Console", e.gscTotals || e.gscEmpty);
     add("Search Console — zoekopdrachten", e.gscQueries);
     add("Search Console — pagina's", e.gscPages);
@@ -6388,7 +6566,7 @@
     // live route. Een verschil met GA4's eigen interface is meestal hiermee te
     // verklaren, dus het hoort zichtbaar te zijn.
     const origin = w.current.origin || {};
-    const labels = { totals: "kerncijfers", channels: "kanalen", landingPages: "landingspagina's", search: "organisch zoeken", queries: "zoekopdrachten" };
+    const labels = { totals: "kerncijfers", channels: "kanalen", demographics: "doelgroep", landingPages: "landingspagina's", search: "organisch zoeken", queries: "zoekopdrachten" };
     const fromSheet = Object.keys(labels).filter(k => origin[k] === "sheet");
     const fromApi = Object.keys(labels).filter(k => origin[k] === "api");
     const ds = w.dataSheet || {};
@@ -6399,7 +6577,7 @@
     // Per blok dat terugviel op de API: waaróm de sheet afviel.
     const cov = w.current.sheetCoverage || {};
     const tabLabels = {
-      ga4Daily: "kerncijfers", ga4Channel: "kanalen", ga4Landing: "landingspagina's",
+      ga4Daily: "kerncijfers", ga4Channel: "kanalen", ga4Landing: "landingspagina's", ga4Demo: "doelgroep",
       gscDaily: "organisch zoeken", gscQuery: "zoekopdrachten",
     };
     const covMsgs = Object.entries(cov)
@@ -7811,6 +7989,7 @@
       websiteFunnel:     () => renderWebsiteFunnel(),
       websiteSearch:     () => renderWebsiteSearch(),
       websiteAudience:   () => renderWebsiteAudience(),
+      websiteDemo:       () => renderWebsiteDemo(),
       websiteNotes:      () => renderWebsiteNotes(),
       roasHero:          () => renderRoasHero(),
       roasDaily:         () => renderRoasDailyChart(),
