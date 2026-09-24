@@ -24,7 +24,7 @@
       "maxDuration": 60
     },
     "api/windsor.js": {
-      "maxDuration": 60
+      "maxDuration": 150
     },
     "api/seo.js": {
       "maxDuration": 60

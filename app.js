@@ -465,6 +465,7 @@
     "#top-posts", "#lib-results", "#analysis-content", "#website-content",
     "#seo-content", "#geo-content", "#roas-content", "#email-content",
     "#report-content", "#chat-body",
+    "#ads-table", "#ads-funnel", "#ads-creative", "#ads-demo",
   ];
 
   function clearRenderedData() {
@@ -1257,7 +1258,17 @@
       adName: String(raw.ad_name || ""),
       campaignId: String(raw.campaign_id || ""),
       campaignName: String(raw.campaign_name || ""),
-      thumb: typeof raw.image_url === "string" ? raw.image_url : "",
+      thumb: typeof raw.image_url === "string" && raw.image_url ? raw.image_url
+        : (typeof raw.thumbnail_url === "string" ? raw.thumbnail_url : ""),
+      // Advertentietekst (gewone advertentie). De CTA-type en `link` waren in de
+      // test leeg; `website_destination_url` en de CTA-asset vullen dat aan.
+      adTitle: String(raw.title || ""),
+      adBody: String(raw.body || ""),
+      cta: String(raw.call_to_action_type || ""),
+      link: String(raw.website_destination_url || raw.link || ""),
+      // Niet optelbaar: per advertentie zoals Meta hem over de periode ontdubbelt.
+      frequency: raw.frequency != null && raw.frequency !== "" ? Number(raw.frequency) || null : null,
+      igProfileVisits: Number(raw.instagram_profile_visits) || 0,
       // Creative-type (geverifieerde Windsor-velden) — bepaalt het getoonde ad-type.
       igMediaType: String(raw.effective_instagram_media__media_type || ""),
       igProductType: String(raw.effective_instagram_media__media_product_type || ""),
@@ -1280,10 +1291,19 @@
       vp95:   numFromAction(raw.video_p95_watched_actions_video_view ?? raw.video_p95_watched_actions),
       vp100:  numFromAction(raw.video_p100_watched_actions_video_view ?? raw.video_p100_watched_actions),
       vplays: numFromAction(raw.video_play_actions_video_view ?? raw.video_play_actions),
+      avgWatch: raw.video_avg_time_watched_actions_video_view != null
+        ? numFromAction(raw.video_avg_time_watched_actions_video_view) : null,
       // Conversies — voor ROAS (waarde) en CAC (aantal). 0 als de klant niet trackt.
-      purchases:     numFromAction(raw.actions_purchase) + numFromAction(raw.actions_omni_purchase),
-      purchaseValue: numFromAction(raw.action_values_purchase) + numFromAction(raw.action_values_omni_purchase),
+      // Eén definitie: omni (web + app + offline) waar Meta hem levert, anders het
+      // gewone veld. Nooit optellen — omni bevat de gewone aankopen al, en de som
+      // telde elke webaankoop dubbel.
+      purchases:     numFromAction(raw.actions_omni_purchase ?? raw.actions_purchase),
+      purchaseValue: numFromAction(raw.action_values_omni_purchase ?? raw.action_values_purchase),
       leads:         numFromAction(raw.actions_lead),
+      addToCart:      numFromAction(raw.actions_omni_add_to_cart),
+      addToCartValue: numFromAction(raw.action_values_omni_add_to_cart),
+      checkouts:      numFromAction(raw.actions_initiate_checkout),
+      checkoutValue:  numFromAction(raw.action_values_initiate_checkout),
     };
   }
 
@@ -1318,12 +1338,18 @@
     return "Advertentie"; // type onbekend → neutrale fallback
   }
 
-  function aggregateWindsorAds(adsRows) {
+  // `extra` = raw.adsExtra uit getDashboard: campagnedoel per naam en de creatieve
+  // varianten per advertentie. Beide optioneel.
+  function aggregateWindsorAds(adsRows, extra = {}) {
+    const objectives = extra.objectives || {};
+    const assets = extra.assets || {};
     const groups = {};
     for (const r of adsRows) {
       if (!r) continue;
-      const isAd = !!r.adId;
-      const id = isAd ? r.adId : (r.campaignId || r.campaignName || "onbekend");
+      // Een sheettab kan ad_name hebben zonder ad_id. Dan groeperen we op naam;
+      // anders viel elke advertentie samen tot één kaart 'onbekend'.
+      const isAd = !!(r.adId || r.adName);
+      const id = r.adId || (r.adName ? `naam:${r.adName}` : (r.campaignId || r.campaignName || "onbekend"));
       const g = groups[id] || (groups[id] = {
         id, isAd,
         name: isAd ? (r.adName || id) : (r.campaignName || id),
@@ -1333,6 +1359,9 @@
         likes: 0, comments: 0, shares: 0, saves: 0,
         vp25: 0, vp50: 0, vp75: 0, vp95: 0, vp100: 0, vplays: 0,
         purchases: 0, purchaseValue: 0, leads: 0,
+        addToCart: 0, addToCartValue: 0, checkouts: 0, checkoutValue: 0, igProfileVisits: 0,
+        adTitle: "", adBody: "", cta: "", link: "",
+        freqRows: 0, frequency: null, watchWeighted: 0, watchPlays: 0,
       });
       g.reach += r.reach || 0;
       g.impressions += r.impressions || 0;
@@ -1343,6 +1372,19 @@
       g.vp25 += r.vp25 || 0; g.vp50 += r.vp50 || 0; g.vp75 += r.vp75 || 0;
       g.vp95 += r.vp95 || 0; g.vp100 += r.vp100 || 0; g.vplays += r.vplays || 0;
       g.purchases += r.purchases || 0; g.purchaseValue += r.purchaseValue || 0; g.leads += r.leads || 0;
+      g.addToCart += r.addToCart || 0; g.addToCartValue += r.addToCartValue || 0;
+      g.checkouts += r.checkouts || 0; g.checkoutValue += r.checkoutValue || 0;
+      g.igProfileVisits += r.igProfileVisits || 0;
+      // Frequentie is een ratio over ontdubbelde personen. Alleen overnemen als de
+      // groep uit precies één rij bestaat (ad-niveau, zonder datum); bij meer rijen
+      // (campagne per dag) is er geen juist getal te maken.
+      if (r.frequency != null) { g.freqRows++; g.frequency = r.frequency; }
+      // Kijktijd is een gemiddelde per play → wegen naar plays, niet middelen.
+      if (r.avgWatch != null && r.vplays > 0) { g.watchWeighted += r.avgWatch * r.vplays; g.watchPlays += r.vplays; }
+      if (!g.adTitle && r.adTitle) g.adTitle = r.adTitle;
+      if (!g.adBody && r.adBody) g.adBody = r.adBody;
+      if (!g.cta && r.cta) g.cta = r.cta;
+      if (!g.link && r.link) g.link = r.link;
       if (!g.campaign && r.campaignName) g.campaign = r.campaignName;
       if (!g.thumb && r.thumb) g.thumb = r.thumb;
       // Creative-type is constant per advertentie — eerste niet-lege waarde volstaat.
@@ -1359,6 +1401,9 @@
       // Paid-conversiemetrics. CAC = spend / #acquisities (purchases indien aanwezig, anders
       // leads — "automatisch"). ROAS = aankoopwaarde / spend. null als er geen conversiedata is.
       const conversions = g.purchases > 0 ? g.purchases : g.leads;
+      const variants = g.isAd ? (assets[g.id] || null) : null;
+      // CTA: het gewone veld, anders de (enige of grootste) CTA-asset.
+      const cta = g.cta || (variants?.cta?.[0]?.value || "");
       const cac = (g.spend > 0 && conversions > 0) ? g.spend / conversions : null;
       const roas = (g.spend > 0 && g.purchaseValue > 0) ? g.purchaseValue / g.spend : null;
       // Retentiecurve (Blok F): percentage van video-plays dat elk checkpoint haalt.
@@ -1382,12 +1427,20 @@
         likes: g.likes, comments: g.comments, shares: g.shares, saves: g.saves,
         clicks: g.clicks, views: g.vplays,
         interactions, engagement, ctr, cpm,
-        avgWatchTime: 0, spend: g.spend,
+        avgWatchTime: g.watchPlays > 0 ? g.watchWeighted / g.watchPlays : 0, spend: g.spend,
+        frequency: g.freqRows === 1 ? g.frequency : null,
+        objective: objectives[g.campaign] || (!g.isAd ? (objectives[g.id] || objectives[g.name] || "") : ""),
+        adTitle: g.adTitle, adBody: g.adBody, cta, link: g.link,
+        variants,
+        addToCart: g.addToCart, addToCartValue: g.addToCartValue,
+        checkouts: g.checkouts, checkoutValue: g.checkoutValue,
+        igProfileVisits: g.igProfileVisits,
         // Paid-conversiemetrics (null = geen data → UI toont "—").
         purchases: g.purchases, purchaseValue: g.purchaseValue, leads: g.leads,
         cac, roas, conversions: conversions || 0,
         retention,
-        caption: g.name, thumb: g.thumb, url: "",
+        // url = de landingspagina: een klik in de Library opent waar de advertentie heen stuurt.
+        caption: g.name, thumb: g.thumb, url: g.link || "",
       };
     });
   }
@@ -1406,7 +1459,8 @@
     const allPosts = [...igPosts, ...fbPosts]; // IG + FB organic
     classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
     // Library: per advertentie zodra de ad-level fetch rijen gaf; anders fallback per campagne.
-    const adsCampaigns = aggregateWindsorAds(adsAdRows.length ? adsAdRows : adsRows);
+    const adsExtra = raw.adsExtra || {};
+    const adsCampaigns = aggregateWindsorAds(adsAdRows.length ? adsAdRows : adsRows, adsExtra);
     classifyAdsPerformance(adsCampaigns); // paid-classifier (ROAS of CTR/CPM, automatisch)
 
     const curAgg = aggregatePosts(allPosts);
@@ -1519,6 +1573,14 @@
       adsCampaigns, // geaggregeerde campagne-cards uit daily rows (Blok B)
       adsLoading: false, // Windsor levert ads in dezelfde call → geen aparte wachttijd
       adLevelWindow: raw.adLevelWindow || null, // venster dat de ad-detail dekt (Hobby-cap)
+      // Accountbereik, demografie en regio (null = niet gemeten). Zie getDashboard.
+      adsExtra: {
+        accountReach: adsExtra.accountReach || null,
+        accountReachPrev: adsExtra.accountReachPrev || null,
+        demographics: adsExtra.demographics || null,
+        regions: adsExtra.regions || null,
+        errors: raw.errors || {},
+      },
       _raw: raw,
       _source: "windsor",
     };
@@ -1675,6 +1737,9 @@
     renderTopPosts();
     renderCadence();
     renderAdsTable();
+    renderAdsFunnel();
+    renderAdsCreative();
+    renderAdsDemo();
     renderLibrary();
   }
 
@@ -2161,7 +2226,7 @@
     if (kop) {
       kop.innerHTML = rev
         ? `€ ${fmt.int(Math.round(spend))} aan advertenties bracht <b>€ ${fmt.int(Math.round(rev))}</b> op`
-        : `<b>${camps.length} campagnes</b> in deze periode, samen € ${fmt.int(Math.round(spend))}`;
+        : `<b>${camps.length} ${camps.some(c => c.isAd) ? "advertenties" : "campagnes"}</b> in deze periode, samen € ${fmt.int(Math.round(spend))}`;
     }
     camps.sort((a, b) => (b.spend || 0) - (a.spend || 0));
     const rijen = camps.slice(0, 12).map(c => {
@@ -2170,25 +2235,323 @@
         : (c.performance === "Bad" ? `<span class="neg">zwak</span>`
         : (c.performance ? "gemiddeld" : `<span style="color:var(--fg-muted);">te klein</span>`));
       return `<tr>
-        <td>${escapeHtml(c.name || "—")}</td>
+        <td>${escapeHtml(c.caption || c.name || "—")}${c.isAd && c.subtitle ? `<br><span class="muted" style="font-size:11px;">${escapeHtml(c.subtitle)}</span>` : ""}</td>
         <td>€ ${fmt.int(Math.round(c.spend || 0))}</td>
         <td>${fmt.int(c.impressions || c.reach || 0)}</td>
         <td>${c.ctr != null ? c.ctr.toFixed(2).replace(".", ",") + "%" : "—"}</td>
         <td>${roas != null ? roas.toFixed(1).replace(".", ",") + "×" : "—"}</td>
+        <td>${c.frequency != null ? fmtFreq(c.frequency) : "—"}</td>
+        <td>${c.objective ? escapeHtml(objectiveLabel(c.objective)) : "—"}</td>
         <td>${oordeel}</td>
       </tr>`;
     }).join("");
     root.innerHTML = `<div class="report-table">
       <table>
         <thead><tr>
-          <th>Campagne</th><th>Kosten</th><th>Vertoningen</th><th>CTR</th><th>ROAS</th><th>Oordeel</th>
+          <th>${camps.some(c => c.isAd) ? "Advertentie" : "Campagne"}</th><th>Kosten</th><th>Vertoningen</th><th>CTR</th><th>ROAS</th><th>Freq.</th><th>Doel</th><th>Oordeel</th>
         </tr></thead>
         <tbody>${rijen}</tbody>
       </table>
     </div>
-    <p class="source-line">Bron: Windsor.ai, connector <b>facebook</b> (Meta Ads) · ${camps.length} campagnes, ${metKosten} met kosten`
+    <p class="source-line">Bron: Windsor.ai, connector <b>facebook</b> (Meta Ads) · ${camps.length} ${camps.some(c => c.isAd) ? "advertenties" : "campagnes"}, ${metKosten} met kosten`
       + `${camps.length > 12 ? ` · de twaalf met de hoogste kosten staan hier` : ""}. `
-      + `Het oordeel vergelijkt binnen deze periode tegen de mediaan; bij minder dan vijf campagnes zegt dat te weinig.</p>`;
+      + `Het oordeel vergelijkt binnen deze periode tegen de mediaan; bij minder dan vijf campagnes zegt dat te weinig. `
+      + `Frequentie = hoe vaak één persoon de advertentie gemiddeld zag; doel = het campagnedoel in Ads Manager.</p>`;
+  }
+
+  /* ---------- Meta Ads: funnel, creatie en doelgroep ----------
+     Drie blokken onder de campagnetabel. Twee regels lopen er doorheen:
+       1. Eén aankoopdefinitie. Funnel en creatie gebruiken omni (web + app +
+          offline). Demografie, regio en assetvarianten kunnen dat niet — Meta
+          weigert die breakdowns met omni-velden — en tonen daarom alléén
+          aandelen, nooit een absoluut aantal naast de omni-totalen.
+       2. Onbekend is geen nul. Een blok zonder data zegt waarom, en een ratio
+          zonder noemer wordt een streepje. */
+
+  const OBJECTIVE_LABELS = {
+    OUTCOME_SALES: "Verkoop", OUTCOME_LEADS: "Leads", OUTCOME_TRAFFIC: "Verkeer",
+    OUTCOME_ENGAGEMENT: "Interactie", OUTCOME_AWARENESS: "Bekendheid", OUTCOME_APP_PROMOTION: "App-promotie",
+    CONVERSIONS: "Conversies", LINK_CLICKS: "Linkkliks", REACH: "Bereik", BRAND_AWARENESS: "Bekendheid",
+    POST_ENGAGEMENT: "Interactie", VIDEO_VIEWS: "Videoweergaven", LEAD_GENERATION: "Leads",
+    MESSAGES: "Berichten", PRODUCT_CATALOG_SALES: "Catalogusverkoop", APP_INSTALLS: "App-installaties",
+  };
+  const CTA_LABELS = {
+    SIGN_UP: "Inschrijven", DOWNLOAD: "Downloaden", SHOP_NOW: "Nu kopen", LEARN_MORE: "Meer info",
+    BOOK_TRAVEL: "Boeken", BOOK_NOW: "Nu boeken", CONTACT_US: "Contact opnemen", APPLY_NOW: "Nu aanvragen",
+    SUBSCRIBE: "Abonneren", GET_OFFER: "Aanbieding bekijken", ORDER_NOW: "Nu bestellen",
+    SEND_MESSAGE: "Bericht sturen", WHATSAPP_MESSAGE: "WhatsApp", GET_QUOTE: "Offerte aanvragen",
+    WATCH_MORE: "Meer bekijken", SEE_MORE: "Meer bekijken", BUY_NOW: "Nu kopen", CALL_NOW: "Nu bellen",
+    NO_BUTTON: "Geen knop",
+  };
+  const humanCode = (v) => String(v || "").toLowerCase().replace(/_/g, " ").replace(/^./, c => c.toUpperCase());
+  const objectiveLabel = (v) => OBJECTIVE_LABELS[v] || humanCode(v);
+  const ctaLabel = (v) => CTA_LABELS[v] || humanCode(v);
+  const fmtFreq = (n) => n.toFixed(2).replace(".", ",") + "×";
+  const fmtShare = (n) => (n == null || !isFinite(n)) ? "—" : n.toFixed(n < 10 ? 1 : 0).replace(".", ",") + "%";
+  const fmtEur = (n) => n == null ? "—" : "€ " + (n < 100 ? n.toFixed(2).replace(".", ",") : fmt.int(n));
+  const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+
+  // Advertenties waar de funnel/creatie over gaat: ad-niveau als dat er is,
+  // anders de campagnes (fallback wanneer de ad-level fetch faalde).
+  function adsForBlocks() {
+    const ov = state.overview;
+    return (ov?.adsCampaigns || []).filter(c => c && (c.spend || c.impressions));
+  }
+
+  function adsWindowNote() {
+    const win = state.overview?.adLevelWindow;
+    return win ? ` Advertentiedetail dekt de laatste ${win.maxDays} dagen (${win.startDate} → ${win.endDate}).` : "";
+  }
+
+  function adsBlockHead(eyebrow, title, lede) {
+    return `<div class="report-head" style="margin-top:0;">
+      <p class="eyebrow">${escapeHtml(eyebrow)}</p>
+      <h2 class="report-title" style="font-size:28px;">${title}</h2>
+      ${lede ? `<p class="report-lede">${lede}</p>` : ""}
+    </div>`;
+  }
+
+  function renderAdsFunnel() {
+    const root = $("#ads-funnel");
+    if (!root) return;
+    const ov = state.overview;
+    if (!ov || state.overviewLoading) { root.innerHTML = ""; return; }
+    const ads = adsForBlocks();
+    if (!ads.length) { root.innerHTML = ""; return; }
+
+    const sum = (k) => ads.reduce((a, c) => a + (c[k] || 0), 0);
+    const spend = sum("spend");
+    const steps = [
+      { label: "Vertoningen", n: sum("impressions") },
+      { label: "Kliks", n: sum("clicks") },
+      { label: "Winkelmand", n: sum("addToCart"), value: sum("addToCartValue") },
+      { label: "Afrekenen", n: sum("checkouts"), value: sum("checkoutValue") },
+      { label: "Aankoop", n: sum("purchases"), value: sum("purchaseValue") },
+    ];
+    const leads = sum("leads"), visits = sum("igProfileVisits");
+    const heeftFunnel = steps.slice(2).some(s => s.n > 0);
+    // Zonder webshopfunnel maar mét leads: drie kaarten 'niet gemeten' zijn ruis.
+    // Dan wordt de funnel vertoning → klik → lead.
+    if (!heeftFunnel && leads > 0) steps.splice(2, 3, { label: "Leads", n: leads });
+    const leadFunnel = !heeftFunnel && leads > 0;
+
+    const cards = steps.map((s, i) => {
+      const prev = i > 0 ? steps[i - 1].n : 0;
+      // Stap-conversie tegen de vorige stap. Boven 100% kan (afrekenen zonder
+      // winkelmand, bv. een directe checkout-link) — dat tonen we zoals het is.
+      const stap = i > 0 && prev > 0 ? (s.n / prev) * 100 : null;
+      const kost = i > 0 && s.n > 0 ? spend / s.n : null;
+      const leeg = i >= 2 && !heeftFunnel && !leadFunnel;
+      return `<div class="kpi-card">
+        <div class="label">${escapeHtml(s.label)}</div>
+        <div class="kpi-value" style="font-size:28px;">${leeg ? "—" : fmt.int(s.n)}</div>
+        <div class="source-line" style="margin:0;">
+          ${i === 0 ? `${fmtEur(spend)} uitgegeven`
+            : leeg ? "niet gemeten"
+            : `${stap != null ? `${fmtShare(stap)} van vorige stap` : "—"} · ${kost != null ? `${fmtEur(kost)} per stuk` : "—"}`}
+          ${s.value ? `<br>waarde ${fmtEur(s.value)}` : ""}
+        </div>
+      </div>`;
+    }).join("");
+
+    const ar = ov.adsExtra?.accountReach, arPrev = ov.adsExtra?.accountReachPrev;
+    const freqLine = ar
+      ? `Over de hele periode zag één persoon je advertenties gemiddeld <b>${fmtFreq(ar.frequency)}</b>`
+        + ` (${fmt.int(ar.reach)} personen bereikt${arPrev ? `; vorige periode ${fmtFreq(arPrev.frequency)}` : ""}).`
+      : "";
+    const roas = spend > 0 && sum("purchaseValue") > 0 ? sum("purchaseValue") / spend : null;
+    const titel = heeftFunnel
+      ? `${fmt.int(steps[1].n)} kliks werden <b>${fmt.int(steps[4].n)} aankopen</b>${roas != null ? `, ROAS ${roas.toFixed(2).replace(".", ",")}×` : ""}`
+      : (leadFunnel ? `${fmt.int(steps[1].n)} kliks leverden <b>${fmt.int(leads)} leads</b>` : `${fmt.int(steps[1].n)} kliks, geen conversies gemeten`);
+
+    root.innerHTML = adsBlockHead("Funnel", titel,
+      "Van vertoning tot aankoop, met het aandeel dat elke stap haalt en wat een stap kost.")
+      + `<div class="kpi-grid">${cards}</div>`
+      + `<p class="source-line">${freqLine ? freqLine + " " : ""}`
+      + `${leads > 0 && !leadFunnel ? `Leads: <b>${fmt.int(leads)}</b> (${fmtEur(spend / leads)} per lead). ` : ""}`
+      + `${visits > 0 ? `Instagram-profielbezoeken via advertenties: <b>${fmt.int(visits)}</b>. ` : ""}`
+      + `Aankopen en winkelmandjes zijn Meta's omni-cijfers (web, app en offline samen); afrekenen heeft geen omni-variant.`
+      + `${heeftFunnel ? "" : " Er kwam geen winkelmand-, afreken- of aankoopdata binnen: de pixel meet die stappen niet, of ze zijn in deze periode niet gebeurd."}`
+      + `${leadFunnel ? " Daarom loopt de funnel hier van klik naar lead." : ""}`
+      + `${adsWindowNote()}</p>`;
+  }
+
+  // Varianten van één assettype als kleine tabel. Conversies staan er als aandeel
+  // binnen de advertentie, want het zijn de gewone (niet-omni) velden.
+  function renderAssetVariants(key, list) {
+    if (!list || list.length < 2) return "";
+    const LABEL = { title: "Titels", body: "Teksten", cta: "Knoppen", image: "Afbeeldingen", video: "Video's" };
+    const impr = list.reduce((a, v) => a + v.impressions, 0);
+    const conv = list.reduce((a, v) => a + (v.purchases || 0), 0);
+    const leads = list.reduce((a, v) => a + (v.leads || 0), 0);
+    const doel = conv > 0 ? "purchases" : (leads > 0 ? "leads" : null);
+    const doelTot = doel === "purchases" ? conv : leads;
+    const rijen = list.slice(0, 5).map(v => {
+      let cel;
+      if (key === "image") {
+        const u = safeUrl(v.value);
+        cel = u.startsWith("http") ? `<img src="${escapeHtml(u)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="width:40px; height:40px; object-fit:cover; border-radius:6px; vertical-align:middle;">` : "—";
+      } else if (key === "cta") {
+        cel = escapeHtml(ctaLabel(v.value));
+      } else {
+        const t = String(v.value).replace(/\s+/g, " ");
+        cel = `<span title="${escapeHtml(t)}">${escapeHtml(t.length > 70 ? t.slice(0, 70) + "…" : t)}</span>`;
+      }
+      const ctr = v.impressions ? (v.clicks / v.impressions) * 100 : null;
+      return `<tr><td>${cel}</td>
+        <td>${fmtShare(impr ? (v.impressions / impr) * 100 : null)}</td>
+        <td>${ctr != null ? ctr.toFixed(2).replace(".", ",") + "%" : "—"}</td>
+        ${doel ? `<td>${fmtShare(doelTot ? ((v[doel] || 0) / doelTot) * 100 : null)}</td>` : ""}</tr>`;
+    }).join("");
+    return `<div class="report-table" style="padding:4px 10px;">
+      <table><thead><tr><th>${LABEL[key]} (${list.length})</th><th>Vertoningen</th><th>CTR</th>
+        ${doel ? `<th title="Aandeel van de ${doelTot} ${doel === "purchases" ? "aankopen" : "leads"} van deze advertentie">${doel === "purchases" ? "Aankopen" : "Leads"}${doelTot < 20 ? (doel === "leads" ? ` (n=${doelTot})` : " · weinig data") : ""}</th>` : ""}</tr></thead>
+      <tbody>${rijen}</tbody></table></div>`;
+  }
+
+  function renderAdsCreative() {
+    const root = $("#ads-creative");
+    if (!root) return;
+    const ov = state.overview;
+    if (!ov || state.overviewLoading) { root.innerHTML = ""; return; }
+    const ads = adsForBlocks().filter(a => a.isAd);
+    if (!ads.length) { root.innerHTML = ""; return; }
+    const top = [...ads].sort((a, b) => (b.spend || 0) - (a.spend || 0)).slice(0, 6);
+    const metVarianten = ads.filter(a => a.variants && Object.values(a.variants).some(l => l.length > 1)).length;
+
+    const cards = top.map((a, i) => {
+      const t = libThumb(a, i);
+      const body = String(a.adBody || "").replace(/\s+/g, " ").trim();
+      const link = safeUrl(a.link);
+      const host = link.startsWith("http") ? hostOf(link) : "";
+      const doel = a.purchases > 0 ? `${fmt.int(a.purchases)} aankopen` : (a.leads > 0 ? `${fmt.int(a.leads)} leads` : "geen conversies");
+      const varianten = a.variants
+        ? ["title", "body", "cta", "image", "video"].map(k => renderAssetVariants(k, a.variants[k])).join("")
+        : "";
+      return `<article class="creative-card">
+        <div class="creative-top">
+          <span class="creative-thumb thumb-pattern" style="background:${t.bg}">${t.imgHtml}</span>
+          <div style="min-width:0;">
+            <div class="creative-name">${escapeHtml(a.caption || "—")}</div>
+            <div class="panel-sub" style="margin-top:2px;">${escapeHtml(a.type)}${a.subtitle ? ` · ${escapeHtml(a.subtitle)}` : ""}${a.objective ? ` · doel: ${escapeHtml(objectiveLabel(a.objective))}` : ""}</div>
+          </div>
+        </div>
+        ${a.adTitle ? `<p class="creative-title">${escapeHtml(a.adTitle)}</p>` : ""}
+        ${body ? `<p class="creative-body">${escapeHtml(body.length > 260 ? body.slice(0, 260) + "…" : body)}</p>` : ""}
+        <div class="creative-meta">
+          ${a.cta ? `<span class="pill">${escapeHtml(ctaLabel(a.cta))}</span>` : ""}
+          ${host ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(host)} ↗</a>` : ""}
+        </div>
+        <div class="creative-stats">
+          <span><b>${fmtEur(a.spend)}</b> kosten</span>
+          <span><b>${(a.ctr || 0).toFixed(2).replace(".", ",")}%</b> CTR</span>
+          ${a.frequency != null ? `<span><b>${fmtFreq(a.frequency)}</b> freq.</span>` : ""}
+          ${a.avgWatchTime > 0 ? `<span><b>${a.avgWatchTime.toFixed(1).replace(".", ",")}s</b> gem. kijktijd</span>` : ""}
+          <span><b>${doel}</b></span>
+        </div>
+        ${varianten}
+      </article>`;
+    }).join("");
+
+    root.innerHTML = adsBlockHead("Creatie",
+      `Wat de ${top.length} grootste advertenties zeiden`,
+      "Titel, tekst en knop per advertentie. Bij Dynamic Creative en Advantage+ creative staan de varianten eronder, met hun aandeel in vertoningen en conversies.")
+      + `<div class="creative-grid">${cards}</div>`
+      + `<p class="source-line">Gesorteerd op kosten. ${metVarianten
+        ? `${metVarianten} advertentie${metVarianten === 1 ? "" : "s"} met meerdere varianten. Conversies per variant zijn Meta's gewone (niet-omni) aankopen en staan daarom alleen als aandeel.`
+        : "Geen advertenties met meerdere creatieve varianten in deze periode."}${adsWindowNote()}</p>`;
+  }
+
+  const AGE_ORDER = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"];
+  const GENDER_LABEL = { female: "Vrouwen", male: "Mannen", unknown: "Onbekend" };
+
+  function renderAdsDemo() {
+    const root = $("#ads-demo");
+    if (!root) return;
+    const ov = state.overview;
+    if (!ov || state.overviewLoading) { root.innerHTML = ""; return; }
+    const demo = ov.adsExtra?.demographics;
+    const regions = ov.adsExtra?.regions;
+    if (!demo || !demo.length) {
+      const err = ov.adsExtra?.errors?.adsDemo;
+      root.innerHTML = adsForBlocks().length
+        ? adsBlockHead("Doelgroep", "Geen demografische data", "")
+          + `<p class="source-line">${err ? `Meta gaf een fout: ${escapeHtml(err)}` : "Meta leverde geen uitsplitsing naar leeftijd en geslacht voor deze periode."}</p>`
+        : "";
+      return;
+    }
+
+    const sum = (rows, k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+    // Doelactie: de verste funnelstap waar iets gemeten is.
+    const DOELEN = [["purchases", "aankopen"], ["leads", "leads"], ["addToCart", "winkelmandjes"], ["clicks", "kliks"]];
+    const [doelKey, doelNaam] = DOELEN.find(([k]) => sum(demo, k) > 0) || ["clicks", "kliks"];
+    const tot = { spend: sum(demo, "spend"), impressions: sum(demo, "impressions"), doel: sum(demo, doelKey) };
+    const share = (n, d) => d > 0 ? (n / d) * 100 : null;
+
+    const rows = demo.map(r => ({
+      ...r,
+      label: `${GENDER_LABEL[r.gender] || humanCode(r.gender)} ${r.age === "Unknown" ? "(leeftijd onbekend)" : r.age}`,
+      sSpend: share(r.spend, tot.spend),
+      sImpr: share(r.impressions, tot.impressions),
+      sDoel: share(r[doelKey] || 0, tot.doel),
+    }));
+    // Index = aandeel in het doel gedeeld door aandeel in de kosten. Boven 1 levert
+    // de groep meer op dan hij kost.
+    rows.forEach(r => { r.index = r.sSpend > 0 && r.sDoel != null ? r.sDoel / r.sSpend : null; });
+    rows.sort((a, b) => (b.sDoel || 0) - (a.sDoel || 0) || (b.sSpend || 0) - (a.sSpend || 0));
+
+    const top = rows.filter(r => (r.sDoel || 0) > 0).slice(0, 3);
+    const titel = top.length
+      ? `${escapeHtml(top[0].label)}: <b>${fmtShare(top[0].sDoel)} van de ${doelNaam}</b>`
+      : "Doelgroep naar leeftijd en geslacht";
+    const lede = top.length
+      ? top.map(r => `${escapeHtml(r.label)} ${fmtShare(r.sDoel)} van de ${doelNaam} bij ${fmtShare(r.sSpend)} van de kosten`).join(" · ")
+      : "";
+
+    // Geslacht los, want dat is de vraag die het vaakst gesteld wordt.
+    const perGender = ["female", "male", "unknown"].map(g => {
+      const gr = demo.filter(r => r.gender === g);
+      return gr.length ? `${GENDER_LABEL[g]} ${fmtShare(share(sum(gr, doelKey), tot.doel))} van de ${doelNaam}, ${fmtShare(share(sum(gr, "spend"), tot.spend))} van de kosten` : "";
+    }).filter(Boolean).join(" · ");
+
+    // Leads en kliks zijn hetzelfde veld als in de totalen, dus een aantal mag.
+    // Aankopen en winkelmandjes zijn hier niet-omni: geen getal, alleen een waarschuwing.
+    const sampleNote = (doelKey === "leads" || doelKey === "clicks")
+      ? ` (n=${fmt.int(tot.doel)})` : (tot.doel < 30 ? " · weinig data" : "");
+    const zichtbaar = rows.filter(r => (r.sSpend || 0) >= 0.5 || (r.sDoel || 0) > 0).slice(0, 14);
+    const indexCel = (r) => r.index == null || !tot.doel ? "—"
+      : `<span class="${r.index >= 1.2 ? "pos" : r.index <= 0.8 ? "neg" : ""}">${r.index.toFixed(2).replace(".", ",")}</span>`;
+    const tabel = `<div class="report-table"><table>
+      <thead><tr><th>Groep</th><th>Kosten</th><th>Vertoningen</th><th>${escapeHtml(doelNaam)}${sampleNote}</th><th>Index</th></tr></thead>
+      <tbody>${zichtbaar.map(r => `<tr>
+        <td>${escapeHtml(r.label)}</td><td>${fmtShare(r.sSpend)}</td><td>${fmtShare(r.sImpr)}</td>
+        <td>${fmtShare(r.sDoel)}</td><td>${indexCel(r)}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+
+    // Regio. Meta vult de conversies per regio soms met nullen waar leeftijd/
+    // geslacht wel aankopen tonen; dan is 'geen conversies' een meetgat, geen feit.
+    let regioHtml = "";
+    if (regions && regions.length) {
+      const rDoelKey = doelKey === "purchases" || doelKey === "leads" ? doelKey : null;
+      const rTot = { spend: sum(regions, "spend"), doel: rDoelKey ? sum(regions, rDoelKey) : 0 };
+      const regioConvGat = rDoelKey && tot.doel > 0 && rTot.doel === 0;
+      const rRows = [...regions].sort((a, b) => b.spend - a.spend).filter(r => share(r.spend, rTot.spend) >= 0.5).slice(0, 8);
+      regioHtml = `<h3 class="label-head" style="margin-top:28px;">Regio</h3>
+        <div class="report-table"><table>
+          <thead><tr><th>Regio</th><th>Kosten</th>${rDoelKey && !regioConvGat ? `<th>${escapeHtml(doelNaam)}</th>` : ""}</tr></thead>
+          <tbody>${rRows.map(r => `<tr><td>${escapeHtml(r.region === "Unknown" ? "Onbekend" : r.region)}</td>
+            <td>${fmtShare(share(r.spend, rTot.spend))}</td>
+            ${rDoelKey && !regioConvGat ? `<td>${fmtShare(share(r[rDoelKey] || 0, rTot.doel))}</td>` : ""}</tr>`).join("")}</tbody>
+        </table></div>
+        ${regioConvGat ? `<p class="source-line">Meta levert voor deze klant geen ${doelNaam} per regio (alles 0, terwijl leeftijd en geslacht er wel tonen). Daarom alleen de kosten.</p>` : ""}`;
+    }
+
+    root.innerHTML = adsBlockHead("Doelgroep", titel, lede)
+      + `<p class="source-line" style="margin-top:0;">${perGender}</p>`
+      + tabel + regioHtml
+      + `<p class="source-line">Alles als aandeel van het totaal. Meta staat deze uitsplitsing niet toe met omni-velden, dus de ${doelNaam} hier zijn de gewone (niet-omni) cijfers — daarom geen absolute aantallen naast de totalen hierboven. `
+      + `Index = aandeel in de ${doelNaam} gedeeld door aandeel in de kosten: boven 1 levert een groep meer op dan hij kost. Bij een kleine groep volstaat één conversie voor een hoge index. `
+      + `Sinds iOS 14 modelleert Meta een deel van de conversies per groep; lees dit als verdeling, niet als exacte telling.${adsWindowNote()}</p>`;
   }
 
   function bindOverviewTabs() {
@@ -3260,7 +3623,37 @@
         cac: a.cac != null ? +a.cac.toFixed(2) : null,
         purchases: a.purchases || 0,
         leads: a.leads || 0,
+        addToCart: a.addToCart || 0,
+        checkouts: a.checkouts || 0,
+        igProfileVisits: a.igProfileVisits || 0,
+        frequency: a.frequency != null ? +a.frequency.toFixed(2) : null,
+        objective: a.objective ? objectiveLabel(a.objective) : null,
+        avgWatchSec: a.avgWatchTime > 0 ? +a.avgWatchTime.toFixed(1) : null,
       };
+      // Creatie: wat de advertentie zei. Ingekort — het model heeft de strekking
+      // nodig, niet elke regel.
+      if (a.isAd) {
+        if (a.adTitle) out.headline = a.adTitle.slice(0, 120);
+        if (a.adBody) out.bodyText = String(a.adBody).replace(/\s+/g, " ").slice(0, 300);
+        if (a.cta) out.cta = ctaLabel(a.cta);
+        // Varianten: per type alleen als er echt iets te vergelijken valt, met
+        // aandelen (de conversies hier zijn niet-omni en dus geen absolute telling).
+        if (a.variants) {
+          const v = {};
+          for (const [k, list] of Object.entries(a.variants)) {
+            if (!list || list.length < 2) continue;
+            const impr = list.reduce((t, x) => t + x.impressions, 0);
+            const conv = list.reduce((t, x) => t + (x.purchases || x.leads || 0), 0);
+            v[k] = list.slice(0, 4).map(x => ({
+              value: k === "image" ? "(afbeelding)" : String(x.value).replace(/\s+/g, " ").slice(0, 100),
+              impressionShare: impr ? +((x.impressions / impr) * 100).toFixed(1) : null,
+              ctr: x.impressions ? +((x.clicks / x.impressions) * 100).toFixed(2) : null,
+              conversionShare: conv ? +(((x.purchases || x.leads || 0) / conv) * 100).toFixed(1) : null,
+            }));
+          }
+          if (Object.keys(v).length) out.creativeVariants = v;
+        }
+      }
       // Retentie alleen meesturen als de curve daadwerkelijk gevuld is (zie task_3c228fd4).
       if (a.retention && a.retention.p50 != null) {
         out.retention = {
@@ -3281,6 +3674,35 @@
     const tVal   = ads.reduce((s, a) => s + (a.purchaseValue || 0), 0);
     const tConv  = ads.reduce((s, a) => s + (a.conversions || 0), 0);
     const tClicks = ads.reduce((s, a) => s + (a.clicks || 0), 0);
+    const tSum = (k) => ads.reduce((s, a) => s + (a[k] || 0), 0);
+    const extra = state.overview?.adsExtra || {};
+
+    // Demografie als aandelen (zie renderAdsDemo): de doelactie is de verste
+    // funnelstap waar iets gemeten is.
+    let audience = null;
+    if (extra.demographics?.length) {
+      const d = extra.demographics;
+      const sum = (rows, k) => rows.reduce((t, r) => t + (r[k] || 0), 0);
+      const doel = ["purchases", "leads", "addToCart", "clicks"].find(k => sum(d, k) > 0) || "clicks";
+      const tSp = sum(d, "spend"), tD = sum(d, doel);
+      const pct = (n, t) => t > 0 ? +((n / t) * 100).toFixed(1) : null;
+      audience = {
+        goalMetric: doel,
+        note: "Aandelen in %, niet-omni cijfers; niet optellen of vergelijken met de omni-totalen.",
+        groups: d.map(r => ({ age: r.age, gender: r.gender, spendShare: pct(r.spend, tSp), goalShare: pct(r[doel] || 0, tD) }))
+          .filter(g => (g.spendShare || 0) >= 1 || (g.goalShare || 0) > 0)
+          .sort((a, b) => (b.goalShare || 0) - (a.goalShare || 0)).slice(0, 10),
+        byGender: ["female", "male", "unknown"].map(g => {
+          const gr = d.filter(r => r.gender === g);
+          return gr.length ? { gender: g, spendShare: pct(sum(gr, "spend"), tSp), goalShare: pct(sum(gr, doel), tD) } : null;
+        }).filter(Boolean),
+      };
+      if (extra.regions?.length) {
+        const r = extra.regions, rSp = sum(r, "spend");
+        audience.regions = [...r].sort((a, b) => b.spend - a.spend).slice(0, 6)
+          .map(x => ({ region: x.region, spendShare: pct(x.spend, rSp) }));
+      }
+    }
 
     return {
       level: adLevel.length ? "ad" : "campaign",  // welk granulariteitsniveau de data heeft
@@ -3295,6 +3717,17 @@
         cac: (tSpend > 0 && tConv > 0) ? +(tSpend / tConv).toFixed(2) : null,
         conversions: tConv,
       },
+      // Funnel over de advertenties (omni waar het bestaat). Kost per stap = spend / aantal.
+      funnel: {
+        impressions: tImpr, clicks: tClicks,
+        addToCart: tSum("addToCart"), checkouts: tSum("checkouts"),
+        purchases: tSum("purchases"), purchaseValue: +tSum("purchaseValue").toFixed(2),
+        leads: tSum("leads"), igProfileVisits: tSum("igProfileVisits"),
+      },
+      // Ontdubbeld over de hele periode (accountniveau); null = niet gemeten.
+      accountFrequency: extra.accountReach ? +extra.accountReach.frequency.toFixed(2) : null,
+      accountFrequencyPrev: extra.accountReachPrev ? +extra.accountReachPrev.frequency.toFixed(2) : null,
+      audience,
       topByReach: [...ads].sort((a, b) => (b.reach || 0) - (a.reach || 0)).slice(0, 3).map(slimAd),
       bestAdsByEngagement: engAds.slice(0, 3).map(slimAd),
       // Alleen los meesturen als er genoeg ads zijn om best/worst te onderscheiden.

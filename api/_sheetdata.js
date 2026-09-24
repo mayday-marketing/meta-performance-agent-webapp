@@ -523,6 +523,11 @@ const DIMENSION_LEVELS = {
   post:     ['mediaid', 'postid', 'videoid'],
   product:  ['producttitle', 'sku'],
   flow:     ['flowname', 'flowid'],
+  // Meta Ads-breakdowns: dezelfde cijfers per leeftijd/geslacht, regio of
+  // creatieve variant. Zo'n tab mag nooit een totaalvraag beantwoorden.
+  demo:     ['age', 'gender'],
+  geo:      ['region', 'country'],
+  asset:    ['titleassettext', 'bodyassettext', 'calltoactionassetname', 'imageasseturl', 'videoassetvideoname'],
 };
 
 // Kolommen waarop we op periode filteren, in volgorde van voorkeur.

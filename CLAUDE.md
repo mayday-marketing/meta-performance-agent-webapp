@@ -176,6 +176,40 @@ topbar — anders dan de ROAS-tab, die een eigen maandperiode heeft.
   met een id, zodat een aanslag alleen dat blok hertekent — een volledige
   re-render zou het invoerveld vervangen en de focus wegnemen.
 
+## Meta Ads-verrijking (Overview → Advertenties)
+
+Onder de campagnetabel staan drie blokken — funnel, creatie, doelgroep — gevoed
+door extra calls in `getDashboard` (`adsExtra` in de respons). Getest op
+24-09-2026 met BAJA en Spotto.
+
+- **Eén aankoopdefinitie: omni.** `actions_omni_purchase` bevat de gewone
+  aankopen al; de frontend telde ze vroeger op en telde elke webaankoop dubbel.
+  Nu `omni ?? gewoon`, nooit de som. Afrekenen heeft geen omni-veld.
+- **Breakdowns weigeren omni.** Leeftijd/geslacht, regio en de asset-breakdowns
+  geven "incompatible with 'omni' and 'ranking' fields". Die blokken gebruiken
+  dus de gewone velden en tonen **alleen aandelen** — nooit een absoluut aantal
+  aankopen naast de omni-totalen (beslissing eigenaar). Leads en kliks zijn in
+  beide hetzelfde veld; daar mag een `n=` in de kop.
+- **Eén asset-breakdown per call** (titel + body samen = `(#100) invalid
+  combination`), dus vijf asset-calls. Ze vallen terug op een call zonder
+  conversies als Meta de velden weigert, niet bij een timeout.
+- **`call_to_action_type` en `link` zijn in de praktijk leeg**;
+  `website_destination_url` en de CTA-asset (`call_to_action_asset_name`) vullen
+  dat aan.
+- **Twee rondes.** De verrijking start ná de bestaande calls. Negentien tegelijk
+  liet de conversie-call over zijn 35 s gaan; Windsor haalt per call alle
+  accounts van de gedeelde sleutel op. `maxDuration` van `windsor.js` is 150.
+- **Frequentie en bereik** komen uit een call zonder dimensie en zonder datum
+  (ontdubbeld over de periode). Uit een sheet (dagrijen) is dat niet te
+  ontdubbelen → `null`.
+- **Doelgroep volgt het ad-venster** (35 dagen), niet de hele periode: anders
+  stonden er twee leadtotalen op één pagina (87 vs 91).
+- **Regio levert vaak geen conversies**: bij Spotto 0 leads per regio terwijl
+  leeftijd/geslacht er wél tonen. De UI toont dan alleen kosten per regio.
+- **Datasheet zonder `ad_id`.** De Meta Ads-tabs van BAJA en Spotto hebben alleen
+  `ad_name` en een paar tellers. Dan haalt `adLevelCore()` het ad-niveau live op
+  (`skipSheet`), anders valt er niets op te mergen.
+
 ## Datasheet-eerst (api/_sheetdata.js)
 
 Windsor exporteert per klant elke nacht naar een **Windsor.ai-data-sheet**. De

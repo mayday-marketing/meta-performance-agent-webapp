@@ -131,7 +131,9 @@ module.exports = async (req, res) => {
   // 'sc-domain:merk.be'; zonder deze strip matcht de config nooit en blijft de
   // tab leeg).
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').replace(/^sc-domain:/i, '').toLowerCase();
-  async function windsorScoped(connector, fieldsCsv, params, timeout, label) {
+  // opts.skipSheet: sla de datasheet over. Alleen voor de ad-level terugval in
+  // getDashboard: een sheettab zonder ad_id kan geen advertentie-detail leveren.
+  async function windsorScoped(connector, fieldsCsv, params, timeout, label, opts = {}) {
     const sharedMode = hasScopeConfig; // gedeeld Windsor-account (meerdere klanten)
     const wantRaw = scopedAccounts[connector];
     const scopable = ACCOUNT_ID_CONNECTORS.has(connector);
@@ -155,7 +157,7 @@ module.exports = async (req, res) => {
     // regel bestaat omdat één Windsor-sleutel meerdere klanten kan bevatten. Een
     // datasheet hoort per definitie bij één klant, dus daar valt niets te lekken
     // en hoeft er niets geblokkeerd te worden.
-    if (client?.dataSheetId) {
+    if (client?.dataSheetId && !opts.skipSheet) {
       const rows = await getConnectorRows(clientId, connector, fieldsCsv, {
         from: params?.date_from, to: params?.date_to,
       }).catch(e => ({ __error: e.message }));
@@ -317,35 +319,137 @@ module.exports = async (req, res) => {
           'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
           'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
           'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
+          // Gemiddelde kijktijd per play. Niet optelbaar: de frontend weegt hem naar plays.
+          'video_avg_time_watched_actions_video_view',
         ].join(',');
 
         // Conversies (ROAS-waarde + CAC-aantal) — value-breakdowns zijn zwaar; apart/niet-fataal.
+        // De funnel (winkelmand → afrekenen → aankoop) zit in dezelfde call: samen
+        // getest op 24-09-2026. Eén aankoopdefinitie: omni waar die bestaat (web + app
+        // + offline). Voor afrekenen bestaat er geen omni-veld, dus daar het gewone.
+        // Kosten per stap vragen we niet op: die rekenen we zelf uit spend / aantal.
         const ADS_AD_CONV = [
           'ad_id',
           'actions_purchase', 'actions_omni_purchase', 'action_values_purchase', 'action_values_omni_purchase',
           'actions_lead',
+          'actions_omni_add_to_cart', 'action_values_omni_add_to_cart',
+          'actions_initiate_checkout', 'action_values_initiate_checkout',
         ].join(',');
+
+        // Advertentietekst van een gewone advertentie. `call_to_action_type` en `link`
+        // bleken in de test bij twee klanten leeg; `website_destination_url` gaf de
+        // link wél, en de CTA komt dan uit de CTA-asset hieronder. Allebei vragen we
+        // op, de frontend neemt de eerste niet-lege.
+        // In dezelfde call: frequentie (Meta ontdubbelt over de periode, want geen
+        // `date`) en profielbezoeken op Instagram. Samen getest op 24-09-2026; als
+        // aparte call liep hij in de tweede ronde over zijn timeout.
+        const ADS_AD_TEXT = [
+          'ad_id', 'title', 'body', 'call_to_action_type', 'thumbnail_url', 'link', 'website_destination_url',
+          'frequency', 'instagram_profile_visits',
+        ].join(',');
+
+        // Campagnedoel. Zonder `date`: het doel is een eigenschap, geen dagcijfer.
+        const ADS_OBJECTIVE = ['campaign_id', 'campaign_name', 'campaign_objective'].join(',');
+
+        // Accountbereik zonder dimensie en zonder `date`: de enige manier om een
+        // ontdubbelde reach en frequentie over de hele periode te krijgen. Een som
+        // over dagen of campagnes telt dezelfde persoon meerdere keren.
+        const ADS_REACH = ['reach', 'impressions', 'frequency'].join(',');
+
+        // Demografie en regio. Meta weigert deze breakdowns samen met omni-velden
+        // (getest 24-09-2026: "incompatible with 'omni' and 'ranking' fields"), dus
+        // hier de gewone aankoopvelden. De UI toont ze daarom alleen als aandeel,
+        // nooit als absoluut aantal naast de omni-totalen.
+        const ADS_DEMO = [
+          'age', 'gender', 'spend', 'impressions', 'clicks',
+          'actions_add_to_cart', 'actions_initiate_checkout', 'actions_purchase', 'action_values_purchase', 'actions_lead',
+        ].join(',');
+        const ADS_REGION = ['region', 'spend', 'impressions', 'clicks', 'actions_purchase', 'actions_lead'].join(',');
+
+        // Creatieve varianten (Dynamic Creative / Advantage+ creative). Meta staat één
+        // asset-breakdown per call toe — titel + body samen gaf "(#100) combination of
+        // data breakdown columns is invalid" — en ook hier geen omni-velden.
+        const ASSET_TYPES = [
+          ['title', 'title_asset_text'],
+          ['body', 'body_asset_text'],
+          ['cta', 'call_to_action_asset_name'],
+          ['image', 'image_asset_url'],
+          ['video', 'video_asset_video_name'],
+        ];
+        const ASSET_METRICS = ['impressions', 'clicks', 'spend'];
+        const ASSET_CONV = ['actions_purchase', 'actions_lead'];
 
         // Core krijgt het volle budget (55s); de extra's een krappere timeout zodat een trage
         // breakdown de functie niet tot 55s gijzelt en de core-data altijd op tijd terugkomt.
         const FETCH_MS = 55000;
         const ADDON_MS = 35000;
         const PREV_MS = sheetOnly ? FETCH_MS : 20000;
-        const [
-          igData, fbOrgData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData,
+
+        // Asset-call met terugval: kent Meta de gewone conversievelden niet in
+        // combinatie met deze breakdown, dan alsnog de varianten met alleen
+        // vertoningen/kliks/spend. Beter varianten zonder conversies dan geen.
+        async function assetCall(field, label) {
+          const base = ['ad_id', field, ...ASSET_METRICS];
+          const full = await windsorScoped('facebook', [...base, ...ASSET_CONV].join(','), adDateParams, ADDON_MS, label);
+          // Een timeout is geen veldprobleem: een tweede poging kost alleen nog eens 35 s.
+          if (!full || !full.__error || /timeout/i.test(full.__error)) return full;
+          const min = await windsorScoped('facebook', base.join(','), adDateParams, ADDON_MS, `${label}-min`);
+          return min && !min.__error ? min : full;
+        }
+
+        // Meta Ads-verrijking: allemaal niet-fataal, in een TWEEDE ronde ná de
+        // bestaande calls. Elke Windsor-call haalt alle accounts van de gedeelde
+        // sleutel op; negentien tegelijk liet de conversie-call (die er al was) in
+        // de test over zijn 35 s gaan. Zo houden de bestaande blokken hun tempo en
+        // kost de verrijking hooguit ADDON_MS extra (maxDuration 150 in vercel.json).
+        const startExtraCalls = () => Promise.all([
+          windsorScoped('facebook', ADS_OBJECTIVE, dateParams, ADDON_MS, 'fb-ads-objective'),
+          windsorScoped('facebook', ADS_REACH, dateParams, ADDON_MS, 'fb-ads-reach'),
+          windsorScoped('facebook', ADS_REACH, prevDateParams, PREV_MS, 'fb-ads-reach-prev'),
+          // Zelfde venster als de ad-level funnel: anders staan er twee leadtotalen
+          // op één pagina (gemeten: 87 in de funnel, 91 in de doelgroep over 90 dagen).
+          windsorScoped('facebook', ADS_DEMO, adDateParams, ADDON_MS, 'fb-ads-demo'),
+          windsorScoped('facebook', ADS_REGION, adDateParams, ADDON_MS, 'fb-ads-region'),
+          ...ASSET_TYPES.map(([key, field]) => assetCall(field, `fb-ads-asset-${key}`)),
+        ]);
+
+        // Ad-level uit de datasheet zonder ad_id (de tabs van BAJA en Spotto hebben
+        // alleen ad_name en een paar tellers): daar valt niets op te mergen en de
+        // frontend groepeert zulke rijen tot één kaart. Dan meteen — nog in de
+        // eerste ronde, met het volle budget — de live-versie ophalen.
+        let adLevelLiveError = null;
+        async function adLevelCore() {
+          const d = await windsorScoped('facebook', ADS_AD_CORE, adDateParams, FETCH_MS, 'fb-ads-core');
+          const zonderId = !sheetOnly && d && d.__sheet && Array.isArray(d.data) && d.data.length > 0
+            && !d.data.some(r => r && r.ad_id != null && r.ad_id !== '');
+          if (!zonderId) return d;
+          const live = await windsorScoped('facebook', ADS_AD_CORE, adDateParams, FETCH_MS, 'fb-ads-core-live', { skipSheet: true });
+          if (live && !live.__error && Array.isArray(live.data) && live.data.length) return live;
+          adLevelLiveError = (live && live.__error) || 'live ad-level gaf geen rijen';
+          return d;
+        }
+
+        let [
+          igData, fbOrgData, adsData, adsAdData, adsCreativeData, adsVideoData, adsConvData, adsTextData,
           igPrev, fbOrgPrev, adsPrev,
         ] = await Promise.all([
           windsorScoped('instagram', IG_FIELDS, dateParams, FETCH_MS, 'ig'),
           windsorScoped('facebook_organic', FB_ORG_FIELDS, dateParams, FETCH_MS, 'fb-organic'),
           windsorScoped('facebook', ADS_FIELDS, dateParams, FETCH_MS, 'fb-ads'),
-          windsorScoped('facebook', ADS_AD_CORE, adDateParams, FETCH_MS, 'fb-ads-core'),
+          adLevelCore(),
           windsorScoped('facebook', ADS_AD_CREATIVE, adDateParams, ADDON_MS, 'fb-ads-creative'),
           windsorScoped('facebook', ADS_AD_VIDEO, adDateParams, ADDON_MS, 'fb-ads-video'),
           windsorScoped('facebook', ADS_AD_CONV, adDateParams, ADDON_MS, 'fb-ads-conv'),
+          windsorScoped('facebook', ADS_AD_TEXT, adDateParams, ADDON_MS, 'fb-ads-text'),
           windsorScoped('instagram', IG_FIELDS, prevDateParams, PREV_MS, 'ig-prev'),
           windsorScoped('facebook_organic', FB_ORG_FIELDS, prevDateParams, PREV_MS, 'fb-organic-prev'),
           windsorScoped('facebook', ADS_FIELDS, prevDateParams, PREV_MS, 'fb-ads-prev'),
         ]);
+
+        const [
+          adsObjectiveData, adsReachData, adsReachPrev,
+          adsDemoData, adsRegionData, ...assetResults
+        ] = await startExtraCalls();
 
         // Merge alle add-on-velden in de ad-core rows op ad_id (allen no-date → 1 rij per ad).
         if (adsAdData && Array.isArray(adsAdData.data)) {
@@ -358,6 +462,10 @@ module.exports = async (req, res) => {
               if (m) for (const k of keys) if (m[k] != null) r[k] = m[k];
             }
           };
+          // Een sheettab is per dag: één rij per ad per dag, en dan is 'de laatste
+          // rij' één dag. Voor de niet-optelbare ratio's is dat een verkeerd getal,
+          // dus die nemen we uit een sheetbron niet over.
+          const fromSheet = (src) => !!(src && src.__sheet);
           mergeById(adsCreativeData, [
             'effective_instagram_media__media_type', 'effective_instagram_media__media_product_type', 'object_type',
           ]);
@@ -365,12 +473,106 @@ module.exports = async (req, res) => {
             'video_p25_watched_actions_video_view', 'video_p50_watched_actions_video_view',
             'video_p75_watched_actions_video_view', 'video_p95_watched_actions_video_view',
             'video_p100_watched_actions_video_view', 'video_play_actions_video_view',
+            ...(fromSheet(adsVideoData) ? [] : ['video_avg_time_watched_actions_video_view']),
           ]);
           mergeById(adsConvData, [
             'actions_purchase', 'actions_omni_purchase', 'action_values_purchase', 'action_values_omni_purchase',
             'actions_lead',
+            'actions_omni_add_to_cart', 'action_values_omni_add_to_cart',
+            'actions_initiate_checkout', 'action_values_initiate_checkout',
+          ]);
+          mergeById(adsTextData, [
+            'title', 'body', 'call_to_action_type', 'thumbnail_url', 'link', 'website_destination_url',
+            'instagram_profile_visits',
+            ...(fromSheet(adsTextData) ? [] : ['frequency']),
           ]);
         }
+
+        const numOr0 = (v) => {
+          const n = typeof v === 'number' ? v : parseFloat(v);
+          return isFinite(n) ? n : 0;
+        };
+        const rowsOf = (d) => (d && !d.__error && Array.isArray(d.data) ? d.data : []);
+
+        // Campagnedoel per campagnenaam: de ad-rijen dragen alleen de naam.
+        const objectives = {};
+        for (const r of rowsOf(adsObjectiveData)) {
+          const obj = r.campaign_objective;
+          if (!obj) continue;
+          if (r.campaign_name) objectives[r.campaign_name] = obj;
+          if (r.campaign_id) objectives[r.campaign_id] = obj;
+        }
+
+        // Accountbereik. De API geeft precies één rij (één account, geen dimensie).
+        // Meer rijen betekent een dagtabel uit de sheet; die is niet te ontdubbelen,
+        // dus dan is het bereik onbekend — geen som.
+        const accountReach = (d) => {
+          const rows = rowsOf(d);
+          if (rows.length !== 1 || d.__sheet) return null;
+          const r = rows[0];
+          const reach = numOr0(r.reach), impressions = numOr0(r.impressions);
+          if (!reach) return null;
+          return { reach, impressions, frequency: r.frequency != null ? numOr0(r.frequency) : impressions / reach };
+        };
+
+        // Optellen per sleutel. Alle velden hieronder zijn tellers, dus optelbaar
+        // over dagen (sheet) en over accounts.
+        const sumBy = (rows, keyOf, fields) => {
+          const out = new Map();
+          for (const r of rows) {
+            const k = keyOf(r);
+            if (k == null) continue;
+            const o = out.get(k) || Object.fromEntries(fields.map(f => [f, 0]));
+            for (const f of fields) o[f] += numOr0(r[f]);
+            out.set(k, o);
+          }
+          return out;
+        };
+        // Een rij zonder de gevraagde dimensie is een totaalrij (bijvoorbeeld een
+        // sheettab zonder die kolom). Die hoort niet in een verdeling.
+        const demoRows = rowsOf(adsDemoData).filter(r => r.age != null && r.gender != null);
+        const DEMO_FIELDS = ['spend', 'impressions', 'clicks', 'actions_add_to_cart', 'actions_initiate_checkout',
+          'actions_purchase', 'action_values_purchase', 'actions_lead'];
+        const demographics = demoRows.length ? [...sumBy(demoRows, r => `${r.age}|${r.gender}`, DEMO_FIELDS)]
+          .map(([k, o]) => {
+            const [age, gender] = k.split('|');
+            return {
+              age, gender, spend: o.spend, impressions: o.impressions, clicks: o.clicks,
+              addToCart: o.actions_add_to_cart, checkouts: o.actions_initiate_checkout,
+              purchases: o.actions_purchase, purchaseValue: o.action_values_purchase, leads: o.actions_lead,
+            };
+          }) : null;
+        const regionRows = rowsOf(adsRegionData).filter(r => r.region != null);
+        const regions = regionRows.length ? [...sumBy(regionRows, r => r.region,
+          ['spend', 'impressions', 'clicks', 'actions_purchase', 'actions_lead'])]
+          .map(([region, o]) => ({
+            region, spend: o.spend, impressions: o.impressions, clicks: o.clicks,
+            purchases: o.actions_purchase, leads: o.actions_lead,
+          })) : null;
+
+        // Varianten per advertentie en per assettype: { adId: { title: [...], ... } }.
+        const assets = {};
+        ASSET_TYPES.forEach(([key, field], i) => {
+          const rows = rowsOf(assetResults[i]).filter(r => r.ad_id != null && r[field] != null && r[field] !== '');
+          const hasConv = rows.some(r => r.actions_purchase != null || r.actions_lead != null);
+          const grouped = sumBy(rows, r => `${r.ad_id}\u0000${r[field]}`,
+            [...ASSET_METRICS, ...ASSET_CONV]);
+          for (const [k, o] of grouped) {
+            const [adId, value] = k.split('\u0000');
+            const perAd = assets[adId] || (assets[adId] = {});
+            (perAd[key] || (perAd[key] = [])).push({
+              value, impressions: o.impressions, clicks: o.clicks, spend: o.spend,
+              purchases: hasConv ? o.actions_purchase : null, leads: hasConv ? o.actions_lead : null,
+            });
+          }
+        });
+        for (const perAd of Object.values(assets)) {
+          for (const list of Object.values(perAd)) list.sort((a, b) => b.impressions - a.impressions);
+        }
+
+        const extraError = (d) => (d && d.__error ? d.__error : null);
+        const assetErrors = ASSET_TYPES.map(([key], i) => extraError(assetResults[i]) && `${key}: ${extraError(assetResults[i])}`)
+          .filter(Boolean).join(' · ') || null;
 
         // Een vergelijkingsblok dat leeg terugkwam sturen we als null mee, niet als
         // een lege lijst: nul gemeten is iets anders dan niets gemeten, en de UI
@@ -389,6 +591,18 @@ module.exports = async (req, res) => {
           fbOrganic: fbOrgData, // Facebook organic pagina-posts
           ads: adsData,        // campagne-niveau (trend/KPI + fallback)
           adsAd: adsAdData,    // ad-niveau core (Library per advertentie, indien gelukt)
+          // Meta Ads-verrijking. Elk blok is null als het niet gemeten kon worden —
+          // onbekend, nooit nul. Demografie, regio en assets gebruiken de gewone
+          // aankoopvelden (geen omni, zie ADS_DEMO) en zijn dus alleen als aandeel
+          // te tonen.
+          adsExtra: {
+            objectives,
+            accountReach: accountReach(adsReachData),
+            accountReachPrev: accountReach(adsReachPrev),
+            demographics,
+            regions,
+            assets,
+          },
           // Diagnostiek: per-connector foutmeldingen meesturen i.p.v. stil opslokken.
           errors: {
             instagram: igData && igData.__error ? igData.__error : null,
@@ -399,6 +613,13 @@ module.exports = async (req, res) => {
             adsCreative: adsCreativeData && adsCreativeData.__error ? adsCreativeData.__error : null,
             adsVideo: adsVideoData && adsVideoData.__error ? adsVideoData.__error : null,
             adsConv: adsConvData && adsConvData.__error ? adsConvData.__error : null,
+            adsText: extraError(adsTextData),
+            adsAdLive: adLevelLiveError,
+            adsObjective: extraError(adsObjectiveData),
+            adsReach: extraError(adsReachData),
+            adsDemo: extraError(adsDemoData),
+            adsRegion: extraError(adsRegionData),
+            adsAssets: assetErrors,
             // Vergelijking faalt niet-fataal: de huidige periode blijft staan.
             previous: [igPrev, fbOrgPrev, adsPrev].map(d => d && d.__error).filter(Boolean).join(' · ') || null,
           },
