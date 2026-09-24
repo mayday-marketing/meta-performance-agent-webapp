@@ -252,6 +252,15 @@ Gemeten: een sheet-tab lezen duurt 0,3–2,3 s, een koude Windsor-fetch over 90 
   `media_id`, `post_id`, `ad_id` of `post_created_time` en heeft de tab die niet,
   dan wordt de sheet overgeslagen (`requireFields`). BAJA's Instagram-tab had geen
   datum: elke week 0 in de trendgrafiek.
+- **Een tab die een verplicht veld mist doet niet mee aan de tabkeuze.** Anders
+  won Spotto's oude Meta-tab (zonder ad_id) van de nieuwe advertentietab. Met een
+  API-terugval is elke gevraagde dimensie ook verplicht (een assetvraag op de
+  advertentietab gaf rijen zonder asset).
+- **Campagnekolommen in een advertentietab zijn geen fijnere korrel**: een ad hoort
+  bij één campagne (`impliedBy` in `getConnectorRows`).
+- **Meta Ads per dag uit de sheet**: `mergeById` telt dagrijen per ad op en zet de
+  som op de eerste rij. Frequentie per advertentie is dan onbekend ("—"); de
+  accountfrequentie en de creatieve varianten blijven live.
 - **Accountcontrole geldt ook voor de sheet.** Heeft een tab `account_id`/
   `account_name`, dan blijven alleen de rijen van het account uit de Config-tab
   over. BAJA's Instagram-export bevatte de posts van mayday.marketing.ai.

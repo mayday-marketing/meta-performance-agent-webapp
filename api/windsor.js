@@ -490,8 +490,21 @@ module.exports = async (req, res) => {
           // Via de API is er één rij per ad en verandert er niets.
           const mergeById = (src, keys) => {
             if (!src || !Array.isArray(src.data)) return;
+            // Per ad optellen: uit een dagtabel komen er meerdere rijen per ad, en de
+            // laatste nemen gaf één dag (BAJA: 16 winkelmandjes i.p.v. 758). Tekst
+            // en andere niet-getallen: de eerste niet-lege waarde.
             const idx = {};
-            for (const r of src.data) if (r.ad_id != null) idx[r.ad_id] = r;
+            for (const r of src.data) {
+              if (r.ad_id == null) continue;
+              const m = idx[r.ad_id];
+              if (!m) { idx[r.ad_id] = { ...r }; continue; }
+              for (const k of keys) {
+                const v = r[k];
+                if (v == null || v === '') continue;
+                if (typeof v === 'number' && typeof m[k] === 'number') m[k] += v;
+                else if (m[k] == null || m[k] === '') m[k] = v;
+              }
+            }
             const gezien = new Set();
             for (const r of adsAdData.data) {
               const m = idx[r.ad_id];

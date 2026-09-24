@@ -532,6 +532,7 @@ const FIELD_ALIASES = {
   videop100watchedactionsvideoview: ['videop100watchedactionsvideoview', 'videowatchedat100percent'],
   videoavgtimewatchedactionsvideoview: ['videoavgtimewatchedactionsvideoview', 'videoaverageplaytime'],
   actionsomniaddtocart: ['actionsomniaddtocart', 'omniaddstocart'],
+  actionsaddtocart: ['actionsaddtocart', 'addstocart'],
   actionvaluesomniaddtocart: ['actionvaluesomniaddtocart', 'omniaddstocartconversionvalue'],
   actionsinitiatecheckout: ['actionsinitiatecheckout', 'checkoutsinitiated'],
   actionvaluesinitiatecheckout: ['actionvaluesinitiatecheckout', 'checkoutsinitiatedconversionvalue'],
@@ -653,7 +654,18 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
   const wantedHeaders = new Set();
   for (const f of wanted) for (const h of headerCandidates(f)) wantedHeaders.add(h);
 
-  let best = null;
+  // Met een API-terugval (requireFields gezet) is ook elke gevraagde dimensie
+  // verplicht: een assetvraag die op de advertentietab uitkomt krijgt anders
+  // rijen zónder asset, en de varianten verdwijnen stil.
+  const dimHeaders = new Set(Object.values(DIMENSION_LEVELS).flat());
+  const dimWanted = requireFields.length
+    ? wanted.filter(f => [...headerCandidates(f)].some(h => dimHeaders.has(h))) : [];
+  const verplicht = [...new Set([...requireFields, ...dimWanted])].filter(f => wanted.includes(f));
+
+  // Een tab die een verplicht veld mist doet niet mee aan de keuze. Anders won
+  // bij Spotto de oude tab zonder ad_id van de nieuwe advertentietab en ging
+  // alles alsnog live. Alleen als géén tab volledig is, melden we wat ontbreekt.
+  let best = null, bestIncompleet = null;
   for (const title of titles) {
     if (/^_windsor_staging/i.test(title) || !pattern.test(title)) continue;
     let rows;
@@ -663,8 +675,15 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
 
     const headers = rows[0].map(normHeader);
     // Te fijn voor deze vraag → overslaan (zou dubbel tellen).
-    const tooFine = Object.values(DIMENSION_LEVELS).some(level =>
-      level.some(h => headers.includes(h)) && !level.some(h => wantedHeaders.has(h)));
+    // Een grovere korrel die volledig in de gevraagde valt, splitst niets: een
+    // advertentie hoort bij precies één campagne. Zonder deze regel viel de
+    // advertentietab af voor elke ad-vraag zonder campagnekolom (conversies,
+    // tekst, video) en ging alles alsnog live.
+    const vraagtOp = (lvl) => DIMENSION_LEVELS[lvl].some(h => wantedHeaders.has(h));
+    const impliedBy = { campaign: ['ad'] };
+    const tooFine = Object.entries(DIMENSION_LEVELS).some(([lvl, level]) =>
+      level.some(h => headers.includes(h)) && !vraagtOp(lvl)
+      && !(impliedBy[lvl] || []).some(vraagtOp));
     if (tooFine) continue;
 
     let score = 0;
@@ -675,12 +694,17 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
       if (i !== -1) { colOf[f] = i; score++; }
     }
     if (score < 2) continue;
-    if (!best || score > best.score) best = { title, rows, headers, colOf, score };
+    const cand = { title, rows, headers, colOf, score };
+    const mist = verplicht.filter(f => colOf[f] == null);
+    if (mist.length) {
+      if (!bestIncompleet || score > bestIncompleet.score) bestIncompleet = { ...cand, mist };
+      continue;
+    }
+    if (!best || score > best.score) best = cand;
   }
 
+  if (!best && bestIncompleet) return { __missing: bestIncompleet.mist, __sheet: { tab: bestIncompleet.title } };
   if (!best) return null;
-  const missing = requireFields.filter(f => wanted.includes(f) && best.colOf[f] == null);
-  if (missing.length) return { __missing: missing, __sheet: { tab: best.title } };
   for (const f of extraFields) {
     if (best.colOf[f] != null) continue;
     const cands = headerCandidates(f);
