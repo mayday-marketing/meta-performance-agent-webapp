@@ -18,7 +18,7 @@
                      Hoger (view-through + eigen attributievenster); kanalen
                      claimen dezelfde sale, dus optellen mag niet.
 
-   VELDNAMEN: alleen `facebook` is geverifieerd via Windsor's get_fields. Voor de
+   VELDNAMEN: alleen `facebook` en `google_ads` zijn geverifieerd via Windsor's get_fields. Voor de
    nog niet gekoppelde connectors staan kandidaat-veldnamen in `revenueFields` /
    `convFields`; windsor.js probeert ze en valt terug op enkel spend als Windsor
    een veld afwijst. De GA4-ROAS blijft dan gewoon werken.
@@ -109,10 +109,13 @@ const CHANNELS = [
     connector: 'google_ads',
     campaignField: 'campaign',
     spendField: 'totalcost',
-    revenueFields: ['conversion_value', 'conversionvalue', 'all_conversion_value'],
-    convFields: ['conversions', 'all_conversions'],
+    // Geverifieerd 25-09-2026 (Spotto). Nooit de all_-velden: die tellen ook
+    // secundaire acties mee (pageviews, klikken) — bij Spotto 680k tegenover
+    // 1.230 echte conversies. Eén ongeldige veldnaam laat de hele call vallen.
+    revenueFields: ['conversion_value'],
+    convFields: ['conversions'],
     ga4Source: /^google\b/i,
-    verified: false,
+    verified: true,
   },
   {
     key: 'bing',

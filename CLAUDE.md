@@ -101,7 +101,7 @@ los van de dashboardperiode in de topbar.
   override. Actief scenario = seizoenskorting zodra die > 0 is, anders volle prijs;
   in de tab met één klik om te zetten. Beide velden zijn daar ook live te
   overschrijven voor een scenario — dat wordt **niet** bewaard.
-- **Alleen `facebook` heeft geverifieerde veldnamen.** Voor niet-gekoppelde
+- **Alleen `facebook` en `google_ads` hebben geverifieerde veldnamen.** Voor niet-gekoppelde
   connectors staan kandidaat-omzetvelden in de registry; wijst Windsor er één af,
   dan valt `fetchChannel` terug op alleen spend (`platformRevenueAvailable:false`)
   en blijft de GA4-ROAS staan. Campagnes van zo'n kanaal krijgen **geen** oordeel —
