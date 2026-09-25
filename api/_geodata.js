@@ -23,10 +23,10 @@
    Het request wijst nooit een map of bestand aan — de gedeelde service-account
    kan bij élke klantmap.
 
-   PERCENTAGES: in dit bestand staan percentages als getal 0–100, niet als
-   fractie. Een hand-geschreven '15' betekent 15%, en een validator die soms
-   0,15 en soms 15 accepteert is een fout die je pas in het dashboard ziet.
-   Velden heten daarom expliciet *Pct.
+   GEEN PERCENTAGES IN HET BESTAND (schema v2). Het bestand bevat de ruwe
+   runs per prompt × engine × pass; het dashboard rekent mention rates,
+   blokken, deltas en share of voice daar zelf uit. Een hand-ingevuld
+   percentage kan zo nooit afwijken van de matrix eronder.
    ========================================================== */
 
 const { getAccessToken } = require('./_config');
@@ -115,16 +115,6 @@ const str = (v, max = 400) => {
   return s ? s.slice(0, max) : null;
 };
 
-// Percentage 0–100. Accepteert '15', '15%', 15 en '15,5'. Buiten bereik → null.
-const pct = (v) => {
-  if (v == null || v === '') return null;
-  const s = String(v).replace('%', '').replace(',', '.').trim();
-  if (!/^-?\d+(\.\d+)?$/.test(s)) return null;
-  const n = parseFloat(s);
-  if (!isFinite(n) || n < 0 || n > 100) return null;
-  return Math.round(n * 10) / 10;
-};
-
 const int = (v, max = 1e9) => {
   if (v == null || v === '') return null;
   const n = Number(v);
@@ -151,132 +141,228 @@ function cell(v) {
   if (v === 0 || v === 1 || v === 2) return v;
   const s = String(v == null ? '' : v).toLowerCase().trim();
   if (s === '0' || s === 'nee' || s === 'absent') return 0;
-  if (s === '1' || s === 'ja' || s === 'mentioned') return 1;
-  if (s === '2' || s === 'fout' || s === 'wrong') return 2;
+  if (s === '1' || s === 'ja' || s === 'mentioned' || s === 'correct') return 1;
+  if (s === '2' || s === 'fout' || s === 'wrong' || s === 'misdescribed') return 2;
   return null; // niet gemeten
+}
+
+/* ==========================================================
+   SCHEMA v2 — het 2+3+1-model (zie agents/GEO_Dashboard_Schema.md)
+   ==========================================================
+   Het bestand bevat ALLE merkdata: merk, bevroren share-of-voice-set,
+   promptset, acties en de metingen als historiek. De code bevat geen enkel
+   merkgegeven. Het dashboard rekent zelf: mention rates, blokken, deltas en
+   share of voice komen uit de ruwe runs, niet uit vrije tekst — zo kan een
+   tegel nooit iets anders zeggen dan de matrix eronder. */
+
+const PROMPT_TYPES = ['category', 'comparison', 'how-to', 'problem', 'brand'];
+// Nederlandse en oude schrijfwijzen → canoniek type.
+const TYPE_ALIAS = {
+  categorie: 'category', category: 'category', vergelijking: 'comparison', comparison: 'comparison',
+  'how-to': 'how-to', howto: 'how-to', probleem: 'problem', problem: 'problem', brand: 'brand', merk: 'brand',
+};
+const SPLIT_CLASSES = ['correct_entity', 'correct_entity_wrong_description', 'namesake', 'invented', 'generic_no_entity'];
+const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+function normEngines(list, note) {
+  const seen = new Set();
+  return arr(list).map((e) => {
+    const name = str(e?.name, 40);
+    const id = slug(e?.id || name);
+    return { id, name: name || id };
+  }).filter((e) => {
+    if (!e.id) { note('Engine zonder id of naam — overgeslagen.'); return false; }
+    if (seen.has(e.id)) { note(`Engine '${e.id}' staat dubbel — tweede overgeslagen.`); return false; }
+    seen.add(e.id);
+    return true;
+  });
+}
+
+function normPrompts(list, note) {
+  const unknown = new Map(); // onbekend type → promptnummers (één waarschuwing per type)
+  const out = arr(list).map((p, i) => {
+    const rawType = String(p?.type ?? '').toLowerCase().trim();
+    const type = TYPE_ALIAS[rawType] || null;
+    const n = int(p?.n, 9999) ?? i + 1;
+    if (!type) unknown.set(p?.type ?? '', [...(unknown.get(p?.type ?? '') || []), n]);
+    return { n, text: str(p?.text, 300), type, priority: str(p?.priority, 20) };
+  }).filter((p) => {
+    if (!p.text) { note('Prompt zonder tekst — overgeslagen.'); return false; }
+    return true;
+  });
+  for (const [t, ns] of unknown) {
+    note(`Prompttype '${t}' is onbekend (${PROMPT_TYPES.join(' / ')}) bij ${ns.length === out.length ? 'alle prompts' : `prompt ${ns.join(', ')}`} — die tellen in geen enkel blok mee.`);
+  }
+  return out;
+}
+
+function normChecks(list) {
+  return arr(list).map((c) => ({
+    check: str(c?.check, 200),
+    // 'unk' is de schrijfwijze van de HTML-template; hier heet het 'unknown'.
+    status: oneOf(String(c?.status || '').replace(/^unk$/i, 'unknown'), ['pass', 'fail', 'unknown']) || 'unknown',
+    note: str(c?.note, 300),
+  })).filter((c) => c.check);
+}
+
+function normActions(list) {
+  const prio = { p1: 'hoog', p2: 'middel', p3: 'laag' };
+  const eff = { s: 'klein', m: 'middel', l: 'groot' };
+  return arr(list).map((a) => {
+    const p = str(a?.priority, 20);
+    const e = str(a?.effort, 20);
+    return {
+      priority: p ? (prio[p.toLowerCase()] || p) : null,
+      effort: e ? (eff[e.toLowerCase()] || e) : null,
+      how: str(a?.how ?? a?.skill, 80),
+      moves: arr(a?.moves).map((m) => str(m, 40)).filter(Boolean).slice(0, 6),
+      title: str(a?.title, 200),
+      text: str(a?.text ?? a?.why, 1200),
+      done: str(a?.done, 600),
+      ongoing: a?.ongoing === true,
+    };
+  }).filter((a) => a.title);
+}
+
+function normSources(s) {
+  return s && typeof s === 'object' ? {
+    keyword: str(s.keyword, 80),
+    platform: oneOf(s.platform, ['chat_gpt', 'google']) || 'chat_gpt',
+    location: str(s.location, 80),
+    language: /^[a-z]{2}$/i.test(String(s.language || '')) ? String(s.language).toLowerCase() : null,
+  } : null;
+}
+
+function normMeasurement(m, engines, prompts, competitors, brandName, note) {
+  const date = isoDate(m?.date);
+  const tag = date || '(zonder datum)';
+  if (!date) note(`Meting zonder geldige 'date' (YYYY-MM-DD) — overgeslagen.`);
+  const kind = oneOf(m?.kind, ['full', 'light']) || 'full';
+  const engineIds = new Set(engines.map((e) => e.id));
+  const promptNs = new Set(prompts.map((p) => p.n));
+
+  // runs[engine][prompt] = één toestand per pass. Een pass die niet 0/1/2 is,
+  // valt weg: niet gemeten, nooit stilzwijgend 'niet genoemd'.
+  const runs = {};
+  const rawRuns = m?.runs && typeof m.runs === 'object' ? m.runs : {};
+  for (const [eRaw, perPrompt] of Object.entries(rawRuns)) {
+    const e = slug(eRaw);
+    if (!engineIds.has(e)) { note(`Meting ${tag}: engine '${eRaw}' staat niet in 'engines' — overgeslagen.`); continue; }
+    for (const [nRaw, passes] of Object.entries(perPrompt && typeof perPrompt === 'object' ? perPrompt : {})) {
+      const n = int(nRaw, 9999);
+      if (n == null || !promptNs.has(n)) { note(`Meting ${tag}: prompt '${nRaw}' staat niet in 'prompts' — overgeslagen.`); continue; }
+      const states = (Array.isArray(passes) ? passes : [passes]).map(cell).filter((v) => v != null);
+      if (states.length) (runs[e] ||= {})[n] = states.slice(0, 10);
+    }
+  }
+
+  // Share of voice: tellingen voor precies de bevroren set (+ het merk zelf).
+  // Een merk buiten de set telt niet mee — anders is de noemer tussen metingen
+  // niet dezelfde en is een delta geen delta.
+  let brandCounts = null;
+  if (m?.brandCounts && typeof m.brandCounts === 'object') {
+    brandCounts = {};
+    for (const b of [brandName, ...competitors].filter(Boolean)) {
+      const v = int(m.brandCounts[b], 1e6);
+      brandCounts[b] = v ?? 0;
+    }
+    const extra = Object.keys(m.brandCounts).filter((k) => k !== brandName && !competitors.includes(k));
+    if (extra.length) note(`Meting ${tag}: ${extra.length} merk(en) in brandCounts buiten de share-of-voice-set genegeerd (${extra.slice(0, 3).join(', ')}).`);
+  }
+
+  const brandSplit = arr(m?.brandSplit).map((r) => ({
+    engine: slug(r?.engine),
+    prompt: int(r?.prompt, 9999),
+    pass: int(r?.pass, 10),
+    class: oneOf(r?.class, SPLIT_CLASSES),
+    evidence: str(r?.evidence, 240),
+  })).filter((r) => {
+    if (!r.class) { note(`Meting ${tag}: brandSplit-rij zonder geldige class — overgeslagen.`); return false; }
+    return engineIds.has(r.engine);
+  });
+
+  return {
+    date, kind,
+    label: str(m?.label, 80),
+    note: str(m?.note, 80),
+    calloutNote: str(m?.calloutNote, 400),
+    matrixNote: str(m?.matrixNote, 300),
+    checksNote: str(m?.checksNote, 300),
+    runs,
+    runCount: int(m?.runCount, 1e6),
+    brandCounts,
+    brandSplit,
+    checks: normChecks(m?.checks),
+    ownCitations: int(m?.ownCitations, 1e6),
+    ownCitationsNote: str(m?.ownCitationsNote, 200),
+    externalCitations: int(m?.externalCitations, 1e6),
+  };
+}
+
+function normalizeV2(d, note) {
+  const brand = {
+    name: str(d.brand?.name, 60),
+    domain: str(d.brand?.domain, 120) ? String(d.brand.domain).toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '') : null,
+    descriptor: str(d.brand?.descriptor, 600),
+  };
+  if (!brand.name) note("Geen 'brand.name' — share of voice en de naamkaping-split tonen dan geen eigen merk.");
+  const engines = normEngines(d.engines, note);
+  const prompts = normPrompts(d.prompts, note);
+  const competitors = [...new Set(arr(d.competitors).map((c) => str(typeof c === 'string' ? c : c?.name, 80)).filter(Boolean))].slice(0, 20);
+  if (!competitors.length) note("Geen 'competitors' (bevroren share-of-voice-set) — share of voice wordt niet getoond.");
+  const measurements = arr(d.measurements)
+    .map((m) => normMeasurement(m, engines, prompts, competitors, brand.name, note))
+    .filter((m) => m.date)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (!measurements.some((m) => m.kind === 'full')) note('Geen volledige meting (kind "full") — de matrix en de blokken blijven leeg.');
+  return {
+    schemaVersion: 2,
+    brand, engines, prompts, competitors, measurements,
+    label: str(d.label, 80),
+    method: str(d.method, 800),
+    passNote: str(d.passNote, 300),
+    actions: normActions(d.actions),
+    sources: normSources(d.sources),
+  };
+}
+
+/* Oud formaat (v1: kpis/phases/competitors-als-telling, één meting met cellen
+   per enginenaam). Omgezet naar v2 zodat er één renderer is. Wat v1 niet
+   meet (share of voice per merk, de naamkaping-split, passes) blijft leeg —
+   nooit afgeleid uit de vrije-tekst-KPI's. */
+function fromV1(d, note) {
+  note('Oud auditformaat (v1): omgezet naar het 2+3+1-model. KPI-teksten, fases en de top-mention-telling worden niet meer getoond; share of voice en de naamkaping-split ontbreken tot het bestand als v2 is weggeschreven.');
+  const engines = arr(d.engines).length
+    ? arr(d.engines).map((e) => ({ id: slug(e?.name), name: str(e?.name, 40) }))
+    : [...new Set(arr(d.prompts).flatMap((p) => Object.keys(p?.engines || {})))].map((n) => ({ id: slug(n), name: n }));
+  const runs = {};
+  for (const p of arr(d.prompts)) {
+    for (const [name, v] of Object.entries(p?.engines || {})) {
+      const c = cell(v);
+      if (c != null) (runs[slug(name)] ||= {})[p?.n] = [c];
+    }
+  }
+  return normalizeV2({
+    brand: { name: d.brandName },
+    engines,
+    prompts: arr(d.prompts).map((p) => ({ n: p?.n, text: p?.text, type: p?.type, priority: p?.priority })),
+    competitors: arr(d.competitors).map((c) => c?.name),
+    label: d.label, method: d.method, passNote: d.passNote,
+    actions: d.actions, sources: d.sources,
+    measurements: [{
+      date: d.auditDate, kind: 'full', note: d.label,
+      calloutNote: d.status?.text,
+      runs, checks: d.readiness,
+    }],
+  }, note);
 }
 
 function normalize(raw) {
   const warnings = [];
   const d = raw && typeof raw === 'object' ? raw : {};
   const note = (m) => warnings.push(m);
-
-  const engines = arr(d.engines).map((e) => ({
-    name: str(e?.name, 40),
-    runs: int(e?.runs, 100000),
-    mentionRatePct: pct(e?.mentionRatePct),
-    shareOfVoicePct: pct(e?.shareOfVoicePct),
-    descriptorAccuracyPct: pct(e?.descriptorAccuracyPct),
-    topCompetitor: str(e?.topCompetitor, 80),
-    sourceType: str(e?.sourceType, 300),
-    note: str(e?.note, 400),
-  })).filter((e) => {
-    if (!e.name) { note('Engine zonder naam — overgeslagen.'); return false; }
-    return true;
-  });
-
-  const prompts = arr(d.prompts).map((p, i) => ({
-    n: int(p?.n, 9999) ?? i + 1,
-    text: str(p?.text, 300),
-    type: str(p?.type, 30),
-    priority: str(p?.priority, 20),
-    // Per engine één cel. Engines die hier niet in staan zijn 'niet gemeten'.
-    cells: Object.fromEntries(
-      Object.entries(p?.engines && typeof p.engines === 'object' ? p.engines : {})
-        .map(([k, v]) => [str(k, 40), cell(v)])
-        .filter(([k]) => k)
-    ),
-  })).filter((p) => {
-    if (!p.text) { note('Prompt zonder tekst — overgeslagen.'); return false; }
-    return true;
-  });
-
-  const readiness = arr(d.readiness).map((c) => ({
-    check: str(c?.check, 200),
-    status: oneOf(c?.status, ['pass', 'fail', 'unknown']) || 'unknown',
-    note: str(c?.note, 300),
-  })).filter((c) => c.check);
-
-  const actions = arr(d.actions).map((a) => ({
-    priority: str(a?.priority, 10),
-    effort: str(a?.effort, 10),
-    skill: str(a?.skill, 80),
-    title: str(a?.title, 200),
-    text: str(a?.text, 1200),
-    done: str(a?.done, 600),
-  })).filter((a) => a.title);
-
-  const kpis = arr(d.kpis).map((k) => ({
-    label: str(k?.label, 60),
-    value: str(k?.value, 30),
-    tone: oneOf(k?.tone, ['good', 'bad', 'neutral']) || 'neutral',
-    delta: str(k?.delta, 80),
-    sub: str(k?.sub, 200),
-  })).filter((k) => k.label && k.value);
-
-  const byType = arr(d.byType).map((t) => ({
-    type: str(t?.type, 40),
-    ratePct: pct(t?.ratePct),
-    note: str(t?.note, 120),
-  })).filter((t) => t.type);
-
-  const competitors = arr(d.competitors).map((c) => ({
-    name: str(c?.name, 80),
-    engines: int(c?.engines, 50),
-    note: str(c?.note, 200),
-  })).filter((c) => c.name);
-
-  const phases = arr(d.phases).map((p) => ({
-    n: str(p?.n, 8),
-    title: str(p?.title, 40),
-    gate: str(p?.gate, 120),
-    here: p?.here === true,
-  })).filter((p) => p.title);
-
-  const status = d.status && typeof d.status === 'object' ? {
-    level: oneOf(d.status.level, ['blocked', 'warn', 'ok']) || 'warn',
-    title: str(d.status.title, 120),
-    text: str(d.status.text, 800),
-  } : null;
-
-  const sources = d.sources && typeof d.sources === 'object' ? {
-    keyword: str(d.sources.keyword, 80),
-    platform: oneOf(d.sources.platform, ['chat_gpt', 'google']) || 'chat_gpt',
-    location: str(d.sources.location, 80),
-    language: /^[a-z]{2}$/i.test(String(d.sources.language || '')) ? String(d.sources.language).toLowerCase() : null,
-  } : null;
-
-  const auditDate = isoDate(d.auditDate);
-  if (!auditDate) note("Geen geldige 'auditDate' (YYYY-MM-DD) — de tab toont geen meetdatum.");
-
-  // Eén kale controle op consistentie: klopt het aantal prompts met wat de
-  // scorecard claimt? Verschil is geen fout (deelmetingen bestaan), maar wel
-  // iets wat je wil zien voordat je het aan een klant toont.
-  const promptCount = int(d.promptCount, 9999);
-  if (promptCount != null && prompts.length && promptCount !== prompts.length) {
-    note(`promptCount zegt ${promptCount}, er staan ${prompts.length} prompts in de lijst.`);
-  }
-
-  return {
-    data: {
-      brandName: str(d.brandName, 60),
-      auditDate,
-      label: str(d.label, 80),
-      promptCount: promptCount ?? (prompts.length || null),
-      passNote: str(d.passNote, 300),
-      method: str(d.method, 800),
-      status, kpis, engines, byType, competitors, phases,
-      prompts, readiness, actions, sources,
-      // Vorige meting, alleen voor de delta-regel bij de KPI's. Bewust niet het
-      // hele schema: een dashboard dat twee volledige audits naast elkaar zet is
-      // een andere tab.
-      previous: d.previous && typeof d.previous === 'object' ? {
-        auditDate: isoDate(d.previous.auditDate),
-        kpis: arr(d.previous.kpis).map((k) => ({ label: str(k?.label, 60), value: str(k?.value, 30) })).filter((k) => k.label),
-      } : null,
-    },
-    warnings,
-  };
+  const data = (Number(d.schemaVersion) >= 2 || Array.isArray(d.measurements)) ? normalizeV2(d, note) : fromV1(d, note);
+  return { data, warnings };
 }
 
 /* ---------- Publieke functie ---------- */

@@ -904,6 +904,53 @@ module.exports = async (req, res) => {
       // dat blijft in de ROAS-tab, anders ontstaan er twee waarheden over dezelfde
       // euro's. Beide bronnen komen uit de Config-tab; een ontbrekende bron is
       // ONBEKEND (null + vlag), nooit nul.
+      // GEO-tab: bezoek via AI-assistenten, uit GA4 per session source / medium.
+      // Eigen vaste periode (laatste 28 volledige dagen): de GEO-tab heeft geen
+      // topbar-periode, net als de ROAS-tab. Via windsorScoped, dus datasheet
+      // eerst en dezelfde fail-closed-scoping op de GA4-property uit de Config-tab.
+      case 'getAiTraffic': {
+        if (!scopedAccounts.googleanalytics4) {
+          return res.status(200).json({ available: false, reason: "Geen 'GA4 property' in de Config-tab." });
+        }
+        const DAY_MS = 86400000;
+        const to = new Date(Date.now() - DAY_MS).toISOString().slice(0, 10);
+        const from = new Date(Date.now() - 28 * DAY_MS).toISOString().slice(0, 10);
+        // Verwijzers van AI-assistenten → engine-id (zelfde id's als in
+        // geo-dashboard.json). AI Overviews heeft geen eigen verwijzer: dat
+        // verkeer komt binnen als gewone Google-zoekopdracht.
+        const AI_SOURCES = [
+          { engine: 'chatgpt',    label: 'ChatGPT',     re: /chatgpt\.com|chat\.openai\.com|openai/i },
+          { engine: 'perplexity', label: 'Perplexity',  re: /perplexity/i },
+          { engine: 'gemini',     label: 'Gemini',      re: /gemini\.google|bard\.google/i },
+          { engine: 'claude',     label: 'Claude',      re: /claude\.ai|anthropic/i },
+          { engine: 'copilot',    label: 'Copilot',     re: /copilot\.microsoft|bing\.com\/chat/i },
+          { engine: 'other',      label: 'overige AI',  re: /deepseek|you\.com|meta\.ai|poe\.com|mistral|grok/i },
+        ];
+        const d = await windsorScoped('googleanalytics4', 'session_source_medium,sessions,engaged_sessions,conversions,purchase_revenue',
+          { date_from: from, date_to: to }, 30000, 'geo-ai-traffic');
+        if (d && d.__error) return res.status(502).json({ error: d.__error });
+        const num = (v) => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : 0; };
+        const groups = new Map();
+        let total = 0;
+        for (const r of (d && Array.isArray(d.data) ? d.data : [])) {
+          const s = num(r.sessions);
+          total += s;
+          const src = String(r.session_source_medium || '');
+          const hit = AI_SOURCES.find(a => a.re.test(src));
+          if (!hit) continue;
+          const g = groups.get(hit.engine) || { engine: hit.engine, label: hit.label, sessions: 0, engaged: 0, conversions: 0, sources: [] };
+          g.sessions += s; g.engaged += num(r.engaged_sessions); g.conversions += num(r.conversions);
+          if (!g.sources.includes(src) && g.sources.length < 8) g.sources.push(src.slice(0, 120));
+          groups.set(hit.engine, g);
+        }
+        return res.status(200).json({
+          available: true, from, to,
+          totalSessions: total,
+          groups: [...groups.values()].sort((a, b) => b.sessions - a.sessions),
+          origin: d && d.__sheet ? 'sheet' : 'api',
+        });
+      }
+
       case 'getWebsite': {
         if (!startDate || !endDate) return res.status(400).json({ error: 'startDate en endDate vereist.' });
 

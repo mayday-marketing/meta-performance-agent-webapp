@@ -1,545 +1,59 @@
 {
-  "brandName": "mayday marketing",
-  "auditDate": "2026-07-28",
-  "label": "Baseline (pre-launch)",
-  "promptCount": 22,
-  "passNote": "2 passes op de 11 High-prompts, 1 pass op Med/Low — houd dit identiek bij elke her-audit.",
-  "method": "22 buyer prompts, live via de DataForSEO AI-optimization endpoints. Engines: ChatGPT (gpt-5.5), Claude (sonnet-4-6), Gemini (3.5-flash), Perplexity (sonar), Google AI Overviews (live SERP, US/en). Totale API-kost ongeveer $6,60.",
-  "status": {
-    "level": "blocked",
-    "title": "Fase 0 — poort dicht",
-    "text": "Site serveerde geen content op auditdatum; merknaam gekaapt door namesakes. Eerst site live + grounding page, dan herbaseline."
+  "_toelichting": "FICTIEF VOORBEELD van de vorm (schema v2). Geen echt merk, geen echte cijfers — alleen om te zien hoe de blokken eruitzien. Zie GEO_Dashboard_Schema.md.",
+  "schemaVersion": 2,
+  "brand": {
+    "name": "Voorbeeldmerk",
+    "domain": "voorbeeldmerk.be",
+    "descriptor": "Voorbeeldmerk is een Belgisch merk dat … voor …"
   },
-  "kpis": [
-    {
-      "label": "Mention rate · unbranded",
-      "value": "0%",
-      "tone": "bad",
-      "delta": "nulmeting",
-      "sub": "0/95 combinaties — de markt-waarheid"
-    },
-    {
-      "label": "Mention rate · branded",
-      "value": "13%",
-      "tone": "bad",
-      "delta": "nulmeting",
-      "sub": "2/15 · enkel Gemini, beide fout beschreven"
-    },
-    {
-      "label": "Descriptor-juistheid",
-      "value": "0%",
-      "tone": "bad",
-      "delta": "verkeerde categorie + verzonnen aanbod",
-      "sub": "doel: 100% canonieke descriptor"
-    },
-    {
-      "label": "Citaties eigen site",
-      "value": "0",
-      "tone": "bad",
-      "delta": "nulmeting",
-      "sub": "site niet crawlbaar op auditdatum"
-    }
-  ],
+  "label": "Baseline",
+  "method": "4 koopvragen, live op 2 engines (voorbeeld).",
+  "passNote": "1 pass per prompt (voorbeeld).",
   "engines": [
-    {
-      "name": "ChatGPT",
-      "runs": 33,
-      "mentionRatePct": 0,
-      "shareOfVoicePct": 0,
-      "descriptorAccuracyPct": null,
-      "topCompetitor": "HubSpot / OpenAI-als-bron",
-      "sourceType": "vendor docs (help.openai.com) + vendor blogs"
-    },
-    {
-      "name": "Claude",
-      "runs": 33,
-      "mentionRatePct": 0,
-      "shareOfVoicePct": 0,
-      "descriptorAccuracyPct": null,
-      "topCompetitor": "HubSpot, Jasper",
-      "sourceType": "vendor own-domain blogs + self-published roundups"
-    },
-    {
-      "name": "Gemini",
-      "runs": 33,
-      "mentionRatePct": 9,
-      "shareOfVoicePct": 1,
-      "descriptorAccuracyPct": 0,
-      "topCompetitor": "HubSpot, ChatGPT-als-tool",
-      "sourceType": "own-domain pages",
-      "note": "14 how-to runs antwoordden parametrisch (zonder zoeken)"
-    },
-    {
-      "name": "Perplexity",
-      "runs": 33,
-      "mentionRatePct": 0,
-      "shareOfVoicePct": 0,
-      "descriptorAccuracyPct": null,
-      "topCompetitor": "HubSpot, ChatGPT-als-tool",
-      "sourceType": "long-tail blogs + vendor self-roundups; YouTube/LinkedIn zwaar"
-    },
-    {
-      "name": "AI Overviews",
-      "runs": 22,
-      "mentionRatePct": 0,
-      "shareOfVoicePct": 0,
-      "descriptorAccuracyPct": null,
-      "topCompetitor": "HubSpot",
-      "sourceType": "AIO-slot aanwezig 22/22, content async — organische proxy gebruikt"
-    }
+    { "id": "chatgpt", "name": "ChatGPT" },
+    { "id": "gemini", "name": "Gemini" }
   ],
-  "byType": [
-    {
-      "type": "categorie",
-      "ratePct": 0,
-      "note": "0/6"
-    },
-    {
-      "type": "vergelijking",
-      "ratePct": 0,
-      "note": "0/5"
-    },
-    {
-      "type": "how-to",
-      "ratePct": 0,
-      "note": "0/5"
-    },
-    {
-      "type": "probleem",
-      "ratePct": 0,
-      "note": "0/3"
-    },
-    {
-      "type": "brand",
-      "ratePct": 13,
-      "note": "2/15, beide Gemini"
-    }
-  ],
-  "competitors": [
-    {
-      "name": "HubSpot",
-      "engines": 5,
-      "note": "top-mention op elke engine"
-    },
-    {
-      "name": "ChatGPT-als-tool",
-      "engines": 2
-    },
-    {
-      "name": "Jasper",
-      "engines": 1
-    },
-    {
-      "name": "OpenAI-als-bron",
-      "engines": 1
-    }
-  ],
-  "phases": [
-    {
-      "n": "0",
-      "title": "Basis",
-      "gate": "Je bent hier — descriptor 0%, site niet crawlbaar",
-      "here": true
-    },
-    {
-      "n": "1",
-      "title": "Leesbaarheid",
-      "gate": "Poort: readiness >= 9/11"
-    },
-    {
-      "n": "2",
-      "title": "Categorie",
-      "gate": "Poort: 1e unbranded mention"
-    },
-    {
-      "n": "3",
-      "title": "Kunde",
-      "gate": "Poort: how-to mentions"
-    },
-    {
-      "n": "4",
-      "title": "Vertrouwen",
-      "gate": "Poort: >= 3 externe citaties"
-    },
-    {
-      "n": "5-6",
-      "title": "Voorkeur",
-      "gate": "Poort: stijgende SoV-trend"
-    }
-  ],
+  "competitors": ["Concurrent A", "Concurrent B"],
   "prompts": [
-    {
-      "n": 1,
-      "text": "best AI marketing prompts library",
-      "type": "categorie",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 2,
-      "text": "best platform for AI marketing agents and workflows",
-      "type": "categorie",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 3,
-      "text": "best membership for marketers who want to use AI",
-      "type": "categorie",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 4,
-      "text": "best ChatGPT prompt packs for marketing",
-      "type": "categorie",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 5,
-      "text": "where can I find ready-made marketing automations for AI",
-      "type": "categorie",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 6,
-      "text": "top resources to learn AI marketing as a small business owner",
-      "type": "categorie",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 7,
-      "text": "PromptBase alternatives for marketers",
-      "type": "vergelijking",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 8,
-      "text": "is AI Snack Club worth it, or are there better AI memberships",
-      "type": "vergelijking",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 9,
-      "text": "Busy Blooming HQ alternatives for AI marketing help",
-      "type": "vergelijking",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 10,
-      "text": "alternatives to hiring a marketing agency using AI",
-      "type": "vergelijking",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 11,
-      "text": "Jasper vs just using ChatGPT with good prompts",
-      "type": "vergelijking",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 12,
-      "text": "how do I automate my marketing with AI as a solo founder",
-      "type": "how-to",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 13,
-      "text": "how to build an AI marketing system for a small business",
-      "type": "how-to",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 14,
-      "text": "how do I write better ChatGPT prompts for marketing content",
-      "type": "how-to",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 15,
-      "text": "how can I use AI agents to run my social media",
-      "type": "how-to",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 16,
-      "text": "how do I go from using ChatGPT occasionally to a full AI marketing workflow",
-      "type": "how-to",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 17,
-      "text": "I pay for ChatGPT but I am not getting real marketing results, what am I doing wrong",
-      "type": "probleem",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 18,
-      "text": "overwhelmed by AI tools for marketing, where do I start",
-      "type": "probleem",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 19,
-      "text": "why does my AI-generated marketing content sound so generic",
-      "type": "probleem",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 20,
-      "text": "what is mayday marketing",
-      "type": "brand",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 0,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 21,
-      "text": "is mayday.marketing any good",
-      "type": "brand",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 2,
-        "AI Overviews": 0
-      }
-    },
-    {
-      "n": 22,
-      "text": "mayday marketing pricing",
-      "type": "brand",
-      "engines": {
-        "ChatGPT": 0,
-        "Claude": 0,
-        "Perplexity": 0,
-        "Gemini": 2,
-        "AI Overviews": 0
-      }
-    }
-  ],
-  "readiness": [
-    {
-      "check": "robots.txt laat AI-crawlers toe",
-      "status": "fail",
-      "note": "site niet bereikbaar"
-    },
-    {
-      "check": "llms.txt aanwezig",
-      "status": "fail"
-    },
-    {
-      "check": "XML-sitemap aanwezig",
-      "status": "unknown",
-      "note": "onmeetbaar (site down)"
-    },
-    {
-      "check": "Geen CDN/WAF bot-blokkering",
-      "status": "unknown",
-      "note": "onmeetbaar"
-    },
-    {
-      "check": "Content in HTML (server-rendered)",
-      "status": "fail",
-      "note": "www gaf lege body"
-    },
-    {
-      "check": "Organization/JSON-LD schema",
-      "status": "fail"
-    },
-    {
-      "check": "FAQ-schema waar zichtbare Q&A staat",
-      "status": "fail"
-    },
-    {
-      "check": "Answer-first (BLUF) openers",
-      "status": "fail"
-    },
-    {
-      "check": "Zuivere heading-hierarchie",
-      "status": "unknown",
-      "note": "onmeetbaar"
-    },
-    {
-      "check": "Meta descriptions + canonicals",
-      "status": "unknown",
-      "note": "onmeetbaar"
-    },
-    {
-      "check": "HTTPS + geen no-index/noai",
-      "status": "fail",
-      "note": "apex time-out"
-    }
+    { "n": 1, "text": "beste … in België", "type": "category", "priority": "High" },
+    { "n": 2, "text": "Concurrent A alternatieven", "type": "comparison", "priority": "Med" },
+    { "n": 3, "text": "hoe kies ik …", "type": "how-to", "priority": "Med" },
+    { "n": 4, "text": "wat is Voorbeeldmerk", "type": "brand", "priority": "High" }
   ],
   "actions": [
     {
-      "priority": "P1",
-      "effort": "M",
-      "skill": "grounding-page + geo-schema-entity",
-      "title": "Site live + grounding page + Organization-schema",
-      "text": "De merknaam is gekaapt (namesakes, getmayday.com, Be Wary-threads). Zonder crawlbare site is elke andere actie zinloos.",
-      "done": "5 engines noemen mayday.marketing eerst op brand-prompts, met juiste descriptor."
+      "priority": "hoog", "effort": "middel", "how": "feitenpagina + structured data",
+      "moves": ["Leesbaarheid", "Herkenning"],
+      "title": "1 · Feitenpagina met de canonieke omschrijving",
+      "text": "Waarom deze actie eerst komt.",
+      "done": "beide engines omschrijven het merk juist op de brand-prompt."
     },
-    {
-      "priority": "P1",
-      "effort": "M",
-      "skill": "geo-page-rewrite",
-      "title": "Claim best membership for AI marketers (#3)",
-      "text": "Bevestigd retrieval-vacuum — niemand bezit deze categorie. Eerste citeerbare answer-first pagina wint.",
-      "done": "mayday in de consideration set op >= 3 engines, >= 1 pass."
-    },
-    {
-      "priority": "P2",
-      "effort": "M",
-      "skill": "geo-page-rewrite",
-      "title": "Pain-point-hijack: ChatGPT betalen, geen resultaat (#16/17)",
-      "text": "maydays kernverhaal, nu beantwoord door OpenAI-docs. Averi.ai bewijst dat dit format citaties oplevert.",
-      "done": "Geciteerd op #16 of #17 in Perplexity of Claude."
-    },
-    {
-      "priority": "P2",
-      "effort": "S",
-      "skill": "geo-page-rewrite + entity B",
-      "title": "AI Snack Club vs mayday vergelijkingspagina (#8)",
-      "text": "Het alternatief-slot is leeg: nul alternatieven genoemd in elke pass. Eerlijke vergelijking pakt dit.",
-      "done": "mayday genoemd als alternatief in >= 1 engine."
-    },
-    {
-      "priority": "P2",
-      "effort": "S",
-      "skill": "geo-schema-entity (B)",
-      "title": "Directory-listings (#5/#7)",
-      "text": "topai.tools, alternatives.co, neura.market worden geciteerd — mayday staat nergens. Plus Product Hunt/Crunchbase voor sameAs.",
-      "done": "Gelist op >= 3 geciteerde directories; genoemd op #5 of #7."
-    },
-    {
-      "priority": "doorlopend",
-      "effort": "S",
-      "skill": "geo-monitor",
-      "title": "Maandcyclus",
-      "text": "Volledige her-run 4-6 weken na launch (ongeveer 37 euro bij 2 passes); tussentijds goedkoop mentions-signaal via de Sources-tab.",
-      "done": "Fase-status beweegt; elke daling krijgt een eigenaar."
-    }
+    { "ongoing": true, "how": "maandmeting", "moves": ["meet alle 6 blokken"],
+      "title": "2 · Maandcyclus", "text": "Kwartaalmeting + maandelijkse signalen.", "done": "blokstatus beweegt." }
   ],
-  "sources": {
-    "keyword": "AI marketing",
-    "platform": "chat_gpt",
-    "location": "United States",
-    "language": "en"
-  }
+  "sources": { "keyword": "…", "platform": "google", "location": "Belgium", "language": "nl" },
+  "measurements": [
+    {
+      "date": "2026-01-15",
+      "kind": "full",
+      "note": "baseline",
+      "runs": {
+        "chatgpt": { "1": [0], "2": [0], "3": [0], "4": [1] },
+        "gemini":  { "1": [0], "2": [0], "4": [2] }
+      },
+      "runCount": 7,
+      "brandCounts": { "Voorbeeldmerk": 2, "Concurrent A": 4, "Concurrent B": 1 },
+      "brandSplit": [
+        { "engine": "chatgpt", "prompt": 4, "pass": 1, "class": "correct_entity", "evidence": "noemt het merk met de juiste omschrijving" },
+        { "engine": "gemini", "prompt": 4, "pass": 1, "class": "namesake", "evidence": "beschrijft een ander bedrijf met dezelfde naam" }
+      ],
+      "checks": [
+        { "check": "robots.txt laat AI-crawlers toe", "status": "pass", "note": "" },
+        { "check": "llms.txt aanwezig", "status": "fail", "note": "" },
+        { "check": "XML-sitemap aanwezig", "status": "unknown", "note": "niet te meten" }
+      ],
+      "ownCitations": 1,
+      "externalCitations": 0
+    }
+  ]
 }

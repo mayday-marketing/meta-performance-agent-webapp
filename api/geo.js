@@ -9,7 +9,12 @@
                           engine-scorecard, promptmatrix, readiness, acties.
                           Statisch — er wordt niets live opgevraagd.
      action 'sources'   → DataForSEO LLM-mentions, live. Welke domeinen en
-                          pagina's voeden AI-antwoorden in deze markt.
+                          pagina's voeden AI-antwoorden in deze markt — standaard
+                          alleen antwoorden waarin het eigen domein NIET staat
+                          (de digital-PR-targetlijst).
+     action 'mentions'  → DataForSEO LLM-mentions search, live. In welke vragen
+                          van echte gebruikers het eigen domein al opduikt, los
+                          van de vaste promptset (ongeplande vermeldingen).
 
    De scheiding is het hele punt. De baseline is een meting met een datum en een
    methode; die verzin je niet en die ververs je niet per ongeluk. De Sources-
@@ -28,7 +33,7 @@
    ========================================================== */
 
 const crypto = require('crypto');
-const { captureOidcToken } = require('./_config');
+const { captureOidcToken, getClientConfig } = require('./_config');
 const { getGeoBaseline } = require('./_geodata');
 
 const SECRET = process.env.AUTH_SECRET;
@@ -126,6 +131,21 @@ async function dfsPostWithFallback(paths, task, auth, timeoutMs) {
   throw lastErr || new Error('Geen bruikbaar endpoint.');
 }
 
+// Het eigen domein van dit merk, altijd server-side: eerst uit het auditbestand
+// in de Drive-map van de klant, anders uit 'SEO domein' in de Config-tab. Nooit
+// uit het request — anders kiest een klant wiens vermeldingen hij opvraagt.
+async function ownDomain(cid, baseline) {
+  const clean = (v) => String(v || '').toLowerCase().trim()
+    .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+  const fromFile = clean(baseline?.brand?.domain);
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(fromFile)) return fromFile;
+  try {
+    const { config } = await getClientConfig(cid);
+    const d = clean(config?.seo?.domain);
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) ? d : null;
+  } catch { return null; }
+}
+
 const groupList = (list) => (Array.isArray(list) ? list : []).map((g) => ({
   key: String(g?.key ?? '').slice(0, 300),
   mentions: Number(g?.mentions) || 0,
@@ -140,7 +160,7 @@ module.exports = async (req, res) => {
   captureOidcToken(req);   // OIDC-token uit de request-header (zie _config.js)
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, clientId, token, keyword, platform, force } = req.body || {};
+  const { action, clientId, token, keyword, platform, force, excludeOwn } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -200,15 +220,22 @@ module.exports = async (req, res) => {
         }
         const location = cfg.location || 'Belgium';
         const language = cfg.language || 'nl';
+        // Eigen domein uitsluiten: dan tonen de domeinen precies de antwoorden
+        // waar het merk ontbreekt — wat de UI belooft ('waar wij niet staan').
+        // Zonder bekend domein kan dat niet, en zegt de respons dat.
+        const own = await ownDomain(cid, base.data);
+        const excl = excludeOwn !== false && !!own;
 
-        const key = `${cid}|src|${cfg.keyword}|${plat}|${location}|${language}`;
+        const key = `${cid}|src|${cfg.keyword}|${plat}|${location}|${language}|${excl ? own : '-'}`;
         if (!force) {
           const hit = cacheGet(key);
           if (hit) return res.status(200).json({ ...hit, fromCache: true });
         }
 
+        const target = [{ keyword: cfg.keyword, match_type: 'partial_match', search_filter: 'include' }];
+        if (excl) target.push({ domain: own, search_filter: 'exclude' });
         const task = {
-          target: [{ keyword: cfg.keyword, match_type: 'partial_match', search_filter: 'include' }],
+          target,
           platform: plat,
           location_name: location,
           language_code: language,
@@ -271,6 +298,8 @@ module.exports = async (req, res) => {
           keyword: cfg.keyword,
           platform: plat,
           location, language,
+          excludedDomain: excl ? own : null,
+          ownDomainKnown: !!own,
           domains, pages, totals,
           errors,
           cost: Math.round(cost * 1000) / 1000,
@@ -279,6 +308,66 @@ module.exports = async (req, res) => {
         // Alleen cachen als er iets bruikbaars uitkwam; anders blijft een
         // mislukte pull een dag lang 'het antwoord'.
         if (domains.length || pages.length) cacheSet(key, payload);
+        return res.status(200).json({ ...payload, fromCache: false });
+      }
+
+      /* ---- Live: ongeplande vermeldingen van het eigen domein ---- */
+      case 'mentions': {
+        if (!auth) {
+          return res.status(400).json({ error: 'Geen DataForSEO-koppeling ingesteld.' });
+        }
+        const base = await getGeoBaseline(cid, client?.driveFolderId, false);
+        const own = await ownDomain(cid, base.data);
+        if (!own) {
+          return res.status(400).json({ error: "Geen domein voor dit merk: zet 'brand.domain' in geo-dashboard.json of 'SEO domein' in de Config-tab." });
+        }
+        const cfg = base.data?.sources || {};
+        const plat = (platform === 'google' || platform === 'chat_gpt') ? platform : (cfg.platform || 'google');
+        const location = cfg.location || 'United States';
+        const language = cfg.language || 'en';
+        // De ChatGPT-database van LLM Mentions bestaat alleen voor VS/Engels.
+        // Een andere markt levert daar stil niets op; zeg het vóór de call.
+        if (plat === 'chat_gpt' && !(location.toLowerCase() === 'united states' && language === 'en')) {
+          return res.status(400).json({ error: `ChatGPT-data bestaat in LLM Mentions alleen voor VS/Engels; deze markt is ${location}/${language}. Kies Google AI.` });
+        }
+
+        const key = `${cid}|mentions|${own}|${plat}|${location}|${language}`;
+        if (!force) {
+          const hit = cacheGet(key);
+          if (hit) return res.status(200).json({ ...hit, fromCache: true });
+        }
+
+        const r = await dfsPost('/ai_optimization/llm_mentions/search/live', {
+          target: [{ domain: own }],
+          platform: plat, location_name: location, language_code: language, limit: 50,
+        }, auth, SOURCES_TIMEOUT_MS);
+
+        const promptSet = new Set((base.data?.prompts || []).map((p) => String(p.text || '').toLowerCase().trim()));
+        const ownRe = new RegExp(`(^|\\.)${own.replace(/\./g, '\\.')}$`, 'i');
+        const items = (r.result?.[0]?.items || []).map((it) => {
+          const question = String(it?.question ?? '').slice(0, 300);
+          const cited = (Array.isArray(it?.sources) ? it.sources : [])
+            .some((src) => ownRe.test(String(src?.domain || '').replace(/^www\./, '')));
+          return {
+            question,
+            model: String(it?.model_name || it?.platform || '').slice(0, 60),
+            cited,
+            inPromptSet: promptSet.has(question.toLowerCase().trim()),
+            aiSearchVolume: it?.ai_search_volume == null ? null : Number(it.ai_search_volume),
+            lastSeen: String(it?.last_response_at || '').slice(0, 10) || null,
+          };
+        }).filter((i) => i.question);
+
+        const payload = {
+          domain: own, platform: plat, location, language,
+          total: Number(r.result?.[0]?.total_count) || items.length,
+          items,
+          cost: Math.round((r.cost || 0) * 1000) / 1000,
+          fetchedAt: new Date().toISOString(),
+        };
+        // Een lege lijst is hier een geldig antwoord ('nog nergens genoemd') en
+        // mag dus ook gecachet worden — anders kost elke klik opnieuw geld.
+        cacheSet(key, payload);
         return res.status(200).json({ ...payload, fromCache: false });
       }
 

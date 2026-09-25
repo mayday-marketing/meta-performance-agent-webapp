@@ -1,178 +1,162 @@
-# geo-dashboard.json — schema voor de GEO-tab
+# geo-dashboard.json — schema voor de GEO-tab (v2, het 2+3+1-model)
 
-De GEO-tab in het dashboard leest één bestand per klant: **`geo-dashboard.json`**
-in de Drive-map van die klant. Dit document beschrijft dat bestand.
-Werkend voorbeeld met echte cijfers: `geo-dashboard.example.json` hiernaast.
+De GEO-tab leest één bestand per klant: **`geo-dashboard.json`** in de Drive-map
+van die klant. Dit document beschrijft dat bestand. Een minimaal, fictief
+voorbeeld staat in `geo-dashboard.example.json` hiernaast.
 
-## Waarom een JSON en niet het audit-rapport zelf
+## Het principe: alle merkdata in het bestand, niets in de code
 
-De `geo-visibility-audit`-skill levert een markdown-rapport. Dat rapport is voor
-mensen: twee echte audits (mayday en Just Jane, allebei 28-07-2026) hebben
-verschillende koppen, verschillende tabelkolommen (`Runs` vs `Prompts`,
-`Top competitor by SoV` vs `Top concurrent`), verschillende talen, en bij Just
-Jane een extra baseline-tabel vóór de scorecard.
+De code van de app kent geen enkel merk. Merknaam, domein, de bevroren
+concurrentieset, de promptset, de acties en de metingen staan allemaal in het
+bestand van de klant. Twee klanten verschillen dus alleen in hun bestand.
 
-Een parser daarop faalt niet luid — hij geeft een verkeerd getal. Voor een
-zichtbaarheidscijfer dat een klant te zien krijgt is dat het enige wat echt niet
-mag. Vandaar: wie de audit draait, schrijft het resultaat één keer weg in dit
-formaat. Dat is hetzelfde werk als de HTML-template per klant invullen, maar dan
-machineleesbaar en één keer.
+En: **het bestand bevat ruwe runs, geen percentages.** De app rekent mention
+rates, de zes blokken, deltas en share of voice zelf uit. Een tegel kan zo nooit
+iets anders zeggen dan de matrix eronder, en een hand-ingevuld percentage kan
+niet afwijken van wat er gemeten is.
 
-**Regel uit de handover blijft gelden: geen audit = geen cijfers.** Zonder
-bestand toont de tab een uitleg, geen nullen en geen demo-data.
+**Geen audit = geen cijfers.** Zonder bestand, of zonder volledige meting, toont
+de tab een uitleg — nooit nullen of demo-data.
 
 ## Waar het bestand hoort
 
 In de Drive-map van de klant (`CLIENTS[clientId].driveFolderId`), in deze
-volgorde doorzocht:
+volgorde doorzocht: de klantmap zelf, `GEO/`, `00_AI-CONTEXT/`. Elke naam die
+matcht op `geo-dashboard*.json` telt mee; de **laatst gewijzigde** wint.
 
-1. de klantmap zelf
-2. `GEO/`
-3. `00_AI-CONTEXT/`
+Een nieuwe meting voeg je toe aan `measurements` in hetzelfde bestand. Nooit een
+oude meting wijzigen: dat is de historiek waar de deltas op rusten.
 
-Elke bestandsnaam die matcht op `geo-dashboard*.json` telt mee; staan er
-meerdere, dan wint de **laatst gewijzigde**. Zo kun je `2026-07-28_geo-dashboard.json`
-laten staan naast een her-audit.
+## Het model
 
-## Regels die de validator afdwingt
+| Groep | Blok | Gemeten door |
+|---|---|---|
+| 🔒 Fundamenten (blokkerend) | Leesbaarheid | `checks` van de meting · op orde vanaf 8/10 geslaagd |
+| | Herkenning | prompts `brand` + `brandSplit` · op orde vanaf 80% juist herkende brand-runs |
+| 🏛 Vindbaarheid (parallel) | Categorie | prompts `category` |
+| | Expertise | prompts `how-to` + `problem` |
+| | Vertrouwen | `externalCitations` van de meting |
+| 📈 Uitkomst | Voorkeur | prompts `comparison` + share of voice · trend vanaf 2 metingen |
 
-- **Percentages zijn getallen 0–100**, geen fracties. `15` is 15%. Velden heten
-  daarom `...Pct`. Buiten dat bereik → veld valt weg met een waarschuwing.
-- **Ontbrekend is onbekend, nooit nul.** Een weggelaten of ongeldig veld
-  verdwijnt en de tab toont een streepje. Er wordt nooit een 0 ingevuld.
-- **Onbekende velden worden genegeerd** — je mag eigen notities meeschrijven.
-- Blokken zijn allemaal optioneel. Ontbreekt `prompts`, dan zegt die sub-tab dat
-  er geen promptmatrix in dit auditbestand staat; de rest blijft werken.
+De drempels (8/10 en 80%) zijn voor elk merk gelijk en staan in de code
+(`GEO_T` in `app.js`), niet in het bestand.
 
 ## De blokken
 
-### Kop
+### Merk en methode
 
 ```json
 {
-  "brandName": "mayday marketing",
-  "auditDate": "2026-07-28",
-  "label": "Baseline (pre-launch)",
-  "promptCount": 22,
-  "passNote": "2 passes op de 11 High-prompts, 1 pass op Med/Low",
-  "method": "22 buyer prompts, live via DataForSEO AI-optimization…"
+  "schemaVersion": 2,
+  "brand": { "name": "Voorbeeldmerk", "domain": "voorbeeldmerk.be", "descriptor": "…" },
+  "label": "Baseline",
+  "method": "20 koopvragen, live via DataForSEO op 5 engines …",
+  "passNote": "2 passes op prioriteit hoog, 1 op middel/laag — bij elke meting gelijk"
 }
 ```
 
-`auditDate` moet `YYYY-MM-DD` zijn. Wijkt `promptCount` af van het aantal
-prompts in de lijst, dan komt dat als waarschuwing terug — een deelmeting is
-geldig, maar je wil het weten vóór een klant het ziet.
+`brand.domain` voedt de live-lagen: de bronnen-pull sluit antwoorden met dit
+domein uit, en de ongeplande vermeldingen zoeken op dit domein. Ontbreekt het,
+dan valt de app terug op `SEO domein` in de Config-tab. Het request levert nooit
+een domein aan.
 
-### `status` — de banner bovenaan
-
-```json
-{ "level": "blocked", "title": "Fase 0 — poort dicht", "text": "…" }
-```
-
-`level`: `blocked` (rood), `warn` (geel), `ok` (groen).
-
-### `kpis` — de vier tegels
+### `engines`
 
 ```json
-[{ "label": "Mention rate · unbranded", "value": "0%", "tone": "bad",
-   "delta": "nulmeting", "sub": "0/95 combinaties" }]
+[{ "id": "chatgpt", "name": "ChatGPT" }, { "id": "aio", "name": "AI Overviews" }]
 ```
 
-`value` is vrije tekst: het dashboard rekent hier niets, het toont wat de audit
-gemeten heeft. `tone`: `good` | `bad` | `neutral`.
+`id` is de sleutel in `runs` en `brandSplit`. Gebruik `chatgpt`, `claude`,
+`perplexity`, `gemini` voor die vier: het AI-verkeer uit GA4 wordt op die id's
+gekoppeld voor de naar verkeer gewogen mention rate.
 
-### `engines` — de scorecard
+### `competitors` — de bevroren share-of-voice-set
 
 ```json
-[{ "name": "Gemini", "runs": 33, "mentionRatePct": 9, "shareOfVoicePct": 1,
-   "descriptorAccuracyPct": 0, "topCompetitor": "HubSpot",
-   "sourceType": "own-domain pages", "note": "14 how-to runs parametrisch" }]
+["Concurrent A", "Concurrent B", "Concurrent C"]
 ```
 
-`descriptorAccuracyPct` weglaten als de audit `n/a` zegt (geen mentions = niets
-te beoordelen). Weglaten ≠ 0%.
+Komt uit `<merk>_geo-config.md`, sectie Competitors → *share-of-voice set*. Vast
+vanaf de baseline: wijzig je de set, dan is share of voice tussen metingen niet
+meer vergelijkbaar. Merken in `brandCounts` buiten deze set worden genegeerd
+(met een waarschuwing).
 
-### `byType` en `competitors`
+### `prompts` — de vaste vragenset
 
 ```json
-"byType":      [{ "type": "categorie", "ratePct": 0, "note": "0/6" }],
-"competitors": [{ "name": "HubSpot", "engines": 5, "note": "top-mention overal" }]
+[{ "n": 1, "text": "beste … voor …", "type": "category", "priority": "High" }]
 ```
 
-`engines` bij een concurrent = op hoeveel engines die de top-mention is.
+`type`: `category` | `comparison` | `how-to` | `problem` | `brand`
+(Nederlands mag ook: `categorie`, `vergelijking`, `probleem`, `merk`). Een
+onbekend type telt in geen enkel blok mee en komt als waarschuwing terug.
 
-### `phases` — de zes fasen
+### `actions`
 
 ```json
-[{ "n": "0", "title": "Basis", "gate": "Poort: readiness ≥ 9/11", "here": true }]
+[{ "priority": "hoog", "effort": "middel", "how": "pagina herschrijven",
+   "moves": ["Categorie"], "title": "…", "text": "…", "done": "…" },
+ { "ongoing": true, "how": "maandmeting", "moves": ["meet alle 6 blokken"], "title": "…" }]
 ```
 
-Precies één fase met `"here": true`.
+Klanttaal: `hoog/middel/laag`, `klein/middel/groot`, geen skillnamen in `how`.
+`moves` = de blokken die de actie beweegt.
 
-### `prompts` — de matrix
+### `sources` — de live bronnenlaag
 
 ```json
-[{ "n": 3, "text": "best membership for marketers who want to use AI",
-   "type": "categorie", "priority": "High",
-   "engines": { "ChatGPT": 0, "Claude": 0, "Perplexity": 0, "Gemini": 2, "AI Overviews": 0 } }]
+{ "keyword": "…", "platform": "google", "location": "Belgium", "language": "nl" }
 ```
 
-Celwaarden:
+Het keyword staat vast (het DataForSEO-saldo is gedeeld); de tab mag alleen het
+platform wisselen. **LLM Mentions kent `chat_gpt` alleen voor VS/Engels** — de
+tab waarschuwt vóór de call. De vaste vragenset in een andere markt meten gaat
+via de ChatGPT-scraper en LLM-responses: dat is de kwartaalmeting, niet deze laag.
 
-| waarde | betekenis |
-|---|---|
-| `0` | niet genoemd |
-| `1` | genoemd |
-| `2` | genoemd maar **fout** beschreven |
-| veld weggelaten of `null` | **niet gemeten** |
-
-Die vierde toestand staat niet in de oorspronkelijke HTML-template maar is wel
-nodig: in de Just Jane-audit is Gemini op 7 van de 20 prompts gemeten en de rest
-niet. Zonder onderscheid telt 'niet gemeten' als 'niet genoemd' en zakt de
-mention rate structureel te laag. De kolomkoppen van de matrix komen uit de
-namen in `engines`.
-
-### `readiness` — de technische checks
+### `measurements` — de historiek
 
 ```json
-[{ "check": "robots.txt laat AI-crawlers toe", "status": "fail", "note": "site niet bereikbaar" }]
+[{
+  "date": "2026-07-28", "kind": "full", "note": "pre-launch",
+  "calloutNote": "Site serveerde geen content op auditdatum …",
+  "runs": { "chatgpt": { "1": [0, 0], "20": [0, 0] }, "gemini": { "21": [2] } },
+  "runCount": 132,
+  "brandCounts": { "Voorbeeldmerk": 2, "Concurrent A": 53 },
+  "brandSplit": [{ "engine": "gemini", "prompt": 21, "pass": 1,
+                   "class": "correct_entity_wrong_description", "evidence": "…" }],
+  "checks": [{ "check": "robots.txt laat AI-crawlers toe", "status": "fail", "note": "…" }],
+  "ownCitations": 0, "externalCitations": 0,
+  "matrixNote": "…", "checksNote": "…"
+}]
 ```
 
-`status`: `pass` | `fail` | `unknown`. De score bovenaan telt alleen `pass`
-tegen het totaal, en `unknown` wordt apart genoemd — anders lijkt onmeetbaar
-hetzelfde als gezakt.
+- `kind`: `full` (volledige vragenset, per kwartaal, ≈ €37 bij 2 passes) of
+  `light` (goedkope maandsignalen). De laatste `full` is de huidige stand, de
+  `full` daarvoor de vorige stand.
+- `runs[engine][prompt]` = één toestand **per pass**: `0` niet genoemd, `1`
+  genoemd en juist omschreven, `2` genoemd maar fout omschreven. Ontbreekt een
+  prompt of engine → **niet gemeten**; dat telt nergens mee, en zeker niet als
+  'niet genoemd'. Een cel telt als genoemd zodra één pass het merk noemt.
+- `brandCounts`: per merk in de set, het aantal runs dat het merk noemt (één keer
+  per run). `runCount` = het aantal runs met antwoordtekst waarover geteld is.
+- `brandSplit`: één rij per run op de brand-prompts. `class`:
+  `correct_entity` · `correct_entity_wrong_description` · `namesake` ·
+  `invented` · `generic_no_entity`. Dit is het cijfer achter 'branded x%'.
+- `checks.status`: `pass` | `fail` | `unknown`. Onmeetbaar is geen gezakte check;
+  de score telt alleen `pass`.
 
-### `actions` — de actiekaarten
+## Hoe je een meting maakt
 
-```json
-[{ "priority": "P1", "effort": "M", "skill": "grounding-page + geo-schema-entity",
-   "title": "Site live + grounding page", "text": "…",
-   "done": "5 engines noemen mayday.marketing eerst op brand-prompts." }]
-```
+1. Draai de `geo-visibility-audit`; de ruwe runs komen in `GEO/<merk>/raw/`.
+2. Zet ze om naar een gestructureerde export (`<datum>_audit-structured.json`:
+   runs met `maydayState`/`brands`, `brandSplit`) — één keer, gecontroleerd tegen
+   de samenvatting van de audit.
+3. Voeg er één meting mee toe aan `measurements`. De rest van het bestand
+   (merk, set, prompts) verandert niet tussen metingen.
 
-### `sources` — de live laag
+## Oud formaat (v1)
 
-```json
-{ "keyword": "AI marketing", "platform": "chat_gpt",
-  "location": "United States", "language": "en" }
-```
-
-Dit stuurt de Sources-tab, die wél live bij DataForSEO ophaalt welke domeinen en
-pagina's AI-antwoorden voeden. Het keyword staat hier vast en kan niet vanuit de
-browser gewijzigd worden: elke pull kost ongeveer $0,10 op het gedeelde
-DataForSEO-saldo. Het platform mag in de tab wel gewisseld worden tussen
-`chat_gpt` en `google`.
-
-**Let op de databases:** de Belgische database kent alleen platform `google`
-(AI Overviews / AI Mode) en vereist een taalparameter. De ChatGPT-database
-bestaat enkel voor VS/EN. Staat er `chat_gpt` met `location: "Belgium"`, dan
-komt er niets terug.
-
-### `previous` — vorige meting
-
-```json
-{ "auditDate": "2026-05-12", "kpis": [{ "label": "Mention rate · unbranded", "value": "0%" }] }
-```
-
-Alleen voor de vergelijkingsregel onder de KPI-tegels. Labels moeten exact
-overeenkomen met die in `kpis`.
+Bestanden zonder `schemaVersion` of `measurements` (met `kpis`, `phases`,
+`competitors` als telling) worden nog ingelezen en omgezet: de promptmatrix,
+checks en acties blijven werken, share of voice en de naamkaping-split
+ontbreken, en de tab zegt dat met een waarschuwing. Schrijf ze om naar v2.

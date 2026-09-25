@@ -364,6 +364,30 @@ multi-tenant en server-side op de **REST**-API met Basic auth.
 Hoe de vijf AI-engines over het merk praten (`#page-geo`, nav `data-page="geo"`,
 `api/geo.js` + `api/_geodata.js`). Geport van `TEMPLATE_geo-dashboard.html` in
 Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
+Draait op het **2+3+1-model**: 2 blokkerende fundamenten (Leesbaarheid,
+Herkenning), 3 parallelle pijlers (Categorie, Expertise, Vertrouwen), 1 uitkomst
+(Voorkeur). Geen fases, geen poorten — het woord 'fase' hoort niet in de UI.
+
+- **Merkloos in code, alles in het bestand (schema v2).** Merk, domein, de
+  bevroren share-of-voice-set, prompts, acties en de metingen als historiek
+  staan in `geo-dashboard.json` van de klant. De code kent geen merk; zet er
+  nooit een concurrent, prompt of merknaam in. Zelfs het voorbeeldbestand in
+  `agents/` is fictief.
+- **Ruwe runs, geen percentages.** Een meting bevat `runs[engine][prompt]` = één
+  toestand per pass. De frontend rekent mention rates, de zes blokken, deltas
+  en share of voice zelf uit (`geoMention`, `geoBlocks`, `geoSov` in `app.js`),
+  zodat een tegel nooit iets anders zegt dan de matrix. Vorige stand = de
+  volledige meting (`kind: "full"`) vóór de laatste.
+- **Share of voice over een bevroren set** (`competitors`), uit de geo-config van
+  het merk. Merken buiten de set in `brandCounts` worden genegeerd: anders
+  verschuift de noemer tussen metingen en is een delta geen delta.
+- **Naamkaping-split** (`brandSplit`, één rij per brand-run) is het cijfer achter
+  'branded x%': herkend / fout omschreven / naamgenoot / verzonnen / geen entiteit.
+- **Drempels in de code, voor elk merk gelijk** (`GEO_T`): Leesbaarheid op orde
+  vanaf 8/10 geslaagde checks, Herkenning vanaf 80% juist herkende brand-runs.
+- **Oude v1-bestanden** (kpis/phases/competitors-als-telling) worden omgezet
+  (`fromV1` in `_geodata.js`), met een waarschuwing; share of voice en de split
+  ontbreken dan. Eén renderer, geen tweede codepad.
 
 - **De baseline is een bestand, geen parser.** De `geo-visibility-audit`-skill
   levert een markdown-rapport voor mensen. Twee echte audits (mayday en Just
@@ -371,7 +395,7 @@ Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
   (`Runs` vs `Prompts`, `Top competitor by SoV` vs `Top concurrent`), een andere
   taal en bij Just Jane een extra baseline-tabel vóór de scorecard. Een parser
   daarop faalt niet luid — hij geeft een verkeerd getal. Daarom leest de tab
-  **`geo-dashboard.json`** uit de Drive-map van de klant. Schema en een ingevuld
+  **`geo-dashboard.json`** uit de Drive-map van de klant. Schema en een fictief
   voorbeeld: `agents/GEO_Dashboard_Schema.md` + `agents/geo-dashboard.example.json`.
 - **Geen audit = geen cijfers.** Zonder bestand toont de tab wat er moet gebeuren
   en waar gezocht is. Nooit nullen, nooit demo-data: een klant ziet het verschil
@@ -379,9 +403,6 @@ Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
 - **Bestand vinden:** klantmap → `GEO/` → `00_AI-CONTEXT/`, elk bestand dat
   matcht op `geo-dashboard*.json`, nieuwste wint. De map komt uit
   `CLIENTS[clientId].driveFolderId`, nooit uit het request.
-- **Percentages zijn 0–100 in dat bestand, geen fracties** (velden heten `*Pct`).
-  Een validator die soms `0,15` en soms `15` accepteert is een fout die je pas
-  in het dashboard ziet.
 - **De promptmatrix kent vier toestanden**, niet drie: 0 niet genoemd, 1 genoemd,
   2 genoemd-maar-fout, en **weggelaten = niet gemeten**. Die vierde staat niet in
   de HTML-template maar is nodig: bij Just Jane is Gemini op 7 van de 20 prompts
@@ -389,10 +410,20 @@ Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
   mention rate structureel. De UI telt de vier apart onder de tabel.
 - **Readiness telt `unknown` apart van `fail`.** Zolang een site niet bereikbaar
   is valt er niets te controleren; dat is geen gezakte check.
-- **Alleen de Sources-tab is live.** DataForSEO LLM-mentions: welke domeinen,
-  merken en pagina's voeden AI-antwoorden in deze markt. Dat is marktdata en zegt
-  niets over déze klant — daarom mag die wél elke dag veranderen, terwijl de
-  baseline een meting met een datum blijft.
+- **Drie live lagen, allemaal achter een knop met dagcache** (de goedkope
+  maandsignalen; de volledige meting is per kwartaal):
+  - *Sources* (`geo.js` action `sources`): welke domeinen en pagina's AI-antwoorden
+    voeden. Standaard met `search_filter: "exclude"` op het eigen domein, zodat
+    de lijst echt 'waar wij ontbreken' is.
+  - *Ongeplande vermeldingen* (`geo.js` action `mentions`, LLM Mentions search):
+    in welke vragen het eigen domein al opduikt, buiten de vaste promptset.
+  - *AI-verkeer* (`windsor.js` action `getAiTraffic`): GA4 per session source /
+    medium, laatste 28 dagen, gegroepeerd per AI-assistent; voedt de naar
+    verkeer gewogen mention rate. Via `windsorScoped`, dus datasheet-eerst en
+    fail-closed op de GA4-property uit de Config-tab.
+- **Het eigen domein komt server-side** (`ownDomain` in `geo.js`): eerst
+  `brand.domain` uit het auditbestand, anders `SEO domein` uit de Config-tab.
+  Nooit uit het request — anders kiest een klant wiens vermeldingen hij opvraagt.
 - **Sources-kosten: ~$0,10 per pull** (per call, niet per rij) en tot 120 s
   looptijd — vandaar `maxDuration: 120`, een knop en een dagcache. Het keyword
   staat vast in het auditbestand; het request mag alleen het platform wisselen,

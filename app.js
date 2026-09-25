@@ -107,6 +107,14 @@
     geoSourcesLoading: false,
     geoSourcesError: null,
     geoSourcesPlatform: null,         // null = volg het auditbestand
+    geoSourcesExclude: true,          // bronnen: alleen antwoorden waarin het eigen domein niet staat
+    geoMovedOnly: false,              // Prompts: toon alleen wat bewoog t.o.v. de vorige meting
+    geoMentions: null,                // live: ongeplande vermeldingen van het eigen domein
+    geoMentionsLoading: false,
+    geoMentionsError: null,
+    geoAi: null,                      // live: AI-verkeer uit GA4 (laatste 28 dagen)
+    geoAiLoading: false,
+    geoAiError: null,
   };
 
   /* ---------- Session persistence ---------- */
@@ -452,6 +460,14 @@
     state.geoSourcesError = null;
     state.geoSourcesLoading = false;
     state.geoSourcesPlatform = null;
+    state.geoSourcesExclude = true;
+    state.geoMovedOnly = false;
+    state.geoMentions = null;
+    state.geoMentionsError = null;
+    state.geoMentionsLoading = false;
+    state.geoAi = null;
+    state.geoAiError = null;
+    state.geoAiLoading = false;
     state.chatMessages = [];
     $("#brand-input").value = "";
     $("#code-input").value = "";
@@ -3694,27 +3710,34 @@
   // momentopname met een datum en een methode; die twee gaan mee, anders kan de
   // agent een half jaar oude meting als 'de stand van vandaag' presenteren.
   function buildGeoSummary() {
-    const g = state.geo;
-    if (!g) return null;
+    if (!state.geo) return null;
+    const { g, full, cur, prev } = geoCtx();
+    if (!cur) return null;
+    const pack = (m) => {
+      const b = geoBlocks(g, m);
+      const sov = geoSov(g, m);
+      return {
+        date: m.date,
+        mentionUnbrandedPct: geoMention(g, m, GEO_UNBRANDED).pct,
+        mentionBrandedPct: b.herk,
+        descriptorPct: b.descr,
+        blocks: {
+          leesbaarheid: b.r.total ? `${b.r.pass}/${b.r.total} (${b.r.fail} falen, ${b.r.unk} onmeetbaar)` : null,
+          herkenningJuistPct: b.herkCorrect, categoriePct: b.cat, expertisePct: b.exp,
+          vertrouwenExterneCitaties: b.vert, voorkeurPct: b.voor,
+        },
+        perEngine: g.engines.map(e => ({ engine: e.name, mentionPct: geoMention(g, m, null, [e.id]).pct })),
+        shareOfVoice: sov ? sov.rows.map(r => ({ brand: r.brand, pct: r.pct == null ? null : Math.round(r.pct * 10) / 10 })) : null,
+        brandSplit: b.sc.total ? Object.fromEntries(GEO_SPLIT.map(([k]) => [k, b.sc[k]])) : null,
+      };
+    };
     return {
-      auditDate: g.auditDate || null,
-      label: g.label || null,
-      promptCount: g.promptCount != null ? g.promptCount : null,
+      brand: g.brand.name || null,
+      fullMeasurements: full.length,
       method: g.method || null,
-      status: g.status ? { level: g.status.level, title: g.status.title } : null,
-      kpis: arrayOrEmpty(g.kpis).map(k => ({ label: k.label, value: k.value, delta: k.delta })),
-      engines: arrayOrEmpty(g.engines).map(e => ({
-        name: e.name, runs: e.runs, mentionRatePct: e.mentionRatePct,
-        shareOfVoicePct: e.shareOfVoicePct, topCompetitor: e.topCompetitor,
-      })),
-      byType: arrayOrEmpty(g.byType).map(t => ({ type: t.type, ratePct: t.ratePct })),
-      competitors: arrayOrEmpty(g.competitors).map(c => ({ name: c.name, engines: c.engines })),
-      phase: (arrayOrEmpty(g.phases).find(p => p.here) || {}).title || null,
-      readiness: arrayOrEmpty(g.readiness).map(c => ({ check: c.check, status: c.status })),
-      actions: arrayOrEmpty(g.actions).slice(0, 5).map(a => ({
-        priority: a.priority, title: a.title, effort: a.effort,
-      })),
-      previous: g.previous || null,
+      current: pack(cur),
+      previous: prev ? pack(prev) : null,
+      actions: arrayOrEmpty(g.actions).slice(0, 5).map(a => ({ priority: a.priority, title: a.title, moves: a.moves })),
     };
   }
 
@@ -7255,6 +7278,7 @@
       clientId: state.session.clientId,
       token: state.session.token,
       ...(state.geoSourcesPlatform ? { platform: state.geoSourcesPlatform } : {}),
+      excludeOwn: state.geoSourcesExclude !== false,
       ...(force ? { force: true } : {}),
     })
       .then((res) => {
@@ -7270,12 +7294,62 @@
       });
   }
 
+  // Ongeplande vermeldingen: waar het eigen domein al opduikt, buiten de
+  // vaste promptset. Het domein staat server-side vast (auditbestand of
+  // Config-tab); het request kiest alleen het platform.
+  function geoMentionsFetch(force) {
+    if (!state.session || state.geoMentionsLoading) return;
+    state.geoMentionsLoading = true;
+    state.geoMentionsError = null;
+    renderGeo();
+    apiPost("/api/geo", {
+      action: "mentions",
+      clientId: state.session.clientId,
+      token: state.session.token,
+      ...(state.geoSourcesPlatform ? { platform: state.geoSourcesPlatform } : {}),
+      ...(force ? { force: true } : {}),
+    })
+      .then((res) => { state.geoMentionsLoading = false; state.geoMentions = res; renderGeo(); })
+      .catch((err) => {
+        state.geoMentionsLoading = false;
+        state.geoMentionsError = err.message || "Ophalen van de vermeldingen mislukt.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderGeo();
+      });
+  }
+
+  // AI-verkeer uit GA4 (laatste 28 dagen) — voor de naar verkeer gewogen
+  // mention rate. Eigen periode, los van de topbar, zoals de ROAS-tab.
+  function geoAiFetch() {
+    if (!state.session || state.geoAiLoading) return;
+    state.geoAiLoading = true;
+    state.geoAiError = null;
+    renderGeo();
+    apiPost("/api/windsor", {
+      action: "getAiTraffic",
+      clientId: state.session.clientId,
+      token: state.session.token,
+    })
+      .then((res) => { state.geoAiLoading = false; state.geoAi = res; renderGeo(); })
+      .catch((err) => {
+        state.geoAiLoading = false;
+        state.geoAiError = err.message || "Ophalen van het AI-verkeer mislukt.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+        renderGeo();
+      });
+  }
+
   window.__geoTab = (k) => { state.geoTab = k; renderGeo(); };
+  window.__geoMoved = (on) => { state.geoMovedOnly = !!on; renderGeo(); };
+  window.__geoExclude = (on) => { state.geoSourcesExclude = !!on; state.geoSources = null; renderGeo(); };
+  window.__geoMentions = (force) => geoMentionsFetch(force === true);
+  window.__geoAi = () => geoAiFetch();
   window.__geoRefresh = () => geoFetch(true);
   window.__geoSources = (force) => geoSourcesFetch(force === true);
   window.__geoPlatform = (p) => {
     state.geoSourcesPlatform = p;
     state.geoSources = null;   // ander platform = andere dataset, niet mengen
+    state.geoMentions = null;
     renderGeo();
   };
 
@@ -7295,13 +7369,119 @@
   // Horizontale balk. Bewust geen charts.js: dat tekent reeksen over een x-as,
   // en dit zijn losse waarden naast elkaar. Een balk vanaf nul met het cijfer
   // ernaast leest bovendien beter bij vijf engines dan een assenstelsel.
-  function geoBar(label, value, max, display, title) {
+  // prev: waarde van de vorige meting → een streep op de track. own: het eigen
+  // merk, donkerder gevuld zodat het in een concurrentielijst opvalt.
+  function geoBar(label, value, max, display, title, prev, own) {
     const w = (max > 0 && value != null) ? Math.max(1, Math.round((value / max) * 100)) : 0;
-    return `<div class="geo-bar"${title ? ` title="${escapeHtml(title)}"` : ""}>
+    const mark = (max > 0 && prev != null) ? `<div class="prev" style="left:${Math.min(100, (prev / max) * 100)}%"></div>` : "";
+    return `<div class="geo-bar${own ? " own" : ""}"${title ? ` title="${escapeHtml(title)}"` : ""}>
       <div class="lbl">${escapeHtml(label)}</div>
-      <div class="track"><div class="fill" style="width:${w}%"></div></div>
+      <div class="track"><div class="fill" style="width:${w}%"></div>${mark}</div>
       <div class="val">${escapeHtml(display)}</div>
     </div>`;
+  }
+
+  /* ---------- Rekenlaag: het 2+3+1-model ----------
+     Alles wat de tab toont wordt hier uitgerekend uit de ruwe runs van de
+     metingen in geo-dashboard.json (schema v2). Niets in deze code kent een
+     merk: naam, domein, concurrenten, prompts en acties komen uit het bestand
+     van de ingelogde klant. De laatste volledige meting is de huidige stand,
+     de volledige meting daarvoor de vorige stand. */
+
+  const GEO_T = { leesbaarheid: 8, herkenningPct: 80 };   // drempels, voor elk merk gelijk
+  const GEO_BLOK = { brand: "Herkenning", category: "Categorie", "how-to": "Expertise", problem: "Expertise", comparison: "Voorkeur" };
+  const GEO_TYPE_NL = { brand: "brand", category: "categorie", "how-to": "how-to", problem: "probleem", comparison: "vergelijking" };
+  const GEO_SPLIT = [
+    ["correct_entity", "herkend als juiste entiteit", "ok"],
+    ["correct_entity_wrong_description", "juiste entiteit, fout omschreven", "wrong"],
+    ["namesake", "verward met naamgenoot", "namesake"],
+    ["invented", "verzonnen aanbod", "invented"],
+    ["generic_no_entity", "geen entiteit (algemene uitleg)", "generic"],
+  ];
+
+  function geoCtx() {
+    const g = state.geo;
+    const all = g.measurements || [];
+    const full = all.filter(m => m.kind === "full");
+    return { g, full, cur: full[full.length - 1] || null, prev: full.length > 1 ? full[full.length - 2] : null, latest: all[all.length - 1] || null };
+  }
+  // null = niet gemeten · 0 niet genoemd · 1 juist · 2 fout omschreven (één pass volstaat)
+  function geoCell(m, engineId, n) {
+    const passes = m?.runs?.[engineId]?.[n];
+    if (!passes || !passes.length) return null;
+    if (passes.includes(2)) return 2;
+    if (passes.includes(1)) return 1;
+    return 0;
+  }
+  const geoPct = (a, b) => (b ? Math.round((a / b) * 100) : null);
+  function geoMention(g, m, types, engineIds) {
+    const ids = engineIds || g.engines.map(e => e.id);
+    let hit = 0, of = 0, ok = 0, wrong = 0;
+    if (m) g.prompts.filter(p => !types || types.includes(p.type)).forEach(p => ids.forEach(e => {
+      const c = geoCell(m, e, p.n);
+      if (c == null) return;
+      of++; if (c > 0) hit++; if (c === 1) ok++; if (c === 2) wrong++;
+    }));
+    return { hit, of, ok, wrong, pct: geoPct(hit, of) };
+  }
+  const GEO_UNBRANDED = ["category", "comparison", "how-to", "problem"];
+  function geoReadiness(m) {
+    const c = m?.checks || [];
+    const n = s => c.filter(x => x.status === s).length;
+    return { pass: n("pass"), fail: n("fail"), unk: n("unknown"), total: c.length };
+  }
+  function geoSov(g, m) {
+    if (!m?.brandCounts || !g.competitors.length) return null;
+    const set = [g.brand.name, ...g.competitors].filter(Boolean);
+    const tot = set.reduce((a, b) => a + (m.brandCounts[b] || 0), 0);
+    return { tot, rows: set.map(b => ({ brand: b, n: m.brandCounts[b] || 0, pct: tot ? (m.brandCounts[b] || 0) / tot * 100 : null })) };
+  }
+  function geoSplitCounts(m) {
+    const out = { total: 0 };
+    GEO_SPLIT.forEach(([k]) => { out[k] = 0; });
+    (m?.brandSplit || []).forEach(r => { out[r.class] = (out[r.class] || 0) + 1; out.total++; });
+    return out;
+  }
+  function geoBlocks(g, m) {
+    const r = geoReadiness(m);
+    const brand = geoMention(g, m, ["brand"]);
+    const sc = geoSplitCounts(m);
+    const sov = geoSov(g, m);
+    return {
+      r, brand, sc,
+      lees: m && r.total ? r.pass : null,
+      herk: brand.pct,
+      herkCorrect: geoPct(sc.correct_entity, sc.total),
+      descr: brand.hit ? geoPct(brand.ok, brand.hit) : null,
+      cat: geoMention(g, m, ["category"]).pct,
+      exp: geoMention(g, m, ["how-to", "problem"]).pct,
+      vert: m?.externalCitations ?? null,
+      voor: geoMention(g, m, ["comparison"]).pct,
+      sovOwn: sov ? (sov.rows.find(x => x.brand === g.brand.name)?.pct ?? null) : null,
+    };
+  }
+  const geoPromptsOf = (g, t) => g.prompts.filter(p => t.includes(p.type)).length;
+  const geoHitPrompts = (g, m, t) => g.prompts.filter(p => t.includes(p.type) && g.engines.some(e => (geoCell(m, e.id, p.n) || 0) > 0)).length;
+  const geoDec = (v, d = 1) => v == null ? "—" : v.toFixed(d).replace(".", ",");
+
+  // Delta tegen de vorige volledige meting. Zonder vorige stand zegt de regel
+  // dat eerlijk, in plaats van een ±0 te tonen die op een vergelijking lijkt.
+  function geoDelta(cur, prev, prevDate, { unit = " pp", higherIsBetter = true } = {}) {
+    if (cur == null) return `<div class="geo-delta neutral">● niet gemeten</div>`;
+    if (!prevDate || prev == null) return `<div class="geo-delta neutral">● nulmeting — nog geen vorige stand</div>`;
+    const d = Math.round((cur - prev) * 10) / 10;
+    const since = `t.o.v. ${escapeHtml(geoFmt.date(prevDate))}`;
+    if (d === 0) return `<div class="geo-delta neutral">● ±0 ${since}</div>`;
+    const good = (d > 0) === higherIsBetter;
+    return `<div class="geo-delta ${good ? "good" : "bad"}">${d > 0 ? "▲ +" : "▼ −"}${String(Math.abs(d)).replace(".", ",")}${unit} ${since}</div>`;
+  }
+
+  function geoPanel(title, sub, body, extra = "") {
+    return `<section class="panel" style="margin-bottom:16px;"${extra}>
+      <div class="panel-header"><div>
+        <h2 class="panel-title">${title}</h2>
+        ${sub ? `<div class="panel-sub">${sub}</div>` : ""}
+      </div></div>${body}</section>`;
   }
 
   /* ---------- Render ---------- */
@@ -7336,7 +7516,7 @@
     return renderAnalysisEmpty(`
       <p class="muted" style="margin:0 0 10px;">Nog geen GEO-audit voor deze klant.</p>
       <p class="muted" style="margin:0; font-size:12px;">
-        Deze tab toont een <em>gemeten</em> nulmeting: hoe de vijf AI-engines over het merk praten.
+        Deze tab toont een <em>gemeten</em> stand: hoe de AI-engines over het merk praten.
         Draai de <strong>geo-visibility-audit</strong> en zet het resultaat als
         <strong>geo-dashboard.json</strong> in de Drive-map van de klant
         (of in de submap <em>GEO</em>). Het schema staat in
@@ -7348,25 +7528,27 @@
   }
 
   function renderGeoBar() {
-    const g = state.geo, m = state.geoMeta || {};
+    const { g, full, cur, prev } = geoCtx();
+    const m = state.geoMeta || {};
     const bits = [];
-    if (g.promptCount) bits.push(`${g.promptCount} prompts`);
+    if (g.prompts.length) bits.push(`${g.prompts.length} prompts`);
     if (g.engines.length) bits.push(`${g.engines.length} engines`);
+    bits.push(`${full.length} volledige meting${full.length === 1 ? "" : "en"}`);
     if (m.file) bits.push(`bron: ${m.file.name}`);
     if (m.otherFiles) bits.push(`${m.otherFiles} ouder${m.otherFiles === 1 ? "" : "e"} bestand${m.otherFiles === 1 ? "" : "en"} genegeerd`);
 
     const warn = (m.warnings || []).length
-      ? `<div style="font-size:11px; color:#b45309; margin-top:8px;">${m.warnings.map(w => escapeHtml(w)).join("<br>")}</div>`
+      ? `<div style="font-size:11px; color:var(--warning); margin-top:8px;">${m.warnings.map(w => escapeHtml(w)).join("<br>")}</div>`
       : "";
 
     return `<section class="panel" style="padding:14px 18px; margin-bottom:16px;">
       <div class="roas-bar">
         <div>
-          <div class="info-label">Nulmeting</div>
+          <div class="info-label">${prev ? "Huidige stand" : "Nulmeting"}</div>
           <div style="font-size:20px; color:var(--fg); margin-top:2px;">
-            ${escapeHtml(geoFmt.date(g.auditDate))}${g.label ? ` · ${escapeHtml(g.label)}` : ""}
+            ${escapeHtml(geoFmt.date(cur?.date))}${cur?.note ? ` · ${escapeHtml(cur.note)}` : g.label ? ` · ${escapeHtml(g.label)}` : ""}
           </div>
-          <div class="muted" style="font-size:11px; margin-top:2px;">${escapeHtml(bits.join(" · "))}</div>
+          <div class="muted" style="font-size:11px; margin-top:2px;">${escapeHtml(bits.join(" · "))}${prev ? ` · vorige stand ${escapeHtml(geoFmt.date(prev.date))}` : ""}</div>
         </div>
         <button class="btn tiny" onclick="window.__geoRefresh()">↻ Opnieuw inlezen</button>
       </div>
@@ -7394,166 +7576,223 @@
   /* ---------- 1. Overzicht ---------- */
 
   function renderGeoOverview() {
-    const g = state.geo;
+    const { g, full, cur, prev, latest } = geoCtx();
+    if (!cur) return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Dit auditbestand heeft nog geen volledige meting (kind "full"). Zonder meting geen cijfers.</p>`);
+    const c = geoBlocks(g, cur), p = prev ? geoBlocks(g, prev) : null;
+    const pd = prev?.date;
+    const brand = g.brand.name || "het merk";
     const out = [];
 
-    if (g.status) {
-      out.push(`<div class="geo-callout ${escapeHtml(g.status.level)}">
-        ${g.status.title ? `<strong>${escapeHtml(g.status.title)}.</strong> ` : ""}${escapeHtml(g.status.text || "")}
-      </div>`);
+    /* callout: slecht, neutraal of goed nieuws — berekend, niet ingetypt */
+    const leesOk = c.lees != null && c.lees >= GEO_T.leesbaarheid;
+    const herkOk = c.herkCorrect != null && c.herkCorrect >= GEO_T.herkenningPct;
+    const blocked = [!leesOk && "leesbaarheid", !herkOk && "herkenning"].filter(Boolean);
+    const visible = [c.cat, c.exp, c.vert].filter(v => v > 0).length;
+    if (blocked.length) {
+      out.push(`<div class="geo-callout blocked"><strong>Fundamenten niet op orde:</strong> ${blocked.join(" en ")} ${blocked.length > 1 ? "blokkeren" : "blokkeert"} alle andere resultaten.${cur.calloutNote ? " " + escapeHtml(cur.calloutNote) : ""}</div>`);
+    } else if (visible === 3) {
+      out.push(`<div class="geo-callout ok"><strong>Fundamenten op orde en alle drie de pijlers zichtbaar.</strong> De volgende winst zit in vergelijkingen en share of voice.</div>`);
+    } else {
+      out.push(`<div class="geo-callout warn"><strong>Fundamenten op orde.</strong> ${visible}/3 pijlers zichtbaar — het werk verschuift naar vindbaarheid.</div>`);
     }
 
-    if (g.kpis.length) {
-      const prev = g.previous?.kpis || [];
-      out.push(`<div class="kpi-grid" style="margin-bottom:16px;">${g.kpis.map(k => {
-        const was = prev.find(p => p.label === k.label);
-        return `<div class="kpi-card">
-          <div class="label"><span class="dot"></span>${escapeHtml(k.label)}</div>
-          <div class="value compact">${escapeHtml(k.value)}</div>
-          ${k.delta ? `<div class="geo-delta ${escapeHtml(k.tone)}">${escapeHtml(k.delta)}</div>` : ""}
-          ${was ? `<div class="muted" style="font-size:11px;">was ${escapeHtml(was.value)} op ${escapeHtml(geoFmt.date(g.previous.auditDate))}</div>` : ""}
-          ${k.sub ? `<div class="muted" style="font-size:11px;">${escapeHtml(k.sub)}</div>` : ""}
-        </div>`;
-      }).join("")}</div>`);
+    /* KPI's */
+    const u = geoMention(g, cur, GEO_UNBRANDED), up = geoMention(g, prev, GEO_UNBRANDED);
+    const who = g.engines.filter(e => g.prompts.some(pr => pr.type === "brand" && (geoCell(cur, e.id, pr.n) || 0) > 0)).map(e => e.name);
+    const kpi = (label, value, delta, sub) => `<div class="kpi-card">
+      <div class="label"><span class="dot"></span>${label}</div>
+      <div class="value compact">${value}</div>${delta}
+      <div class="muted" style="font-size:11px;">${sub}</div></div>`;
+    out.push(`<div class="kpi-grid" style="margin-bottom:16px;">
+      ${kpi("Mention rate · unbranded", geoFmt.pct(u.pct), geoDelta(u.pct, up.pct, pd), `${u.hit}/${u.of} combinaties · de markt-waarheid`)}
+      ${kpi("Mention rate · branded", geoFmt.pct(c.herk), geoDelta(c.herk, p?.herk, pd),
+        `${c.brand.hit}/${c.brand.of} combinaties${who.length ? " · " + (who.length === 1 ? "enkel " : "") + escapeHtml(who.join(", ")) : ""}${c.brand.wrong ? ` · ${c.brand.wrong} fout omschreven` : ""}`)}
+      ${kpi("Descriptor-juistheid", geoFmt.pct(c.descr), c.descr == null ? `<div class="geo-delta neutral">● merk nergens genoemd</div>` : geoDelta(c.descr, p?.descr, pd), "doel: 100% canonieke descriptor")}
+      ${kpi("Citaties eigen site", geoFmt.int(cur.ownCitations), geoDelta(cur.ownCitations, prev?.ownCitations, pd, { unit: "" }), escapeHtml(cur.ownCitationsNote || "citaties van het eigen domein in de bronnen"))}
+    </div>`);
+
+    /* scorecard */
+    const r = c.r, sc = c.sc;
+    const leesWhy = leesOk ? "site leesbaar voor AI" : [r.fail ? `${r.fail} falen` : "", r.unk ? `${r.unk} onmeetbaar` : ""].filter(Boolean).join(", ") || "nog niet gemeten";
+    const herkWhy = herkOk ? "merk juist herkend" : [sc.namesake ? "naamgenoten" : "", sc.invented ? "verzonnen aanbod" : "",
+      sc.correct_entity_wrong_description ? "foute omschrijving" : "", sc.generic_no_entity ? "geen entiteit" : ""].filter(Boolean).join(", ") || (sc.total ? "onvoldoende herkend" : "geen brand-runs gemeten");
+    const gate = (ok, why) => `<div class="geo-st ${ok ? "open" : "closed"}"><span aria-hidden="true">${ok ? "✓" : "✕"}</span><span>${ok ? "op orde" : "niet op orde"} — ${escapeHtml(why)}</span></div>`;
+    const pillar = (v) => (v != null && v > 0)
+      ? `<div class="geo-st open"><span aria-hidden="true">✓</span><span>zichtbaar</span></div>`
+      : `<div class="geo-st muted"><span aria-hidden="true">●</span><span>${v == null ? "niet gemeten" : "niet zichtbaar"}</span></div>`;
+    const jump = (tab, lbl) => `<button class="geo-jump" onclick="window.__geoTab('${tab}')">${lbl}</button>`;
+    const tile = (o) => `<div class="geo-stile${o.found ? " found " + (o.ok ? "open" : "closed") : ""}">
+      <h3>${o.title}</h3><div class="q">${o.q}</div>
+      <div class="v">${o.v}</div><div class="vsub">${o.sub}</div>${o.delta}${o.status}
+      <div class="muted fn">${o.fn}</div></div>`;
+    out.push(geoPanel("Statusoverzicht — 2 fundamenten, 3 pijlers, 1 uitkomst", "gelezen → gekend → gevonden → gekozen", `<div class="geo-score">
+      <div class="geo-sgroup" aria-label="Fundamenten">
+        <div class="geo-sgroup-h">🔒 Fundamenten<small>blokkerend — eerst op orde brengen</small></div>
+        ${tile({ found: true, ok: leesOk, title: "Leesbaarheid", q: "Kan AI onze site lezen?", v: r.total ? `${r.pass}/${r.total}` : "—",
+          sub: `leesbaarheidsscore${r.unk ? ` · ${r.unk} onmeetbaar` : ""}`, delta: geoDelta(c.lees, p?.lees, pd, { unit: "" }),
+          status: gate(leesOk, leesWhy), fn: `op orde vanaf ${GEO_T.leesbaarheid}/10 · gemeten in ${jump("website", "Website")}` })}
+        ${tile({ found: true, ok: herkOk, title: "Herkenning", q: "Kent AI ons merk, en klopt de omschrijving?", v: geoFmt.pct(c.herk),
+          sub: `branded mention · descriptor ${geoFmt.pct(c.descr)}`, delta: geoDelta(c.herk, p?.herk, pd),
+          status: gate(herkOk, herkWhy), fn: `op orde vanaf ${GEO_T.herkenningPct}% juist herkend · gemeten in ${jump("prompts", "Prompts")}` })}
+      </div>
+      <div class="geo-sgroup" aria-label="Vindbaarheid">
+        <div class="geo-sgroup-h">🏛 Vindbaarheid<small>3 pijlers, parallel — score + label</small></div>
+        ${tile({ title: "Categorie", q: "Plaatst AI ons op het juiste schap?", v: geoFmt.pct(c.cat),
+          sub: `${geoHitPrompts(g, cur, ["category"])}/${geoPromptsOf(g, ["category"])} prompts × ${g.engines.length} engines`,
+          delta: geoDelta(c.cat, p?.cat, pd), status: pillar(c.cat), fn: `gemeten in ${jump("prompts", "Prompts")}` })}
+        ${tile({ title: "Expertise", q: "Koppelt AI ons aan de taken waar we goed in zijn?", v: geoFmt.pct(c.exp),
+          sub: `how-to ${geoHitPrompts(g, cur, ["how-to"])}/${geoPromptsOf(g, ["how-to"])} · probleem ${geoHitPrompts(g, cur, ["problem"])}/${geoPromptsOf(g, ["problem"])}`,
+          delta: geoDelta(c.exp, p?.exp, pd), status: pillar(c.exp), fn: `gemeten in ${jump("prompts", "Prompts")}` })}
+        ${tile({ title: "Vertrouwen", q: "Bevestigen onafhankelijke bronnen het?", v: geoFmt.int(c.vert), sub: "externe citaties van het merk",
+          delta: geoDelta(c.vert, p?.vert, pd, { unit: "" }), status: pillar(c.vert), fn: `gemeten in ${jump("sources", "Sources")} + citatie-mix audit` })}
+      </div>
+      <div class="geo-sgroup" aria-label="Uitkomst">
+        <div class="geo-sgroup-h">📈 Uitkomst<small>gevolg, geen werk</small></div>
+        ${tile({ title: "Voorkeur", q: "Winnen we vergelijkingen en groeit ons aandeel?", v: geoFmt.pct(c.voor),
+          sub: `vergelijking · share of voice ${c.sovOwn == null ? "—" : geoDec(c.sovOwn) + "%"}`, delta: geoDelta(c.voor, p?.voor, pd),
+          status: full.length < 2 ? `<div class="geo-st muted"><span aria-hidden="true">●</span><span>trend volgt na meting 2</span></div>` : pillar(c.voor),
+          fn: `vereist ≥ 2 metingen · gemeten in ${jump("prompts", "Prompts")}` })}
+      </div>
+    </div>`));
+
+    /* mention rate per engine (met vorige stand) + share of voice */
+    const rows = g.engines.map(e => ({ e, m: geoMention(g, cur, null, [e.id]), p: geoMention(g, prev, null, [e.id]) }))
+      .sort((a, b) => (b.m.pct ?? -1) - (a.m.pct ?? -1));
+    const named = rows.filter(x => x.m.hit > 0);
+    const engTitle = !named.length ? `Geen enkele engine noemt ${escapeHtml(brand)}`
+      : named.length === 1 ? `Alleen ${escapeHtml(named[0].e.name)} noemt ${escapeHtml(brand)}${named[0].m.wrong === named[0].m.hit ? " — en beschrijft het fout" : ""}`
+      : `${named.length} van ${g.engines.length} engines noemen ${escapeHtml(brand)}`;
+    const engBody = rows.map(x => geoBar(x.e.name, x.m.pct, 100, geoFmt.pct(x.m.pct),
+      `${x.m.hit}/${x.m.of}${x.m.wrong ? `, ${x.m.wrong} fout omschreven` : ""}${prev ? ` · vorige meting ${geoFmt.pct(x.p.pct)}` : ""}`, prev ? x.p.pct : null)).join("") +
+      `<div class="muted" style="font-size:11px; margin-top:10px;">Aandeel van de ${g.prompts.length} prompts waarop de engine ${escapeHtml(brand)} noemt, juist of fout omschreven.${prev ? " Streep = vorige meting." : ""}</div>`;
+
+    const s = geoSov(g, cur), sp = geoSov(g, prev);
+    let sovBody, sovTitle = "Share of voice";
+    if (!g.competitors.length) {
+      sovBody = `<p class="muted" style="margin:0; font-size:12px;">Geen bevroren share-of-voice-set in het auditbestand (<em>competitors</em>). Die komt uit de geo-config van het merk.</p>`;
+    } else if (!s || !s.tot) {
+      sovBody = `<p class="muted" style="margin:0; font-size:12px;">Deze meting heeft geen merktellingen (<em>brandCounts</em>). Share of voice verschijnt zodra de audit als schema v2 is weggeschreven.</p>`;
+    } else {
+      const sorted = [...s.rows].sort((a, b) => b.n - a.n);
+      const own = s.rows.find(x => x.brand === g.brand.name);
+      sovTitle = own && own.n > 0 ? `${escapeHtml(brand)} heeft ${geoDec(own.pct)}% share of voice` : `${escapeHtml(sorted[0].brand)} pakt ${Math.round(sorted[0].pct)}% van het gesprek — ${escapeHtml(brand)} 0%`;
+      const max = Math.max(...sorted.map(x => x.pct), ...(sp ? sp.rows.map(x => x.pct ?? 0) : [0]), 1);
+      sovBody = sorted.map(x => {
+        const pr = sp?.rows.find(y => y.brand === x.brand);
+        const d = pr && pr.pct != null ? x.pct - pr.pct : null;
+        const isOwn = x.brand === g.brand.name;
+        const dl = d == null ? "nulmeting" : `${d > 0 ? "+" : d < 0 ? "−" : "±"}${geoDec(Math.abs(d))} pp`;
+        return geoBar(x.brand, x.pct, max, `${geoDec(x.pct)}% · ${dl}`, `${x.n} runs${pr ? ` · vorige meting ${geoDec(pr.pct)}%` : ""}`, pr ? pr.pct : null, isOwn);
+      }).join("") + `<div class="muted" style="font-size:11px; margin-top:10px;">Aandeel van alle vermeldingen binnen de bevroren set van ${s.rows.length} merken, over ${geoFmt.int(cur.runCount)} runs. Een merk telt één keer per run. ${sp ? "Streep = vorige meting; delta in procentpunten." : "Na de volgende meting verschijnt de vorige stand als streep."} De set staat vast in het auditbestand van dit merk.</div>`;
+    }
+    out.push(`<div class="geo-grid2" style="margin-bottom:16px;">
+      ${geoPanel(engTitle, "Mention rate per engine", engBody, ' data-geo="engines"').replace('style="margin-bottom:16px;"', "")}
+      ${geoPanel(sovTitle, "Over de bevroren concurrentieset van dit merk", sovBody).replace('style="margin-bottom:16px;"', "")}
+    </div>`);
+
+    /* naamkaping-split */
+    if (sc.total) {
+      const ps = prev ? geoSplitCounts(prev) : null;
+      const bar = GEO_SPLIT.filter(([k]) => sc[k]).map(([k, l, cls]) => `<span class="k-${cls}" style="flex:${sc[k]}" title="${escapeHtml(l)}: ${sc[k]}"></span>`).join("");
+      const legend = GEO_SPLIT.map(([k, l, cls]) => {
+        const d = ps ? sc[k] - (ps[k] || 0) : 0;
+        return `<span><i class="geo-sw k-${cls}"></i>${escapeHtml(l)}: <b>${sc[k]}</b>${d ? ` (${d > 0 ? "+" : ""}${d})` : ""}</span>`;
+      }).join("");
+      const engName = id => g.engines.find(e => e.id === id)?.name || id;
+      const splitRows = (cur.brandSplit || []).map(x => {
+        const k = GEO_SPLIT.find(y => y[0] === x.class);
+        return `<tr><td>${escapeHtml(engName(x.engine))}</td><td class="right">#${x.prompt ?? "—"}${x.pass ? `·${x.pass}` : ""}</td><td><i class="geo-sw k-${k[2]}"></i>${escapeHtml(k[1])}</td><td class="row-caption" title="${escapeHtml(x.evidence || "")}">${escapeHtml(x.evidence || "")}</td></tr>`;
+      }).join("");
+      out.push(geoPanel(`Achter "branded ${geoFmt.pct(c.herk)}": ${sc.correct_entity} van ${sc.total} brand-runs herkennen ${escapeHtml(brand)} juist`,
+        `Wat de engines antwoorden op de ${geoPromptsOf(g, ["brand"])} brand-prompts, per run. De mention rate telt genoemd-maar-fout mee; deze split niet.`,
+        `<div class="geo-stack" role="img" aria-label="Verdeling brand-runs">${bar}</div><div class="geo-legend">${legend}</div>
+        <div class="lib-table" style="margin-top:12px;"><table><thead><tr><th>Engine</th><th class="right">Prompt·pass</th><th>Uitkomst</th><th>Wat de engine zei</th></tr></thead><tbody>${splitRows}</tbody></table></div>`));
     }
 
-    if (g.engines.length) {
-      const measured = g.engines.filter(e => e.mentionRatePct != null);
-      const max = Math.max(100, ...measured.map(e => e.mentionRatePct));
-      out.push(`<section class="panel" style="margin-bottom:16px;">
-        <div class="panel-header"><div>
-          <h2 class="panel-title">Mention rate per engine</h2>
-          <div class="panel-sub">Op hoeveel van de prompts het merk genoemd wordt</div>
-        </div></div>
-        ${measured.length
-          ? measured.map(e => geoBar(e.name, e.mentionRatePct, max, geoFmt.pct(e.mentionRatePct),
-              [e.runs != null ? `${e.runs} runs` : "", e.note || ""].filter(Boolean).join(" · "))).join("")
-          : `<p class="muted" style="margin:0; font-size:12px;">Geen mention rate per engine in dit auditbestand.</p>`}
-        <div class="lib-table" style="margin-top:14px;"><table>
-          <thead><tr>
-            <th>Engine</th><th class="right">Runs</th><th class="right">Mention rate</th>
-            <th class="right">Share of voice</th><th class="right">Descriptor</th>
-            <th>Top concurrent</th><th>Meest geciteerd brontype</th>
-          </tr></thead>
-          <tbody>${g.engines.map(e => `<tr>
-            <td class="row-caption">${escapeHtml(e.name)}</td>
-            <td class="right">${geoFmt.int(e.runs)}</td>
-            <td class="right">${geoFmt.pct(e.mentionRatePct)}</td>
-            <td class="right">${geoFmt.pct(e.shareOfVoicePct)}</td>
-            <td class="right">${geoFmt.pct(e.descriptorAccuracyPct)}</td>
-            <td>${escapeHtml(e.topCompetitor || "—")}</td>
-            <td class="row-caption" title="${escapeHtml(e.sourceType || "")}">${escapeHtml(e.sourceType || "—")}</td>
-          </tr>`).join("")}</tbody>
-        </table></div>
-        <div class="muted" style="font-size:11px; margin-top:10px;">
-          Een leeg vak bij Descriptor betekent <em>niets te beoordelen</em>: zonder mentions is er geen beschrijving om juist of fout te noemen. Dat is niet hetzelfde als 0%.
-        </div>
-      </section>`);
+    /* trend over de volledige metingen */
+    if (full.length >= 2) {
+      out.push(geoPanel(`Mention rate per engine over ${full.length} metingen`, "Volledige metingen, zelfde promptset en passes",
+        `<div class="lib-table"><table><thead><tr><th>Engine</th>${full.map(m => `<th class="right">${escapeHtml(geoFmt.date(m.date))}</th>`).join("")}</tr></thead>
+        <tbody>${g.engines.map(e => `<tr><td class="row-caption">${escapeHtml(e.name)}</td>${full.map(m => `<td class="right">${geoFmt.pct(geoMention(g, m, null, [e.id]).pct)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`));
     }
 
-    const cols = [];
-    if (g.byType.length) {
-      const max = Math.max(100, ...g.byType.map(t => t.ratePct || 0));
-      cols.push(`<section class="panel">
-        <div class="panel-header"><div>
-          <h2 class="panel-title">Per prompt-type</h2>
-          <div class="panel-sub">Waar in de koopreis het merk wel en niet opduikt</div>
-        </div></div>
-        ${g.byType.map(t => geoBar(t.type, t.ratePct, max, geoFmt.pct(t.ratePct), t.note || "")).join("")}
-      </section>`);
-    }
-    if (g.competitors.length) {
-      const max = Math.max(1, ...g.competitors.map(c => c.engines || 0));
-      cols.push(`<section class="panel">
-        <div class="panel-header"><div>
-          <h2 class="panel-title">Wie de plek inneemt</h2>
-          <div class="panel-sub">Op hoeveel engines dit merk de top-mention is</div>
-        </div></div>
-        ${g.competitors.map(c => geoBar(c.name, c.engines, max, `${c.engines ?? "—"}×`, c.note || "")).join("")}
-      </section>`);
-    }
-    if (cols.length) out.push(`<div class="geo-grid2" style="margin-bottom:16px;">${cols.join("")}</div>`);
-
-    if (g.phases.length) {
-      out.push(`<section class="panel" style="margin-bottom:16px;">
-        <div class="panel-header"><div>
-          <h2 class="panel-title">Waar het merk staat</h2>
-          <div class="panel-sub">Elke fase heeft een poort; die haal je voordat de volgende zin heeft</div>
-        </div></div>
-        <div class="geo-phases">${g.phases.map(p => `<div class="geo-phase${p.here ? " here" : ""}">
-          <div class="n">${escapeHtml(p.n || "")}</div>
-          <div class="t">${escapeHtml(p.title)}</div>
-          <div class="g">${escapeHtml(p.gate || "")}</div>
-        </div>`).join("")}</div>
-      </section>`);
-    }
+    /* meetritme: dure meting per kwartaal, goedkope signalen maandelijks */
+    out.push(geoPanel("Meetritme", "Dure meting per kwartaal, goedkope signalen maandelijks", `<div class="geo-lanes">
+      <div class="geo-lane"><b>Volledige meting · per kwartaal</b>≈ €37 bij 2 passes — vaste vragenset op alle engines → matrix, de 6 blokken, share of voice, naamkaping-split. Laatste: ${escapeHtml(geoFmt.date(cur.date))}.</div>
+      <div class="geo-lane"><b>Goedkope signalen · maandelijks</b>Centen per pull — Sources (bronnen), ongeplande vermeldingen en AI-verkeer uit GA4.${latest && latest.kind === "light" ? ` Laatste: ${escapeHtml(geoFmt.date(latest.date))}.` : ""}</div>
+    </div>`));
 
     if (g.method) {
-      out.push(`<section class="panel">
-        <div class="panel-header"><div>
-          <h2 class="panel-title">Hoe dit gemeten is</h2>
-          <div class="panel-sub">Zodat een her-meting vergelijkbaar blijft</div>
-        </div></div>
-        <p class="muted" style="margin:0; font-size:13px; line-height:1.7;">${escapeHtml(g.method)}</p>
-        <div class="muted" style="font-size:11px; margin-top:10px;">
-          Een her-audit is alleen vergelijkbaar met dezelfde promptset én hetzelfde aantal passes. Een 1-pass nulmeting naast een 3-pass hermeting leggen is geen trend.
-        </div>
-      </section>`);
+      out.push(geoPanel("Hoe dit gemeten is", "Zodat een her-meting vergelijkbaar blijft",
+        `<p class="muted" style="margin:0; font-size:13px; line-height:1.7;">${escapeHtml(g.method)}</p>
+        <div class="muted" style="font-size:11px; margin-top:10px;">Een her-audit is alleen vergelijkbaar met dezelfde promptset én hetzelfde aantal passes. Een 1-pass nulmeting naast een 3-pass hermeting leggen is geen trend.</div>`));
     }
-
     return out.join("");
   }
 
   /* ---------- 2. Prompts ---------- */
 
   function renderGeoPrompts() {
-    const g = state.geo;
-    if (!g.prompts.length) {
-      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen promptmatrix in dit auditbestand. Voeg een <em>prompts</em>-blok toe (zie het schema).</p>`);
+    const { g, cur, prev } = geoCtx();
+    if (!g.prompts.length || !cur) {
+      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen promptmatrix in dit auditbestand. Voeg <em>prompts</em> en een volledige meting toe (zie het schema).</p>`);
     }
-    const engines = g.engines.length ? g.engines.map(e => e.name) : [...new Set(g.prompts.flatMap(p => Object.keys(p.cells)))];
+    const E = g.engines;
+    const sym = (v) => v === 1 ? ["yes", "✓", "genoemd, juist omschreven"] : v === 2 ? ["warn", "⚠", "genoemd maar fout omschreven"]
+      : v === 0 ? ["no", "–", "niet genoemd"] : ["unk", "·", "niet gemeten"];
+    const named = (m, n) => E.filter(e => (geoCell(m, e.id, n) || 0) > 0).length;
+    const measured = (m, n) => E.filter(e => geoCell(m, e.id, n) != null).length;
+    let moved = 0;
+    const rows = g.prompts.map(p => {
+      const changed = prev ? E.map(e => geoCell(cur, e.id, p.n) !== geoCell(prev, e.id, p.n)) : E.map(() => false);
+      const any = changed.some(Boolean);
+      if (any) moved++;
+      if (state.geoMovedOnly && prev && !any) return "";
+      const cells = E.map((e, i) => {
+        const [cls, s, t] = sym(geoCell(cur, e.id, p.n));
+        const was = prev ? ` · vorige meting: ${sym(geoCell(prev, e.id, p.n))[2]}` : "";
+        return `<td class="c geo-cell ${cls}${changed[i] ? " moved" : ""}" title="${t}${was}">${s}</td>`;
+      }).join("");
+      return `<tr>
+        <td class="right">${p.n}</td>
+        <td class="row-caption" title="${escapeHtml(p.text)}">${escapeHtml(p.text)}</td>
+        <td><span class="geo-tag" title="prompttype: ${escapeHtml(GEO_TYPE_NL[p.type] || "onbekend")}">${escapeHtml(GEO_BLOK[p.type] || "—")}</span></td>
+        ${cells}
+        <td class="c">${named(cur, p.n)}/${measured(cur, p.n)}</td>
+        <td class="c">${prev ? `${named(prev, p.n)}/${measured(prev, p.n)}` : "—"}</td>
+      </tr>`;
+    }).join("");
 
-    const cell = (v) => {
-      if (v === 1) return `<td class="c geo-cell yes" title="genoemd">✓</td>`;
-      if (v === 2) return `<td class="c geo-cell warn" title="genoemd maar fout beschreven">⚠</td>`;
-      if (v === 0) return `<td class="c geo-cell no" title="niet genoemd">–</td>`;
-      return `<td class="c geo-cell unk" title="niet gemeten">·</td>`;
-    };
-
-    const rows = g.prompts.map(p => `<tr>
-      <td class="right">${p.n}</td>
-      <td class="row-caption" title="${escapeHtml(p.text)}">${escapeHtml(p.text)}</td>
-      <td><span class="geo-tag">${escapeHtml(p.type || "—")}</span></td>
-      ${engines.map(e => cell(p.cells[e])).join("")}
-    </tr>`).join("");
-
-    // Tel per toestand, zodat 'niet gemeten' zichtbaar blijft in plaats van in
-    // de nullen te verdwijnen.
-    const flat = g.prompts.flatMap(p => engines.map(e => p.cells[e]));
+    const flat = g.prompts.flatMap(p => E.map(e => geoCell(cur, e.id, p.n)));
     const n = (v) => flat.filter(x => x === v).length;
-    const unmeasured = flat.filter(x => x !== 0 && x !== 1 && x !== 2).length;
+    const u = geoMention(g, cur, GEO_UNBRANDED), b = geoMention(g, cur, ["brand"]);
+    const brand = escapeHtml(g.brand.name || "het merk");
 
     return `<section class="panel">
       <div class="panel-header"><div>
-        <h2 class="panel-title">${g.prompts.length} buyer prompts × ${engines.length} engines</h2>
-        <div class="panel-sub">De vragen die kopers stellen, en of het merk in het antwoord zit</div>
-      </div></div>
+        <h2 class="panel-title">${g.prompts.length} koopvragen × ${E.length} engines — ${brand} genoemd in ${u.hit}/${u.of} unbranded en ${b.hit}/${b.of} brand-combinaties</h2>
+        <div class="panel-sub">${prev ? `${moved} van ${g.prompts.length} prompts bewogen t.o.v. ${escapeHtml(geoFmt.date(prev.date))}` : "Nog geen vorige meting — na meting 2 zie je hier wat bewoog"}</div>
+      </div>
+      <div class="panel-actions"><label class="geo-chk"><input type="checkbox" ${state.geoMovedOnly ? "checked" : ""} ${prev ? "" : "disabled"} onchange="window.__geoMoved(this.checked)"> Toon alleen wat bewoog</label></div>
+      </div>
       <div class="lib-table"><table>
         <thead><tr>
-          <th class="right">#</th><th>Prompt</th><th>Type</th>
-          ${engines.map(e => `<th class="c">${escapeHtml(e)}</th>`).join("")}
+          <th class="right">#</th><th>Prompt</th><th>Blok</th>
+          ${E.map(e => `<th class="c">${escapeHtml(e.name)}</th>`).join("")}
+          <th class="c">Nu</th><th class="c">Vorige meting</th>
         </tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows || `<tr><td colspan="${E.length + 5}" class="muted">Niets bewoog tussen ${escapeHtml(geoFmt.date(prev?.date))} en ${escapeHtml(geoFmt.date(cur.date))}.</td></tr>`}</tbody>
       </table></div>
       <div class="geo-legend">
-        <span><b class="geo-cell yes">✓</b> genoemd — ${n(1)}</span>
-        <span><b class="geo-cell warn">⚠</b> genoemd maar fout beschreven — ${n(2)}</span>
+        <span><b class="geo-cell yes">✓</b> genoemd, juist omschreven — ${n(1)}</span>
+        <span><b class="geo-cell warn">⚠</b> genoemd maar fout omschreven — ${n(2)}</span>
         <span><b class="geo-cell no">–</b> niet genoemd — ${n(0)}</span>
-        <span><b class="geo-cell unk">·</b> niet gemeten — ${unmeasured}</span>
+        <span><b class="geo-cell unk">·</b> niet gemeten — ${n(null)}</span>
+        ${prev ? `<span><i class="geo-sw moved"></i>veranderd t.o.v. vorige meting</span>` : ""}
       </div>
       <div class="muted" style="font-size:11px; margin-top:8px;">
-        'Niet gemeten' is bewust een eigen toestand: bij een deelmeting (niet elke engine draaide elke prompt)
-        zou het anders als 'niet genoemd' meetellen en de mention rate structureel te laag maken.
+        "Nu" en "Vorige meting" = aantal engines dat ${brand} noemt / aantal gemeten engines. Een cel telt als genoemd zodra één pass het merk noemt.
+        'Niet gemeten' is een eigen toestand: bij een deelmeting telt die anders als 'niet genoemd' en zakt de mention rate structureel.${cur.matrixNote ? " " + escapeHtml(cur.matrixNote) : ""}
       </div>
     </section>`;
   }
@@ -7561,146 +7800,175 @@
   /* ---------- 3. Sources (live) ---------- */
 
   function renderGeoSources() {
-    const g = state.geo;
+    const { g } = geoCtx();
     const m = state.geoMeta || {};
     if (!m.hasSources) {
       return renderAnalysisEmpty(`
         <p class="muted" style="margin:0 0 10px;">Deze sub-tab haalt live op bij DataForSEO; er is geen koppeling ingesteld.</p>
         <p class="muted" style="margin:0; font-size:12px;">Zet <strong>DATAFORSEO_LOGIN</strong> en <strong>DATAFORSEO_PASSWORD</strong> in de omgevingsvariabelen.</p>`);
     }
-    if (!g.sources || !g.sources.keyword) {
-      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen <em>sources</em>-blok in het auditbestand. Zet daar een keyword, platform, markt en taal.</p>`);
-    }
 
-    const s = state.geoSources;
-    const plat = state.geoSourcesPlatform || g.sources.platform;
+    const plat = state.geoSourcesPlatform || g.sources?.platform || "google";
     const platBtn = (k, label) => `<button class="btn tiny ${plat === k ? "primary" : ""}" onclick="window.__geoPlatform('${k}')">${escapeHtml(label)}</button>`;
-
-    // De BE-database kent alleen platform 'google'; de ChatGPT-database bestaat
-    // enkel voor VS/EN. Die combinatie levert stilzwijgend niets op, dus zeggen
-    // we het vóór de call in plaats van erna.
-    const loc = (g.sources.location || "").toLowerCase();
-    const mismatch = plat === "chat_gpt" && loc && loc !== "united states"
-      ? `<div class="geo-callout warn" style="margin-top:12px;">De ChatGPT-database bestaat alleen voor de Verenigde Staten en het Engels. Met markt <strong>${escapeHtml(g.sources.location)}</strong> komt er niets terug — kies Google AI, of zet de markt in het auditbestand op United States.</div>`
+    const loc = (g.sources?.location || "").toLowerCase();
+    const lang = (g.sources?.language || "").toLowerCase();
+    // LLM Mentions kent platform chat_gpt alleen voor VS/Engels. Die combinatie
+    // levert stilzwijgend niets op, dus zeggen we het vóór de call.
+    const gptOutOfMarket = plat === "chat_gpt" && loc && !(loc === "united states" && (!lang || lang === "en"));
+    const mismatch = gptOutOfMarket
+      ? `<div class="geo-callout warn" style="margin-top:12px;">De ChatGPT-data van LLM Mentions bestaat alleen voor de VS en het Engels. Met markt <strong>${escapeHtml(g.sources.location)}</strong> komt er niets terug — kies Google AI.</div>`
       : "";
+    const lanes = `<div class="geo-lanes" style="margin-top:12px;">
+      <div class="geo-lane"><b>Marktdata · deze tab · maandelijks</b>LLM Mentions: welke bronnen AI gebruikt in een markt. ChatGPT alleen voor VS/Engels; voor andere markten Google AI (AI Overviews / AI Mode).</div>
+      <div class="geo-lane"><b>Promptmeting per markt · kwartaal</b>De vaste vragenset buiten de VS draait via de ChatGPT-scraper (met locatie) en LLM-responses voor GPT, Claude, Gemini en Perplexity — dat is de volledige meting, niet deze tab.</div>
+    </div>`;
 
-    const head = `<section class="panel" style="margin-bottom:16px;">
-      <div class="panel-header"><div>
-        <h2 class="panel-title">Welke bronnen voeden AI-antwoorden</h2>
-        <div class="panel-sub">Live bij DataForSEO · marktdata voor "${escapeHtml(g.sources.keyword)}", niet over dit merk</div>
-      </div></div>
-      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        ${platBtn("chat_gpt", "ChatGPT")}
-        ${platBtn("google", "Google AI")}
-        <button class="btn tiny" onclick="window.__geoSources(true)"${state.geoSourcesLoading ? " disabled" : ""}>
-          ${state.geoSourcesLoading ? "Ophalen…" : "◎ Ophalen"}
-        </button>
-        <span class="muted" style="font-size:11px;">markt ${escapeHtml(g.sources.location || "—")} · taal ${escapeHtml((g.sources.language || "—").toUpperCase())}</span>
+    const out = [];
+    const s = state.geoSources;
+
+    if (!g.sources || !g.sources.keyword) {
+      out.push(renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen <em>sources</em>-blok in het auditbestand. Zet daar een keyword, platform, markt en taal.</p>`));
+    } else {
+      out.push(`<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Welke bronnen voeden AI-antwoorden</h2>
+          <div class="panel-sub">Live bij DataForSEO · marktdata voor "${escapeHtml(g.sources.keyword)}", niet over dit merk</div>
+        </div></div>
+        <div class="panel-actions" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          ${platBtn("chat_gpt", "ChatGPT")}
+          ${platBtn("google", "Google AI")}
+          <label class="geo-chk"><input type="checkbox" ${state.geoSourcesExclude !== false ? "checked" : ""} onchange="window.__geoExclude(this.checked)"> Alleen antwoorden waarin wij niet staan</label>
+          <button class="btn tiny" onclick="window.__geoSources(true)"${state.geoSourcesLoading ? " disabled" : ""}>${state.geoSourcesLoading ? "Ophalen…" : "◎ Ophalen"}</button>
+          <span class="muted" style="font-size:11px;">markt ${escapeHtml(g.sources.location || "—")} · taal ${escapeHtml((g.sources.language || "—").toUpperCase())}</span>
+        </div>
+        <div class="muted" style="font-size:11px; margin-top:8px;">Eén pull kost centen tot ~$0,10 op het gedeelde DataForSEO-saldo en mag tot twee minuten duren — daarom een knop en een dagcache. Het keyword staat vast in het auditbestand.</div>
+        ${mismatch}${lanes}
+        ${state.geoSourcesError ? `<div style="font-size:11px; color:var(--negative); margin-top:8px;">${escapeHtml(state.geoSourcesError)}</div>` : ""}
+        ${s ? `<div class="muted" style="font-size:11px; margin-top:8px;">${escapeHtml(s.fromCache ? "uit de cache van vandaag" : `zojuist opgehaald${s.cost ? ` ($${s.cost})` : ""}`)}${s.totals?.mentions != null ? ` · ${escapeHtml(geoFmt.int(s.totals.mentions))} mentions in de dataset` : ""}${s.excludedDomain ? ` · antwoorden met ${escapeHtml(s.excludedDomain)} uitgesloten` : s.ownDomainKnown === false ? " · eigen domein onbekend, dus niet uitgesloten" : ""}</div>` : ""}
+      </section>`);
+
+      if (s) {
+        if (s.domains?.length) {
+          const max = Math.max(...s.domains.map(d => d.mentions), 1);
+          out.push(geoPanel("Meest geciteerde domeinen", s.excludedDomain
+            ? `Je digital-PR-targetlijst: domeinen die AI citeert in antwoorden waar ${escapeHtml(s.excludedDomain)} ontbreekt`
+            : "Alle antwoorden op dit keyword, ook die waarin het merk al staat",
+            s.domains.map(d => geoBar(d.key, d.mentions, max, geoFmt.int(d.mentions), d.aiSearchVolume != null ? `AI-zoekvolume ${geoFmt.int(d.aiSearchVolume)}` : "")).join("")));
+        } else if (s.errors?.domains) {
+          out.push(geoPanel("Meest geciteerde domeinen", "", `<p class="muted" style="margin:0; font-size:12px;">Domeinen ophalen mislukt: ${escapeHtml(s.errors.domains)}</p>`));
+        }
+        if (s.totals?.brands?.length) {
+          const max = Math.max(...s.totals.brands.map(b => b.mentions), 1);
+          out.push(geoPanel("Merken die AI noemt", "Wie in deze markt als entiteit bestaat voor de modellen",
+            s.totals.brands.map(b => geoBar(b.key, b.mentions, max, geoFmt.int(b.mentions))).join("")));
+        }
+        if (s.pages?.length) {
+          out.push(geoPanel("Meest gebruikte pagina's", "Welk paginatype AI citeert — het formaat om na te bouwen",
+            `<div class="lib-table"><table><thead><tr><th>URL</th><th class="right">Mentions</th><th class="right">AI-volume</th></tr></thead>
+            <tbody>${s.pages.map(p => `<tr><td class="row-caption" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</td><td class="right">${geoFmt.int(p.mentions)}</td><td class="right">${geoFmt.int(p.aiSearchVolume)}</td></tr>`).join("")}</tbody></table></div>`));
+        } else if (s.errors?.pages) {
+          out.push(geoPanel("Meest gebruikte pagina's", "", `<p class="muted" style="margin:0; font-size:12px;">Pagina's ophalen mislukt: ${escapeHtml(s.errors.pages)}</p>`));
+        }
+        if (!s.domains?.length && !s.pages?.length && !s.errors?.domains && !s.errors?.pages) {
+          out.push(renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen data voor deze combinatie. Probeer het andere platform, of een breder keyword in het auditbestand.</p>`));
+        }
+      }
+    }
+
+    /* ongeplande vermeldingen */
+    const mm = state.geoMentions;
+    const mentionsHead = `<div class="panel-actions" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button class="btn tiny" onclick="window.__geoMentions(true)"${state.geoMentionsLoading ? " disabled" : ""}>${state.geoMentionsLoading ? "Ophalen…" : "◎ Vermeldingen ophalen"}</button>
+        <span class="muted" style="font-size:11px;">platform: ${plat === "chat_gpt" ? "ChatGPT" : "Google AI"} · centen per pull, dagcache</span>
       </div>
-      <div class="muted" style="font-size:11px; margin-top:8px;">
-        Eén pull kost ongeveer $0,10 op het gedeelde DataForSEO-saldo en mag tot twee minuten duren — daarom een knop en een dagcache.
-        Het keyword staat vast in het auditbestand.
-      </div>
-      ${mismatch}
-      ${state.geoSourcesError ? `<div style="font-size:11px; color:var(--negative); margin-top:8px;">${escapeHtml(state.geoSourcesError)}</div>` : ""}
-      ${s ? `<div class="muted" style="font-size:11px; margin-top:8px;">${escapeHtml(
-          s.fromCache ? "uit de cache van vandaag" : `zojuist opgehaald${s.cost ? ` ($${s.cost})` : ""}`
-        )}${s.totals?.mentions != null ? ` · ${escapeHtml(geoFmt.int(s.totals.mentions))} mentions in de dataset` : ""}</div>` : ""}
-    </section>`;
-
-    if (!s) return head;
-
-    const blocks = [];
-
-    if (s.domains?.length) {
-      const max = Math.max(...s.domains.map(d => d.mentions), 1);
-      blocks.push(`<section class="panel" style="margin-bottom:16px;">
-        <div class="panel-header"><div>
-          <h2 class="panel-title">Meest geciteerde domeinen</h2>
-          <div class="panel-sub">Je digital-PR-targetlijst: hier wordt de markt beslist</div>
-        </div></div>
-        ${s.domains.map(d => geoBar(d.key, d.mentions, max, geoFmt.int(d.mentions),
-          d.aiSearchVolume != null ? `AI-zoekvolume ${geoFmt.int(d.aiSearchVolume)}` : "")).join("")}
-      </section>`);
-    } else if (s.errors?.domains) {
-      blocks.push(`<section class="panel" style="margin-bottom:16px;"><p class="muted" style="margin:0; font-size:12px;">Domeinen ophalen mislukt: ${escapeHtml(s.errors.domains)}</p></section>`);
+      ${state.geoMentionsError ? `<div style="font-size:11px; color:var(--negative); margin-top:8px;">${escapeHtml(state.geoMentionsError)}</div>` : ""}`;
+    if (!mm) {
+      // Nog niet opgehaald: helemaal in panel-actions, zodat een rapportslide
+      // nooit een 'nog niet opgehaald'-paneel toont.
+      out.push(`<div class="panel-actions">${geoPanel("Ongeplande vermeldingen", "Waar AI ons al noemt, buiten de vaste vragenset", mentionsHead)}</div>`);
+    } else {
+      const outside = mm.items.filter(i => !i.inPromptSet).length;
+      const body = mm.items.length
+        ? `<div class="muted" style="font-size:12px; margin:10px 0;">${mm.items.length} ${mm.items.length === 1 ? "vraag" : "vragen"}, waarvan ${outside} buiten de vaste vragenset.</div>
+          <div class="lib-table"><table><thead><tr><th>Vraag</th><th>Model</th><th class="c">Hoe</th><th class="c">In vaste set</th><th class="right">AI-volume</th><th>Gezien</th></tr></thead>
+          <tbody>${mm.items.map(i => `<tr><td class="row-caption" title="${escapeHtml(i.question)}">${escapeHtml(i.question)}</td><td>${escapeHtml(i.model)}</td><td class="c">${i.cited ? "bron" : "in antwoord"}</td><td class="c">${i.inPromptSet ? "ja" : "nee"}</td><td class="right">${geoFmt.int(i.aiSearchVolume)}</td><td>${escapeHtml(geoFmt.date(i.lastSeen))}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="muted" style="margin:10px 0 0; font-size:12px;">0 vragen gevonden: AI noemt of citeert ${escapeHtml(mm.domain)} op ${mm.platform === "chat_gpt" ? "ChatGPT" : "Google AI"} (${escapeHtml(mm.location)}) nog nergens.</p>`;
+      out.push(geoPanel("Ongeplande vermeldingen", `Vragen van echte gebruikers waarin ${escapeHtml(mm.domain)} opduikt${mm.fromCache ? " · uit de cache van vandaag" : ""}`, mentionsHead + body));
     }
-
-    if (s.totals?.brands?.length) {
-      const max = Math.max(...s.totals.brands.map(b => b.mentions), 1);
-      blocks.push(`<section class="panel" style="margin-bottom:16px;">
-        <div class="panel-header"><div>
-          <h2 class="panel-title">Merken die AI noemt</h2>
-          <div class="panel-sub">Wie in deze markt als entiteit bestaat voor de modellen</div>
-        </div></div>
-        ${s.totals.brands.map(b => geoBar(b.key, b.mentions, max, geoFmt.int(b.mentions))).join("")}
-      </section>`);
-    }
-
-    if (s.pages?.length) {
-      blocks.push(`<section class="panel">
-        <div class="panel-header"><div>
-          <h2 class="panel-title">Meest gebruikte pagina's</h2>
-          <div class="panel-sub">Welk paginatype AI citeert — het formaat om na te bouwen</div>
-        </div></div>
-        <div class="lib-table"><table>
-          <thead><tr><th>URL</th><th class="right">Mentions</th><th class="right">AI-volume</th></tr></thead>
-          <tbody>${s.pages.map(p => `<tr>
-            <td class="row-caption" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</td>
-            <td class="right">${geoFmt.int(p.mentions)}</td>
-            <td class="right">${geoFmt.int(p.aiSearchVolume)}</td>
-          </tr>`).join("")}</tbody>
-        </table></div>
-      </section>`);
-    } else if (s.errors?.pages) {
-      blocks.push(`<section class="panel"><p class="muted" style="margin:0; font-size:12px;">Pagina's ophalen mislukt: ${escapeHtml(s.errors.pages)}</p></section>`);
-    }
-
-    if (!blocks.length) {
-      blocks.push(renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen data voor deze combinatie. Probeer het andere platform, of een breder keyword in het auditbestand.</p>`));
-    }
-
-    return head + blocks.join("");
+    return out.join("");
   }
 
-  /* ---------- 4. Website (readiness) ---------- */
+  /* ---------- 4. Website (leesbaarheid + AI-verkeer) ---------- */
 
   function renderGeoWebsite() {
-    const g = state.geo;
-    if (!g.readiness.length) {
-      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen readiness-checks in dit auditbestand. Voeg een <em>readiness</em>-blok toe (zie het schema).</p>`);
+    const { g, cur, prev } = geoCtx();
+    const out = [];
+    const r = geoReadiness(cur), rp = prev ? geoReadiness(prev) : null;
+    if (!r.total) {
+      out.push(renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen leesbaarheidschecks in deze meting. Voeg <em>checks</em> toe aan de meting (zie het schema).</p>`));
+    } else {
+      const icon = { pass: "✓", fail: "✕", unknown: "?" };
+      const lbl = { pass: "geslaagd", fail: "faalt", unknown: "onmeetbaar" };
+      out.push(`<div class="kpi-grid" style="grid-template-columns:repeat(2,1fr); margin-bottom:16px;">
+        <div class="kpi-card">
+          <div class="label"><span class="dot"></span>Leesbaarheidsscore</div>
+          <div class="value compact">${r.pass}/${r.total}</div>
+          ${geoDelta(r.pass, rp?.pass, prev?.date, { unit: "" })}
+          <div class="muted" style="font-size:11px;">op orde vanaf ${GEO_T.leesbaarheid}/10 · ${r.fail} falen · ${r.unk} onmeetbaar</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label"><span class="dot"></span>Onmeetbaar</div>
+          <div class="value compact">${r.unk}</div>
+          <div class="muted" style="font-size:11px;">Apart geteld: onmeetbaar is geen gezakte check. Zolang een site niet bereikbaar is valt er niets te controleren.</div>
+        </div>
+      </div>`);
+      out.push(geoPanel(r.unk ? `Leesbaarheid — ${r.pass} van ${r.total} geslaagd, ${r.fail} falen, ${r.unk} niet te meten` : `Leesbaarheid — ${r.pass} van ${r.total} checks geslaagd`,
+        "Kan een AI-crawler het merk überhaupt lezen",
+        `<div class="geo-checks">${cur.checks.map(c => {
+          const was = prev?.checks?.find(x => x.check === c.check)?.status;
+          return `<div class="geo-check">
+            <div class="dot ${escapeHtml(c.status)}" aria-label="${lbl[c.status]}">${icon[c.status]}</div>
+            <div style="flex:1;">${escapeHtml(c.check)}<div class="muted" style="font-size:11px;">${lbl[c.status]}${was && was !== c.status ? ` · was ${lbl[was]}` : ""}</div></div>
+            <div class="why">${escapeHtml(c.note || "")}</div>
+          </div>`;
+        }).join("")}</div>
+        <div class="muted" style="font-size:11px; margin-top:12px;">Status op ${escapeHtml(geoFmt.date(cur.date))}. De score telt alleen geslaagde checks.${cur.checksNote ? " " + escapeHtml(cur.checksNote) : ""}</div>`));
     }
-    const pass = g.readiness.filter(c => c.status === "pass").length;
-    const fail = g.readiness.filter(c => c.status === "fail").length;
-    const unk = g.readiness.filter(c => c.status === "unknown").length;
-    const icon = { pass: "✓", fail: "✕", unknown: "?" };
 
-    return `<div class="kpi-grid" style="grid-template-columns:repeat(2,1fr); margin-bottom:16px;">
-      <div class="kpi-card">
-        <div class="label"><span class="dot"></span>Readiness-score</div>
-        <div class="value compact">${pass}/${g.readiness.length}</div>
-        <div class="muted" style="font-size:11px;">${fail} gezakt · ${unk} onmeetbaar</div>
+    /* AI-verkeer uit GA4 + naar verkeer gewogen mention rate */
+    const a = state.geoAi;
+    const head = `<div class="panel-actions" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button class="btn tiny" onclick="window.__geoAi()"${state.geoAiLoading ? " disabled" : ""}>${state.geoAiLoading ? "Ophalen…" : "◎ AI-verkeer ophalen"}</button>
+        <span class="muted" style="font-size:11px;">GA4 via Windsor · laatste 28 dagen · GA4-property uit de Config-tab</span>
       </div>
-      <div class="kpi-card">
-        <div class="label"><span class="dot"></span>Onmeetbaar</div>
-        <div class="value compact">${unk}</div>
-        <div class="muted" style="font-size:11px;">Apart geteld: onmeetbaar is geen gezakte check. Zolang een site niet bereikbaar is valt er niets te controleren.</div>
-      </div>
-    </div>
-    <section class="panel">
-      <div class="panel-header"><div>
-        <h2 class="panel-title">GEO/AEO readiness</h2>
-        <div class="panel-sub">Kan een AI-crawler het merk überhaupt lezen</div>
-      </div></div>
-      <div class="geo-checks">${g.readiness.map(c => `<div class="geo-check">
-        <div class="dot ${escapeHtml(c.status)}">${icon[c.status]}</div>
-        <div style="flex:1;">${escapeHtml(c.check)}</div>
-        <div class="why">${escapeHtml(c.note || "")}</div>
-      </div>`).join("")}</div>
-      <div class="muted" style="font-size:11px; margin-top:12px;">
-        Status op auditdatum ${escapeHtml(geoFmt.date(g.auditDate))}. Deze checks worden niet live herhaald — ze horen bij de meting waar de rest van deze tab op slaat.
-      </div>
-    </section>`;
+      ${state.geoAiError ? `<div style="font-size:11px; color:var(--negative); margin-top:8px;">${escapeHtml(state.geoAiError)}</div>` : ""}`;
+    if (!a) {
+      out.push(`<div class="panel-actions">${geoPanel("AI-verkeer naar de site", "Hoeveel bezoek via AI-assistenten binnenkomt, en van welke", head)}</div>`);
+    } else if (!a.available) {
+      out.push(geoPanel("AI-verkeer naar de site", "", head + `<p class="muted" style="margin:10px 0 0; font-size:12px;">${escapeHtml(a.reason || "Geen GA4 voor deze klant.")}</p>`));
+    } else {
+      const ai = a.groups.reduce((s2, x) => s2 + x.sessions, 0);
+      const engIds = new Set(g.engines.map(e => e.id));
+      const weighted = a.groups.filter(x => engIds.has(x.engine));
+      const wTot = weighted.reduce((s2, x) => s2 + x.sessions, 0);
+      const rate = id => geoMention(g, cur, GEO_UNBRANDED, [id]).pct;
+      const wRate = wTot ? weighted.reduce((s2, x) => s2 + (rate(x.engine) ?? 0) * x.sessions, 0) / wTot : null;
+      const uRate = geoMention(g, cur, GEO_UNBRANDED).pct;
+      const kpi = (label, value, sub) => `<div class="kpi-card"><div class="label"><span class="dot"></span>${label}</div><div class="value compact">${value}</div><div class="muted" style="font-size:11px;">${sub}</div></div>`;
+      out.push(geoPanel("AI-verkeer naar de site", `${escapeHtml(geoFmt.date(a.from))} – ${escapeHtml(geoFmt.date(a.to))} · bron: ${a.origin === "sheet" ? "datasheet" : "Windsor API"}`, head +
+        `<div class="kpi-grid" style="margin:14px 0;">
+          ${kpi("Sessies via AI", geoFmt.int(ai), `van ${geoFmt.int(a.totalSessions)} sessies totaal (${geoFmt.pct(geoPct(ai, a.totalSessions))})`)}
+          ${kpi("Engaged via AI", geoFmt.int(a.groups.reduce((s2, x) => s2 + x.engaged, 0)), "sessies langer dan 10 s of met interactie")}
+          ${kpi("Mention rate · ongewogen", geoFmt.pct(uRate), "unbranded, alle engines even zwaar")}
+          ${kpi("Mention rate · naar verkeer gewogen", wRate == null ? "—" : geoFmt.pct(Math.round(wRate)), wRate == null ? "nog geen AI-verkeer om mee te wegen" : "engines wegen naar hun aandeel in het AI-verkeer")}
+        </div>` +
+        (a.groups.length
+          ? `<div class="lib-table"><table><thead><tr><th>Bron</th><th class="right">Sessies</th><th class="right">Engaged</th><th class="right">Key events</th><th class="right">Mention rate (unbranded)</th></tr></thead>
+            <tbody>${a.groups.map(x => `<tr><td class="row-caption" title="${escapeHtml(x.sources.join(", "))}">${escapeHtml(x.label)}</td><td class="right">${geoFmt.int(x.sessions)}</td><td class="right">${geoFmt.int(x.engaged)}</td><td class="right">${geoFmt.int(x.conversions)}</td><td class="right">${engIds.has(x.engine) ? geoFmt.pct(rate(x.engine)) : "—"}</td></tr>`).join("")}</tbody></table></div>`
+          : `<p class="muted" style="margin:0; font-size:12px;">Geen sessies van AI-assistenten in deze periode (${geoFmt.int(a.totalSessions)} sessies in totaal).</p>`) +
+        `<div class="muted" style="font-size:11px; margin-top:10px;">AI Overviews stuurt verkeer door als gewone Google-zoekopdracht en valt daarom buiten de weging. Key events = alle GA4-key events samen, geen conversieratio.</div>`));
+    }
+    return out.join("");
   }
 
   /* ---------- 5. Acties ---------- */
@@ -7710,16 +7978,16 @@
     if (!g.actions.length) {
       return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen acties in dit auditbestand. Voeg een <em>actions</em>-blok toe (zie het schema).</p>`);
     }
-    return `<div class="geo-actions">${g.actions.map(a => `<div class="geo-action${/^p2/i.test(a.priority || "") ? " p2" : ""}">
-      <div class="meta">
-        ${a.priority ? `<span>${escapeHtml(a.priority)}</span>` : ""}
-        ${a.effort ? `<span>effort ${escapeHtml(a.effort)}</span>` : ""}
-        ${a.skill ? `<span>${escapeHtml(a.skill)}</span>` : ""}
-      </div>
-      <h3>${escapeHtml(a.title)}</h3>
-      ${a.text ? `<p>${escapeHtml(a.text)}</p>` : ""}
-      ${a.done ? `<div class="done">✓ Klaar als: ${escapeHtml(a.done)}</div>` : ""}
-    </div>`).join("")}</div>`;
+    return `<div class="geo-actions">${g.actions.map(a => {
+      const meta = a.ongoing ? ["doorlopend", a.how] : [a.priority && `prioriteit: ${a.priority}`, a.effort && `inspanning: ${a.effort}`, a.how];
+      return `<div class="geo-action${a.priority === "hoog" ? "" : " p2"}">
+        <div class="meta">${meta.filter(Boolean).map(x => `<span>${escapeHtml(x)}</span>`).join("")}</div>
+        ${a.moves.length ? `<div class="moves">Beweegt: ${a.moves.map(x => `<span>${escapeHtml(x)}</span>`).join("")}</div>` : ""}
+        <h3>${escapeHtml(a.title)}</h3>
+        ${a.text ? `<p>${escapeHtml(a.text)}</p>` : ""}
+        ${a.done ? `<div class="done">✓ Klaar als: ${escapeHtml(a.done)}</div>` : ""}
+      </div>`;
+    }).join("")}</div>`;
   }
 
   /* ---------- Chat panel (mock, stap 6) ---------- */

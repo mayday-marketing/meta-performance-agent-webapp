@@ -1887,9 +1887,8 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
      ≤ 760    sub-tabs horizontaal scrollbaar · callouts onder de grafiek
      ≤ 520    tabellen scrollen horizontaal met de eerste kolom vastgezet
 
-   De oudere component-breekpunten (620 voor .method-thresholds, 520 voor
-   .geo-phases) staan nog zoals ze waren; die horen bij één blok en botsen niet
-   met de ladder.
+   Het oudere component-breekpunt (620 voor .method-thresholds) staat nog
+   zoals het was; dat hoort bij één blok en botst niet met de ladder.
    ========================================================== */
 
 /* ---- Navigatiestanden -----------------------------------------------------
@@ -2419,19 +2418,65 @@ th.c, td.c { text-align: center; }
 .geo-check .dot.unknown { background: var(--fg-muted); }
 .geo-check .why { color: var(--fg-muted); font-size: 12px; text-align: right; }
 
-/* Fasenstrip */
-.geo-phases { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
-@media (max-width: 900px) { .geo-phases { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 520px) { .geo-phases { grid-template-columns: repeat(2, 1fr); } }
-.geo-phase {
-  border: 1px solid var(--border); border-radius: 12px; padding: 12px;
-  background: var(--accent-10);
+/* Statusoverzicht 2+3+1: fundamenten · vindbaarheid · uitkomst. Drie
+   kolommen naast elkaar, gestapeld onder 760 (de ladder). Geen volgorde:
+   het zijn groepen, geen treden. */
+.geo-score { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+@media (max-width: 760px) { .geo-score { grid-template-columns: 1fr; } }
+.geo-sgroup { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.geo-sgroup-h {
+  font-size: 12px; font-weight: 600; color: var(--fg-muted);
+  text-transform: uppercase; letter-spacing: .09em; line-height: 1.4;
 }
-.geo-phase.here { background: var(--accent); border-color: var(--accent); color: #fff; }
-.geo-phase .n { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.geo-phase .t { font-size: 13px; font-weight: 600; margin: 2px 0; }
-.geo-phase .g { font-size: 11px; line-height: 1.4; color: var(--fg-muted); }
-.geo-phase.here .g { color: rgba(255, 255, 255, 0.85); }
+.geo-sgroup-h small { display: block; font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.geo-stile {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px; min-width: 0;
+}
+/* Een fundament is een poort op het werk: een dichte krijgt een rode rand. */
+.geo-stile.found { border-left: 3px solid var(--border); }
+.geo-stile.found.closed { border-left-color: var(--negative); }
+.geo-stile.found.open { border-left-color: var(--positive); }
+.geo-stile h3 { margin: 0 0 2px; font-size: 15px; }
+.geo-stile .q { font-size: 12px; color: var(--fg-muted); line-height: 1.4; margin-bottom: 12px; }
+.geo-stile .v { font-size: 26px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums lining-nums; line-height: 1.05; }
+.geo-stile .vsub { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
+.geo-stile .fn { font-size: 11px; margin-top: 8px; line-height: 1.4; }
+/* Status nooit alleen in kleur: altijd icoon + tekst. */
+.geo-st { display: flex; gap: 6px; align-items: baseline; font-size: 12px; font-weight: 600; margin-top: 10px; line-height: 1.4; }
+.geo-st.closed { color: var(--negative); }
+.geo-st.open { color: var(--positive); }
+.geo-st.muted { color: var(--fg-muted); }
+.geo-jump {
+  background: none; border: none; padding: 2px 0; min-height: 24px; cursor: pointer;
+  color: var(--fg); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px;
+}
+.geo-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* Vorige stand als streep op de balk; het eigen merk donkerder gevuld. */
+.geo-bar .track { position: relative; }
+.geo-bar .prev { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--fg); }
+.geo-bar.own .lbl { font-weight: 700; }
+.geo-bar:not(.own) .fill { background: var(--s2); }
+
+/* Naamkaping-split: gestapelde staaf per uitkomst, met legenda die de cijfers draagt. */
+.geo-stack { display: flex; height: 22px; border-radius: 6px; overflow: hidden; gap: 2px; margin: 4px 0 10px; }
+.geo-stack span { display: block; height: 100%; }
+.k-ok { background: var(--positive); }
+.k-wrong { background: var(--warning); }
+.k-namesake { background: var(--negative); }
+.k-invented { background: var(--chart-6); }
+.k-generic { background: var(--fg-muted); }
+.geo-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: baseline; }
+.geo-sw.moved, .geo-cell.moved { background: var(--warning-bg); }
+
+.geo-chk { display: inline-flex; gap: 8px; align-items: center; font-size: 12px; min-height: 24px; cursor: pointer; color: var(--fg); }
+.geo-chk input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+.geo-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .geo-lanes { grid-template-columns: 1fr; } }
+.geo-lane { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; }
+.geo-lane b { display: block; font-size: 13px; color: var(--fg); margin-bottom: 4px; }
 
 /* Actiekaarten */
 .geo-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap, 16px); }
@@ -2449,6 +2494,11 @@ th.c, td.c { text-align: center; }
 .geo-action h3 { margin: 0 0 6px; font-size: 15px; }
 .geo-action p { font-size: 13px; color: var(--fg-muted); margin: 0 0 6px; line-height: 1.6; }
 .geo-action .done { font-size: 12px; color: var(--positive); font-weight: 500; }
+.geo-action .moves { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 11px; color: var(--fg-muted); margin-bottom: 8px; }
+.geo-action .moves span {
+  font-size: 11px; font-weight: 600; padding: 1px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+}
 
 
 /* ==========================================================
@@ -2603,7 +2653,8 @@ th.c, td.c { text-align: center; }
 .rp-body .insight-grid  { grid-template-columns: 1fr 1fr 1fr; }
 .rp-body .web-mini-grid { grid-template-columns: repeat(3, 1fr); }
 .rp-body .geo-grid2     { grid-template-columns: 1fr 1fr; }
-.rp-body .geo-phases    { grid-template-columns: repeat(6, 1fr); }
+.rp-body .geo-score     { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rp-body .geo-lanes     { grid-template-columns: 1fr 1fr; }
 .rp-body .geo-actions   { grid-template-columns: 1fr 1fr; }
 .rp-body .method-grid   { grid-template-columns: 1fr 1fr; }
 .rp-body .table-wrap, .rp-body .tablewrap { overflow-x: visible; }
