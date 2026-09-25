@@ -380,7 +380,7 @@
     const charts = Array.from(el.querySelectorAll("svg"));
 
     const notes = [];
-    el.querySelectorAll("p, li, .geo-callout, .channel-row").forEach(n => {
+    el.querySelectorAll("p, li, .callout-card, .channel-row").forEach(n => {
       if (n.closest(".kpi-card") || n.closest("table")) return;
       const t = txt(n);
       if (t.length > 3 && notes.length < 14) notes.push(t);

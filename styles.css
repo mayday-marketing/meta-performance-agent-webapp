@@ -2350,14 +2350,6 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
 .geo-tabs button:hover, .subtabs button:hover { color: var(--fg); }
 .geo-tabs button:focus-visible, .subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.geo-callout {
-  border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;
-  font-size: 13px; line-height: 1.6; border-left: 3px solid var(--fg-muted);
-  background: rgba(0, 0, 0, 0.03); color: var(--fg);
-}
-.geo-callout.blocked { border-left-color: var(--negative); background: var(--negative-bg); }
-.geo-callout.warn { border-left-color: var(--warning); background: var(--warning-bg); }
-.geo-callout.ok { border-left-color: var(--positive); background: var(--positive-bg); }
 
 .geo-delta { font-size: 12px; font-weight: 600; margin-top: 2px; }
 .geo-delta.bad { color: var(--negative); }
@@ -2420,7 +2412,8 @@ th.c, td.c { text-align: center; }
 
 /* Statusoverzicht 2+3+1: fundamenten · vindbaarheid · uitkomst. Drie
    kolommen naast elkaar, gestapeld onder 760 (de ladder). Geen volgorde:
-   het zijn groepen, geen treden. */
+   het zijn groepen, geen treden. De tegels zijn gewone .kpi-card's — geen
+   gekleurde zij- of bovenrand; de status staat als icoon + tekst. */
 .geo-score { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
 @media (max-width: 760px) { .geo-score { grid-template-columns: 1fr; } }
 .geo-sgroup { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -2429,19 +2422,12 @@ th.c, td.c { text-align: center; }
   text-transform: uppercase; letter-spacing: .09em; line-height: 1.4;
 }
 .geo-sgroup-h small { display: block; font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; }
-.geo-stile {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 12px; padding: 20px; min-width: 0;
-}
-/* Een fundament is een poort op het werk: een dichte krijgt een rode rand. */
-.geo-stile.found { border-left: 3px solid var(--border); }
-.geo-stile.found.closed { border-left-color: var(--negative); }
-.geo-stile.found.open { border-left-color: var(--positive); }
-.geo-stile h3 { margin: 0 0 2px; font-size: 15px; }
-.geo-stile .q { font-size: 12px; color: var(--fg-muted); line-height: 1.4; margin-bottom: 12px; }
-.geo-stile .v { font-size: 26px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums lining-nums; line-height: 1.05; }
-.geo-stile .vsub { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
-.geo-stile .fn { font-size: 11px; margin-top: 8px; line-height: 1.4; }
+.geo-stile { gap: 6px; min-width: 0; }
+.geo-stile:hover { transform: none; box-shadow: none; }
+.geo-stile .q { font-size: 12px; color: var(--fg-muted); line-height: 1.4; margin-top: -4px; }
+.geo-stile .vsub { font-size: 12px; color: var(--fg-muted); }
+.geo-stile .fn { font-size: 11px; line-height: 1.4; }
+.geo-stile .geo-st { margin-top: 2px; }
 /* Status nooit alleen in kleur: altijd icoon + tekst. */
 .geo-st { display: flex; gap: 6px; align-items: baseline; font-size: 12px; font-weight: 600; margin-top: 10px; line-height: 1.4; }
 .geo-st.closed { color: var(--negative); }
@@ -2478,14 +2464,38 @@ th.c, td.c { text-align: center; }
 .geo-lane { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; }
 .geo-lane b { display: block; font-size: 13px; color: var(--fg); margin-bottom: 4px; }
 
+/* Engine-logo's: een masker in de tekstkleur, zodat ze in licht en donker
+   dezelfde inkt hebben als de tekst ernaast (bestanden: assets/engines/). */
+.geo-logo {
+  display: inline-block; width: 14px; height: 14px; margin-right: 7px; vertical-align: -2px; flex: none;
+  background: currentColor;
+  -webkit-mask: var(--logo) center / contain no-repeat; mask: var(--logo) center / contain no-repeat;
+}
+.geo-bar .lbl { display: flex; align-items: center; }
+.geo-th-engine { white-space: nowrap; }
+/* GEO-tabellen zijn smal (4–9 kolommen): geen 1120px-minimum van de bibliotheektabel. */
+.lib-table.geo-fit table { min-width: 0; }
+.geo-th-engine .geo-logo { width: 13px; height: 13px; }
+.geo-plat { display: inline-flex; align-items: center; }
+.geo-plat .geo-logo { width: 12px; height: 12px; margin-right: 6px; }
+
 /* Actiekaarten */
 .geo-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap, 16px); }
 @media (max-width: 900px) { .geo-actions { grid-template-columns: 1fr; } }
 .geo-action {
   background: var(--surface); border: 1px solid var(--border);
-  border-left: 3px solid var(--accent); border-radius: 12px; padding: 20px;
+  border-radius: var(--radius); padding: var(--kpi-pad, 20px);
 }
-.geo-action.p2 { border-left-color: var(--fg-muted); }
+/* Prioriteit: hoog rood, middel oranje, laag groen — de tekst staat er altijd bij. */
+.geo-prio {
+  font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 999px;
+  background: var(--accent-10); color: var(--fg);
+}
+/* Via .meta, anders wint de algemene regel .geo-action .meta span. */
+.geo-action .meta .geo-prio.hoog { background: var(--negative-bg); color: var(--negative); }
+.geo-action .meta .geo-prio.middel { background: var(--warning-bg); color: var(--warning); }
+.geo-action .meta .geo-prio.laag { background: var(--positive-bg); color: var(--positive); }
+.geo-action .meta .geo-prio.ongoing { background: var(--info-bg); color: var(--info); }
 .geo-action .meta { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
 .geo-action .meta span {
   font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 999px;
@@ -2778,7 +2788,6 @@ th.c, td.c { text-align: center; }
 }
 .rp-deck[data-ds="on"] .lib-table tbody tr:hover { background: none; }
 .rp-deck[data-ds="on"] .panel,
-.rp-deck[data-ds="on"] .geo-callout,
 .rp-deck[data-ds="on"] .geo-action {
   background: none; border: none; border-radius: 0; box-shadow: none;
 }

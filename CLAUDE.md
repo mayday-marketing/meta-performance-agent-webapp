@@ -385,6 +385,18 @@ Herkenning), 3 parallelle pijlers (Categorie, Expertise, Vertrouwen), 1 uitkomst
   'branded x%': herkend / fout omschreven / naamgenoot / verzonnen / geen entiteit.
 - **Drempels in de code, voor elk merk gelijk** (`GEO_T`): Leesbaarheid op orde
   vanaf 8/10 geslaagde checks, Herkenning vanaf 80% juist herkende brand-runs.
+- **Opbouw van de tab.** Elke GEO-pagina begint meteen met de sub-tabs; de
+  meetgegevens (bestand, metingen, meetritme, methode, waarschuwingen) staan in
+  een eigen sub-tab *Meting*, niet in een kader bovenaan. Overzicht: melding →
+  KPI's → mention rate per engine + share of voice → statusoverzicht →
+  naamkaping-split. Website: eerst AI-verkeer, dan leesbaarheid.
+- **Geen gekleurde zij- of bovenlijntjes op kaarten.** Tegels zijn gewone
+  `.kpi-card`'s, meldingen `.callout-card` (getinte vlakken met glyph), zoals in
+  de rest van de app. Status staat als icoon + tekst. Prioriteit krijgt wél een
+  kleur (`.geo-prio`: hoog rood, middel oranje, laag groen), altijd met tekst.
+- **Engine-logo's** staan in `assets/engines/` (MIT, @lobehub/icons-static-svg)
+  en worden als CSS-masker in de tekstkleur getekend (`geoLogo()`), zodat ze in
+  dark mode meekleuren. Alleen bekende engine-id's krijgen een logo.
 - **Oude v1-bestanden** (kpis/phases/competitors-als-telling) worden omgezet
   (`fromV1` in `_geodata.js`), met een waarschuwing; share of voice en de split
   ontbreken dan. Eén renderer, geen tweede codepad.
