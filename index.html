@@ -215,14 +215,14 @@
             <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg></span>
             <span>Overview</span>
           </button>
-          <button class="nav-link" data-page="library">
-            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2 14 5.3 8 8.4 2 5.3z"/><path d="M2 8.4 8 11.5l6-3.1"/><path d="M2 11.4 8 14.5l6-3.1"/></svg></span>
-            <span>Library</span>
-            <span class="badge">14</span>
+          <button class="nav-link" data-page="social">
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="3.6" r="1.9"/><circle cx="4" cy="8" r="1.9"/><circle cx="12" cy="12.4" r="1.9"/><path d="M5.7 7.1l4.6-2.6M5.7 8.9l4.6 2.6"/></svg></span>
+            <span>Social</span>
+            <span class="badge" style="display:none;"></span>
           </button>
-          <button class="nav-link" data-page="analysis">
-            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.2 2h4.6l3 3v9H4.2z"/><path d="M6.4 8.4h4M6.4 11h4"/></svg></span>
-            <span>Analysis</span>
+          <button class="nav-link" data-page="ads">
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6.2v3.6h2.4L10 13V3L4.9 6.2z"/><path d="M12.3 5.8c.9.6.9 3.8 0 4.4"/></svg></span>
+            <span>Ads</span>
           </button>
           <button class="nav-link" data-page="website">
             <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.8 2.2 1.8 9.8 0 12M8 2c-1.8 2.2-1.8 9.8 0 12"/></svg></span>
@@ -245,7 +245,9 @@
             <span>E-mail</span>
           </button>
           <button class="nav-link" data-page="report">
-            <span class="icon">▤</span>
+            <!-- Presentatiebord: de tab levert een deck, geen tabel. Zelfde lijndikte
+                 als de andere iconen (1.5) — het oude teken '▤' was een lettertype-glyph. -->
+            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 2.5h12.4"/><path d="M2.8 2.5v7.6h10.4V2.5"/><path d="M8 10.1v2.3M5.6 14l2.4-1.6 2.4 1.6"/><path d="M5.6 8V6.6M8 8V4.8M10.4 8V5.9"/></svg></span>
             <span>Rapport</span>
           </button>
           <button class="nav-link" data-page="methodology">
@@ -329,18 +331,45 @@
                grafiek in de getinte bak met bronregel, en de callouts ernaast.
                Drie sub-tabs zodat publicaties en advertenties hun eigen blad
                krijgen in plaats van één lange pagina. -->
+          <!-- ========== OVERVIEW PAGE ==========
+               Overkoepelend: één regel per domein (social, ads, website,
+               e-mail), elk met een link naar de eigen pagina. Opbouw in
+               renderHome() in app.js. -->
           <div id="page-overview" class="dash-page">
+            <div class="subtabs" id="home-subtabs">
+              <button type="button" class="on" data-hometab="overzicht" aria-selected="true">Overzicht</button>
+              <button type="button" data-hometab="analyse" aria-selected="false">AI-analyse</button>
+              <button type="button" data-hometab="merk" aria-selected="false">Merk</button>
+            </div>
+            <div class="subpane on" data-homepane="overzicht"><div id="overview-content"></div></div>
+            <!-- AI-analyse: renderAnalysis() in app.js. Stond eerder op een eigen pagina. -->
+            <div class="subpane" data-homepane="analyse"><div id="analysis-content"></div></div>
+            <!-- Merk: Merkcontext + Doelen uit de klantsheet, renderBrand() in app.js. -->
+            <div class="subpane" data-homepane="merk"><div id="brand-content"></div></div>
+          </div>
 
-            <div class="subtabs" id="ov-subtabs">
-              <button type="button" class="on" data-ovtab="samenvatting" aria-selected="true">Samenvatting</button>
-              <button type="button" data-ovtab="publicaties" aria-selected="false">Publicaties</button>
-              <button type="button" data-ovtab="advertenties" aria-selected="false">Advertenties</button>
+          <!-- ========== SOCIAL PAGE ==========
+               Organische kanalen. Samenvatting = de rapportkop, KPI's en
+               publicaties; elke kanaaltab toont dezelfde post-bibliotheek
+               (#lib-host) met een ander filter. #lib-host verhuist tussen de
+               panelen in plaats van dubbel te bestaan, zodat het zoekveld zijn
+               focus houdt en de ids uniek blijven. -->
+          <div id="page-social" class="dash-page" style="display:none;">
+
+            <div class="subtabs" id="social-subtabs">
+              <button type="button" class="on" data-soctab="samenvatting" aria-selected="true">Samenvatting</button>
+              <button type="button" data-soctab="ig-posts" aria-selected="false">Instagram posts</button>
+              <button type="button" data-soctab="ig-reels" aria-selected="false">Instagram reels</button>
+              <button type="button" data-soctab="fb-posts" aria-selected="false">Facebook posts</button>
+              <button type="button" data-soctab="fb-reels" aria-selected="false">Facebook reels</button>
+              <button type="button" data-soctab="tiktok" aria-selected="false">TikTok</button>
+              <button type="button" data-soctab="linkedin" aria-selected="false">LinkedIn</button>
               <span style="flex-grow:1;"></span>
               <span style="padding-bottom:9px;"><span class="datastamp" id="ov-stamp" hidden></span></span>
             </div>
 
-            <!-- ---------- Samenvatting ---------- -->
-            <div class="subpane on" data-ovpane="samenvatting">
+            <!-- ---------- Samenvatting + publicaties ---------- -->
+            <div class="subpane on" data-socpane="samenvatting">
               <div class="report-head">
                 <p class="eyebrow" id="ov-eyebrow">Instagram, Facebook &amp; Meta Ads</p>
                 <h2 class="report-title" id="ov-conclusion">Cijfers worden opgehaald…</h2>
@@ -354,7 +383,7 @@
                   <button>7 dagen</button>
                 </div>
                 <span style="flex-grow:1;"></span>
-                <button class="btn" onclick="document.querySelector('[data-page=&quot;analysis&quot;]').click()">AI-analyse</button>
+                <button class="btn" onclick="window.__openAnalysis()">AI-analyse</button>
                 <button class="btn" onclick="window.__refreshOverview()">Ververs data</button>
               </div>
 
@@ -371,10 +400,8 @@
                 </div>
                 <div class="callouts" id="ov-callouts"></div>
               </div>
-            </div>
 
-            <!-- ---------- Publicaties ---------- -->
-            <div class="subpane" data-ovpane="publicaties">
+              <div style="margin-top:36px;"></div>
               <div class="report-head">
                 <p class="eyebrow">Publicaties</p>
                 <h2 class="report-title" id="pub-conclusion">Wat er gepost is, en wat het deed</h2>
@@ -388,7 +415,7 @@
                       <h3 class="label-head">Top performers</h3>
                       <div class="panel-sub">Best presterende posts in deze periode</div>
                     </div>
-                    <button class="btn tiny" onclick="document.querySelector('[data-page=&quot;library&quot;]').click()">Bekijk alle →</button>
+                    <button class="btn tiny" onclick="window.__socialTab('ig-posts')">Alle posts →</button>
                   </div>
                   <div id="top-posts" class="top-posts"></div>
                 </div>
@@ -420,8 +447,44 @@
               </div>
             </div>
 
-            <!-- ---------- Advertenties ---------- -->
-            <div class="subpane" data-ovpane="advertenties">
+            <!-- ---------- Kanaaltabs: één paneel, de bibliotheek wisselt van filter ---------- -->
+            <div class="subpane" data-socpane="channel">
+              <div id="lib-host">
+                <div class="lib-toolbar">
+                  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <div class="toggle-group" id="lib-view-toggle">
+                      <button data-view="grid" class="on">▦ Grid</button>
+                      <button data-view="table">☰ Tabel</button>
+                    </div>
+                    <span id="lib-count" style="font-size:11px; color:var(--fg-muted); letter-spacing:0.06em; text-transform:uppercase; font-weight:700;"></span>
+                  </div>
+                  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <div class="search-input">
+                      <input id="lib-search" type="text" placeholder="Zoek in captions…">
+                    </div>
+                    <select id="lib-sort" class="btn" style="padding:9px 12px;">
+                      <option value="date">Sorteer: Recent</option>
+                      <option value="reach">Sorteer: Reach</option>
+                      <option value="engagement">Sorteer: Engagement</option>
+                      <option value="saves">Sorteer: Saves</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="lib-results"></div>
+              </div>
+            </div>
+            <div class="subpane" data-socpane="unlinked"><div id="social-unlinked"></div></div>
+          </div>
+
+          <!-- ========== ADS PAGE ==========
+               Meta Ads: campagnes met funnel, creatie en doelgroep, en de
+               advertenties zelf in de bibliotheek (filter 'ads'). -->
+          <div id="page-ads" class="dash-page" style="display:none;">
+            <div class="subtabs" id="ads-subtabs">
+              <button type="button" class="on" data-adstab="campagnes" aria-selected="true">Campagnes</button>
+              <button type="button" data-adstab="advertenties" aria-selected="false">Advertenties</button>
+            </div>
+            <div class="subpane on" data-adspane="campagnes">
               <div class="report-head">
                 <p class="eyebrow">Meta Ads</p>
                 <h2 class="report-title" id="ads-conclusion">Advertenties worden opgehaald…</h2>
@@ -434,36 +497,9 @@
               <section class="ads-block" id="ads-creative"></section>
               <section class="ads-block" id="ads-demo"></section>
             </div>
+            <div class="subpane" data-adspane="advertenties"></div>
           </div>
 
-          <!-- ========== LIBRARY PAGE ========== -->
-          <div id="page-library" class="dash-page" style="display:none;">
-            <div class="lib-toolbar">
-              <div class="chip-row" id="lib-filters"></div>
-              <div style="display:flex; gap:10px; align-items:center;">
-                <span id="lib-count" style="font-size:11px; color:var(--fg-muted); letter-spacing:0.06em; text-transform:uppercase; font-weight:700;">14 posts</span>
-                <div class="search-input">
-                  <input id="lib-search" type="text" placeholder="Zoek in captions…">
-                </div>
-                <select id="lib-sort" class="btn" style="padding:9px 12px;">
-                  <option value="date">Sorteer: Recent</option>
-                  <option value="reach">Sorteer: Reach</option>
-                  <option value="engagement">Sorteer: Engagement</option>
-                  <option value="saves">Sorteer: Saves</option>
-                </select>
-                <div class="toggle-group" id="lib-view-toggle">
-                  <button data-view="grid" class="on">▦ Grid</button>
-                  <button data-view="table">☰ Tabel</button>
-                </div>
-              </div>
-            </div>
-            <div id="lib-results"></div>
-          </div>
-
-          <!-- ========== ANALYSIS PAGE ========== -->
-          <div id="page-analysis" class="dash-page" style="display:none;">
-            <div id="analysis-content"></div>
-          </div>
 
           <!-- ========== WEBSITE PAGE ========== -->
           <!-- Analytics-overzicht van de site: GA4 + Search Console. Volgt de

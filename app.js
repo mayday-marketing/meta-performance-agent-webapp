@@ -44,6 +44,15 @@
     page: "overview",
     libraryView: "grid",
     libraryFilter: "all",
+    homeTab: "overzicht",             // sub-tab van Overview: overzicht | analyse | merk
+    brand: null,                      // action=brand-respons: { brand, goals, hasGoalsTab, ... }
+    brandKey: null,                   // clientId waarvoor brand geladen is
+    brandLoading: false,
+    brandError: null,
+    goalMetrics: null,                // { "<start>|<end>": { values, errors } } uit getGoalMetrics
+    goalMetricsLoading: false,
+    socialTab: "samenvatting",        // sub-tab van Social: samenvatting | ig-posts | … | linkedin
+    adsTab: "campagnes",              // sub-tab van Ads: campagnes | advertenties
     adsDemoGender: "all", // filter boven de doelgroepgrafiek: all / female / male
     adsSort: { key: "spend", dir: "desc" }, // sortering van de advertentietabel
     adsShowAll: false,
@@ -141,6 +150,9 @@
     // bezoek. Hier en niet in logout(), want een verlopen sessie (401) komt
     // alleen langs clearSession — en dat pad moet net zo schoon zijn.
     clearRenderedData();
+    // Merk-tab: merkgegevens en doelen horen bij één klant.
+    state.brand = null; state.brandKey = null; state.brandError = null;
+    state.goalMetrics = null; state.homeTab = "overzicht";
     // report.js houdt zijn eigen state buiten `state`: gekozen blokken,
     // opgehaalde ROAS, duiding, slides, design system.
     if (window.__report) window.__report.reset();
@@ -483,6 +495,7 @@
   const RENDER_TARGETS = [
     "#kpi-grid", "#trend-chart", "#trend-legend", "#channel-mix", "#cadence",
     "#top-posts", "#lib-results", "#analysis-content", "#website-content",
+    "#overview-content", "#social-unlinked", "#brand-content",
     "#seo-content", "#geo-content", "#roas-content", "#email-content",
     "#report-content", "#chat-body",
     "#ads-table", "#ads-funnel", "#ads-creative", "#ads-demo",
@@ -593,8 +606,10 @@
     bindNav();
     bindChatPanel();
 
-    // Live Overview — fetch + render.
+    // Live data — fetch + render. De Overview stond al open vóór de periode
+    // gezet was, dus de websitecijfers pas nu ophalen.
     refreshOverview();
+    homeFetch();
   }
 
   function bindNav() {
@@ -606,7 +621,7 @@
   }
 
   function bindPeriodToggle() {
-    const buttons = $$("#page-overview .period-toggle button");
+    const buttons = $$("#page-social .period-toggle button");
     const setPeriod = (days, label) => {
       const today = new Date();
       const start = new Date(today);
@@ -634,17 +649,19 @@
 
   // Pagina's met een eigen rapportkop dragen hun titel zelf; dan verdwijnt de
   // topbar-titel, anders staan er twee koppen van 40px boven elkaar.
-  const REPORT_PAGES = new Set(["overview", "website", "roas", "bronnen"]);
+  const REPORT_PAGES = new Set(["overview", "social", "ads", "website", "roas", "bronnen"]);
 
   function switchPage(page) {
+    // De AI-analyse is een tab van de Overview geworden; oude links blijven werken.
+    if (page === "analysis") { state.homeTab = "analyse"; page = "overview"; }
     state.page = page;
     document.documentElement.setAttribute("data-report", REPORT_PAGES.has(page) ? "on" : "off");
     $$(".nav-link").forEach((l) => l.classList.toggle("on", l.dataset.page === page));
     $$(".dash-page").forEach((p) => p.style.display = p.id === `page-${page}` ? "block" : "none");
     const titles = {
       overview:    { title: "Overview",    crumbs: ["Dashboard", "Overview"] },
-      library:     { title: "Library",     crumbs: ["Dashboard", "Library"] },
-      analysis:    { title: "Analysis",    crumbs: ["Dashboard", "Analysis"] },
+      social:      { title: "Social",      crumbs: ["Dashboard", "Social"] },
+      ads:         { title: "Ads",         crumbs: ["Dashboard", "Ads"] },
       email:       { title: "E-mail",      crumbs: ["Dashboard", "E-mail"] },
       website:     { title: "Website",     crumbs: ["Dashboard", "Website"] },
       seo:         { title: "SEO",         crumbs: ["Dashboard", "SEO"] },
@@ -658,6 +675,9 @@
     $(".crumbs").innerHTML = t.crumbs.map((c, i) =>
       i === 0 ? `<span>${c}</span>` : `<span class="sep">/</span><span>${c}</span>`
     ).join("");
+    if (page === "overview") { setHomeTab(state.homeTab); homeFetch(); }
+    if (page === "social") setSocialTab(state.socialTab);
+    if (page === "ads") setAdsTab(state.adsTab);
     // E-mail wordt lui geladen bij het eerste bezoek (en opnieuw na periode-wissel).
     if (page === "email" && typeof refreshEmail === "function") refreshEmail();
     // ROAS heeft een eigen periode (month-to-date) en wordt daarom niet door de
@@ -678,15 +698,14 @@
     if (page === "bronnen") renderBronnen();
   }
 
-  // Spring vanuit de Analyse naar een specifieke advertentie in de Library: filter op
-  // Meta Ads, render, scroll naar de rij/kaart en licht 'm even op.
+  // Spring vanuit de Analyse naar een specifieke advertentie: Ads → Advertenties,
+  // render, scroll naar de rij/kaart en licht 'm even op.
   function goToAd(adId) {
-    state.libraryFilter = "ads";
-    switchPage("library");
-    if (typeof renderLibrary === "function") renderLibrary();
+    state.adsTab = "advertenties";
+    switchPage("ads");
     setTimeout(() => {
       const sel = (window.CSS && CSS.escape) ? CSS.escape(adId) : adId;
-      const el = document.querySelector(`#page-library [data-post="${sel}"]`);
+      const el = document.querySelector(`#lib-results [data-post="${sel}"]`);
       if (!el) return;
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.style.transition = "background-color .4s";
@@ -707,7 +726,8 @@
     state.emailKey = null; // e-mail-cache verloopt bij periode-wissel
     if (state.page === "email") refreshEmail();
     state.websiteKey = null;
-    if (state.page === "website") websiteFetch();
+    // De Overview toont de websitecijfers ook, dus daar ook opnieuw ophalen.
+    if (state.page === "website" || state.page === "overview") websiteFetch();
     // De Rapport-tab heeft een eigen opgehaalde set (ROAS, duiding, slides)
     // die aan deze periode hangt; die moet mee verlopen.
     if (window.__report) window.__report.periodChanged();
@@ -744,7 +764,7 @@
         return;
       }
       if (s !== state.period.start || e !== state.period.end) {
-        $$("#page-overview .period-toggle button").forEach(b => b.classList.remove("on"));
+        $$("#page-social .period-toggle button").forEach(b => b.classList.remove("on"));
       }
       state.period.start = s;
       state.period.end = e;
@@ -1273,6 +1293,11 @@
       id: String(raw.post_id || `fb-${raw.post_created_time || Math.random()}`),
       platform: "fb",
       type,
+      // Ruw posttype ('video_inline', 'video_direct_response', 'photo', 'album').
+      // Facebook onderscheidt reels niet van andere video's; de tab 'Facebook
+      // reels' leest daarom dit veld. Bewust niet in `type`: dat stuurt de
+      // performance-formule (formulaKeyFor) en die blijft zoals hij was.
+      kind: typeof raw.type === "string" ? raw.type : "",
       date,
       dateLabel: date ? fmt.dateNL(date) : "—",
       startMs: 0, stopMs: 0,
@@ -1793,8 +1818,426 @@
     renderAdsCreative();
     renderAdsDemo();
     renderLibrary();
+    if (state.page === "overview" && state.homeTab === "overzicht") renderHome();
   }
 
+
+  /* ==========================================================
+     Overview — overkoepelend over alle kanalen
+     ==========================================================
+     Eén blok per domein, elk met een link naar zijn eigen pagina. De cijfers
+     komen uit dezelfde renderers en dezelfde state als die pagina's: de social-
+     KPI's zijn de kaarten van Social, de website-KPI's die van de Website-tab.
+     Zo kan de Overview nooit iets anders zeggen dan de pagina erachter.
+     ========================================================== */
+
+  // De Overview haalt de websitedata mee op, maar lui: alleen bij een bezoek,
+  // en alleen als er een bron is. Social en Ads komen al mee met getDashboard.
+  function homeFetch() {
+    if (state.session?.hasWindsor && typeof websiteFetch === "function") websiteFetch();
+  }
+
+  function homeSection(titel, sub, page, body) {
+    return `<section style="margin-bottom:28px;">
+      <div class="panel-header">
+        <div>
+          <h3 class="label-head">${escapeHtml(titel)}</h3>
+          <div class="panel-sub">${sub}</div>
+        </div>
+        <button class="btn tiny" onclick="document.querySelector('[data-page=&quot;${page}&quot;]').click()">Naar ${escapeHtml(titel)} →</button>
+      </div>
+      ${body}
+    </section>`;
+  }
+
+  function homeSkeleton(n) {
+    return `<div class="kpi-grid">${Array(n).fill(`<div class="kpi-card skeleton">
+      <div class="skel-line" style="width:60%; height:11px;"></div>
+      <div class="skel-line" style="width:50%; height:28px; margin-top:14px;"></div>
+    </div>`).join("")}</div>`;
+  }
+
+  function homeNote(tekst) {
+    return `<p class="source-line" style="margin:0;">${tekst}</p>`;
+  }
+
+  function homeCard(label, value, sub, cvar) {
+    return `<div class="kpi-card">
+      <div class="label"><span class="dot" style="background:var(${cvar})"></span>${escapeHtml(label)}</div>
+      <div class="value">${value}</div>
+      <div class="delta none">${sub}</div>
+    </div>`;
+  }
+
+  function renderHomeSocial() {
+    const ov = state.overview;
+    if (state.overviewLoading) return homeSkeleton(4);
+    if (state.overviewError || !ov) return homeNote(escapeHtml(state.overviewError || "Nog geen cijfers opgehaald."));
+    // Dezelfde kaarten als op Social: renderKpis() heeft #kpi-grid al gevuld.
+    // Zonder de campagnekaart — die hoort hieronder bij Ads.
+    const grid = $("#kpi-grid");
+    const kaarten = grid ? [...grid.children].filter(k => !/Campagnes/.test(k.querySelector(".label")?.textContent || "")) : [];
+    return kaarten.length
+      ? `<div class="kpi-grid">${kaarten.map(k => k.outerHTML).join("")}</div>`
+      : homeNote("Geen organische publicaties in deze periode.");
+  }
+
+  function renderHomeAds() {
+    const ov = state.overview;
+    if (state.overviewLoading) return homeSkeleton(4);
+    if (!ov) return homeNote("Nog geen cijfers opgehaald.");
+    if (ov.adsLoading) return homeSkeleton(4);
+    const camps = (ov.adsCampaigns || []).filter(c => c && (c.spend || c.impressions || c.reach));
+    if (!camps.length) return homeNote("Er liep geen Meta Ads-campagne in deze periode, of het advertentieaccount staat niet in de Config-tab.");
+    const som = (k) => camps.reduce((a, c) => a + (Number(c[k]) || 0), 0);
+    const spend = som("spend"), clicks = som("clicks"), reach = som("reach");
+    const omzet = som("purchaseValue") || som("revenue");
+    const leads = som("leads");
+    const metKosten = camps.filter(c => (c.spend || 0) > 0).length;
+    const kaarten = [
+      homeCard("Kosten", `€ ${fmt.int(Math.round(spend))}`, `${camps.length} campagnes · ${metKosten} met kosten`, "--kpi-1"),
+      homeCard("Bereik", fmt.k(reach), "opgeteld per campagne", "--kpi-2"),
+      homeCard("Kliks", fmt.k(clicks), clicks && spend ? `€ ${(spend / clicks).toFixed(2).replace(".", ",")} per klik` : "—", "--kpi-3"),
+      omzet
+        ? homeCard("Opbrengst", `€ ${fmt.int(Math.round(omzet))}`, spend ? `ROAS ${(omzet / spend).toFixed(2).replace(".", ",")} · volgens Meta` : "volgens Meta", "--kpi-4")
+        : homeCard("Leads", leads ? fmt.int(leads) : "—", leads && spend ? `€ ${(spend / leads).toFixed(2).replace(".", ",")} per lead` : "geen leads gemeten", "--kpi-4"),
+    ];
+    return `<div class="kpi-grid">${kaarten.join("")}</div>`;
+  }
+
+  function renderHomeWebsite() {
+    if (!state.session?.hasWindsor) return homeNote("Voor deze klant is geen Windsor-koppeling ingesteld, dus geen GA4.");
+    if (state.websiteLoading) return homeSkeleton(4);
+    if (state.websiteError) return homeNote(escapeHtml(state.websiteError));
+    const w = state.website;
+    if (!w || !w.current) return homeNote("De websitecijfers worden opgehaald zodra je deze pagina opent.");
+    if (!w.hasGa4 && !w.hasGsc) {
+      return homeNote("Geen GA4-property of Search Console-site in de Config-tab, dus geen websitecijfers.");
+    }
+    return renderWebsiteKpis();
+  }
+
+  function renderHome() {
+    const root = $("#overview-content");
+    if (!root) return;
+    const per = periodLabel();
+    const merk = state.session?.brandName || "";
+    const vergelijk = state.compare === "yoy" ? "vergeleken met vorig jaar" : "vergeleken met de vorige periode";
+    root.innerHTML = `<div class="report-head">
+        <p class="eyebrow">Alle kanalen${per ? ` · ${escapeHtml(per)}` : ""}</p>
+        <h2 class="report-title">${merk ? `Zo deed ${escapeHtml(merk)} het deze periode` : "Zo deed het merk het deze periode"}</h2>
+        <p class="report-lede">Per kanaal de kerncijfers, ${vergelijk}. Elk blok komt uit de pagina erachter — daar staat de uitleg.</p>
+      </div>`
+      + homeSection("Social", "Instagram en Facebook, organisch en betaald bereik", "social", renderHomeSocial())
+      + homeSection("Ads", "Meta Ads — cijfers zoals Meta ze rapporteert", "ads", renderHomeAds())
+      + homeSection("Website", "GA4 en Search Console", "website", renderHomeWebsite());
+  }
+
+  /* ==========================================================
+     Merk — tab van de Overview
+     ==========================================================
+     Merkgegevens uit de tab Merkcontext, doelen uit de tab Doelen, allebei in
+     de klantsheet (sheets.js action=brand; de sheet komt uit CLIENTS, nooit uit
+     het request). Het dashboard leest alleen: bewerken doe je in de sheet.
+
+     De stand van een doel komt uit de kolom Meetbron als die een bekende bron
+     noemt, gemeten over de periode van het doel zelf — een jaar-KPI over het
+     jaar tot gisteren, niet over de dashboardperiode. Zonder meetbron geldt de
+     kolom Huidig. Onbekend blijft onbekend: geen stand is een streepje, geen 0.
+     ========================================================== */
+
+  // Bekende meetbronnen. `sum`: telt op over de periode, dus er is een
+  // verwachte stand halverwege. `ratio`: een verhouding, die vergelijk je direct.
+  const GOAL_METRICS = {
+    "ga4.sessies":     { label: "Sessies · GA4",           unit: "",  kind: "sum",   need: "ga4" },
+    "ga4.conversies":  { label: "Key events · GA4",        unit: "",  kind: "sum",   need: "ga4" },
+    "ga4.doel":        { label: "Hoofddoel · GA4",         unit: "",  kind: "sum",   need: "ga4Goal" },
+    "ga4.omzet":       { label: "Omzet · GA4",             unit: "€", kind: "sum",   need: "ga4" },
+    "ga4.transacties": { label: "Transacties · GA4",       unit: "",  kind: "sum",   need: "ga4" },
+    "meta.kosten":     { label: "Advertentiekosten · Meta", unit: "€", kind: "sum",  need: "meta" },
+    "meta.klikken":    { label: "Kliks · Meta",            unit: "",  kind: "sum",   need: "meta" },
+    "meta.leads":      { label: "Leads · Meta",            unit: "",  kind: "sum",   need: "meta" },
+    "meta.aankopen":   { label: "Aankopen · Meta",         unit: "",  kind: "sum",   need: "meta" },
+    "meta.omzet":      { label: "Omzet · Meta",            unit: "€", kind: "sum",   need: "meta" },
+    "meta.roas":       { label: "ROAS · Meta",             unit: "x", kind: "ratio", need: "meta" },
+  };
+
+  const MAANDEN = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+
+  // '2026' → jaar, '2026-Q4' / 'Q4 2026' → kwartaal, '2026-09' → maand.
+  // Meetvenster = periode tot en met gisteren (vandaag is nog niet af).
+  function goalRange(periode) {
+    const t = String(periode || "").trim();
+    let y, m0, m1, label;
+    let mt;
+    if ((mt = t.match(/^(\d{4})$/))) { y = +mt[1]; m0 = 0; m1 = 11; label = String(y); }
+    else if ((mt = t.match(/^(\d{4})\s*[-/ ]?\s*Q([1-4])$/i) || t.match(/^Q([1-4])\s*[-/ ]?\s*(\d{4})$/i))) {
+      const q = /^Q/i.test(t) ? +mt[1] : +mt[2];
+      y = /^Q/i.test(t) ? +mt[2] : +mt[1];
+      m0 = (q - 1) * 3; m1 = m0 + 2; label = `Q${q} ${y}`;
+    }
+    else if ((mt = t.match(/^(\d{4})-(\d{1,2})$/)) && +mt[2] >= 1 && +mt[2] <= 12) {
+      y = +mt[1]; m0 = m1 = +mt[2] - 1; label = `${MAANDEN[m0]} ${y}`;
+    }
+    else return null;
+    const start = ymd(y, m0, 1), end = ymd(y, m1, lastDayOf(y, m1));
+    const gister = new Date(); gister.setDate(gister.getDate() - 1);
+    const g = ymd(gister.getFullYear(), gister.getMonth(), gister.getDate());
+    const tot = end < g ? end : g;
+    const dagen = (a, b) => Math.round((webAtNoon(b) - webAtNoon(a)) / 86400000) + 1;
+    return {
+      start, end, label,
+      measureEnd: start <= g ? tot : null,           // null = nog niet begonnen
+      elapsed: start > g ? 0 : Math.min(1, dagen(start, tot) / dagen(start, end)),
+      done: end <= g,
+    };
+  }
+
+  function goalFmt(n, unit) {
+    if (n == null || !isFinite(n)) return "—";
+    if (unit === "x") return n.toFixed(2).replace(".", ",") + "×";
+    if (unit === "%") return (Math.round(n * 10) / 10).toString().replace(".", ",") + "%";
+    const v = Math.abs(n) >= 100 ? Math.round(n).toLocaleString("nl-NL")
+      : (Math.round(n * 100) / 100).toLocaleString("nl-NL");
+    return unit === "€" ? `€ ${v}` : v;
+  }
+
+  function brandFetch() {
+    const s = state.session;
+    if (!s) return;
+    if (state.brandLoading) return;
+    if (state.brand && state.brandKey === s.clientId) { renderBrand(); return; }
+    state.brandLoading = true;
+    state.brandError = null;
+    state.brand = null;
+    state.goalMetrics = null;
+    state.brandKey = s.clientId;
+    renderBrand();
+    const qs = new URLSearchParams({ action: "brand", clientId: s.clientId, token: s.token });
+    fetch(`/api/sheets?${qs.toString()}`)
+      .then(async (res) => {
+        if (res.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); throw new Error("Sessie verlopen."); }
+        if (!res.ok) throw new Error(`Klantsheet niet leesbaar (${res.status}).`);
+        return res.json();
+      })
+      .then((data) => {
+        if (state.brandKey !== s.clientId) return;   // klant gewisseld tijdens de fetch
+        state.brand = data;
+        state.brandLoading = false;
+        renderBrand();
+        goalMetricsFetch();
+      })
+      .catch((err) => {
+        if (state.brandKey !== s.clientId) return;
+        state.brandLoading = false;
+        state.brandError = err.message || "Merkgegevens niet opgehaald.";
+        renderBrand();
+      });
+  }
+  window.__refreshBrand = () => { state.brand = null; state.brandKey = null; brandFetch(); };
+
+  function allGoals() {
+    const out = [];
+    for (const g of state.brand?.goals || []) {
+      out.push(g);
+      for (const kr of g.keyResults || []) out.push(kr);
+    }
+    return out;
+  }
+
+  function goalMetricsFetch() {
+    if (!state.session?.hasWindsor) return;
+    const ranges = new Map();
+    for (const g of allGoals()) {
+      if (!g.source || !GOAL_METRICS[g.source]) continue;
+      const r = goalRange(g.period);
+      if (r && r.measureEnd) ranges.set(`${r.start}|${r.measureEnd}`, { start: r.start, end: r.measureEnd });
+    }
+    if (!ranges.size) return;
+    const key = state.brandKey;
+    state.goalMetricsLoading = true;
+    renderBrand();
+    windsorCall("getGoalMetrics", { ranges: [...ranges.values()] })
+      .then((res) => {
+        if (state.brandKey !== key) return;
+        const map = {};
+        for (const r of res.results || []) map[`${r.start}|${r.end}`] = r;
+        map.__available = res.available || {};
+        state.goalMetrics = map;
+        state.goalMetricsLoading = false;
+        renderBrand();
+      })
+      .catch((err) => {
+        if (state.brandKey !== key) return;
+        state.goalMetricsLoading = false;
+        state.goalMetrics = { __error: err.message || "Meetbronnen niet opgehaald." };
+        renderBrand();
+      });
+  }
+
+  // De stand van één doel: gemeten, handmatig of onbekend — en waarom.
+  function goalState(g) {
+    const r = goalRange(g.period);
+    const m = g.source ? GOAL_METRICS[g.source] : null;
+    const unit = m ? m.unit : (g.target?.unit || g.actual?.unit || "");
+    let actual = null, bron = "", note = "";
+    if (g.source && !m) {
+      note = `onbekende meetbron '${g.source}'`;
+    } else if (m && !r) {
+      note = "periode niet herkend — gebruik 2026, 2026-Q4 of 2026-09";
+    } else if (m && !r.measureEnd) {
+      note = "periode nog niet begonnen";
+    } else if (m) {
+      const gm = state.goalMetrics;
+      const res = gm && gm[`${r.start}|${r.measureEnd}`];
+      if (!state.session?.hasWindsor) note = "meetbron vraagt een Windsor-koppeling";
+      else if (state.goalMetricsLoading) note = "wordt gemeten…";
+      else if (gm && gm.__error) note = gm.__error;
+      else if (gm && gm.__available && !gm.__available[m.need]) {
+        note = m.need === "meta" ? "geen Meta Ads-account in de Config-tab"
+          : m.need === "ga4Goal" ? "geen Conversiedoel in de Config-tab" : "geen GA4-property in de Config-tab";
+      } else if (res && res.values && res.values[g.source] != null) {
+        actual = res.values[g.source];
+        bron = `gemeten t/m ${r.measureEnd.split("-").reverse().join("-")}`;
+      } else if (res && res.errors && Object.keys(res.errors).length) {
+        note = Object.values(res.errors)[0];
+      }
+    }
+    // Handmatig als terugval: een meetbron die (nog) niets oplevert mag de
+    // ingevulde stand niet wegvegen.
+    if (actual == null && g.actual) { actual = g.actual.value; bron = bron || "handmatig"; }
+    const target = g.target ? g.target.value : null;
+    const pct = (actual != null && target) ? actual / target : null;
+
+    // Oordeel. Verwachte stand alleen bij optelbare meetbronnen in een lopende
+    // periode: een handmatige 'Huidig' kan net zo goed een momentopname zijn.
+    let status = null;
+    if (pct != null && r) {
+      if (pct >= 1) status = { toon: "good", tekst: "behaald" };
+      else if (r.done) status = { toon: "bad", tekst: "niet behaald" };
+      else if (m && m.kind === "sum" && bron.startsWith("gemeten") && r.elapsed > 0) {
+        const tovSchema = pct / r.elapsed;
+        status = tovSchema >= 1 ? { toon: "good", tekst: "op schema" }
+          : tovSchema >= 0.9 ? { toon: "warn", tekst: "net achter" }
+          : { toon: "bad", tekst: "achter op schema" };
+      }
+    }
+    return { r, m, unit, actual, target, pct, bron, note, status,
+      expected: (m && m.kind === "sum" && r && !r.done && r.elapsed > 0) ? r.elapsed : null };
+  }
+
+  function goalRow(g) {
+    const st = goalState(g);
+    const bar = st.pct != null
+      ? `<div class="goal-bar" title="${Math.round(st.pct * 100)}% van het doel">
+          <span class="${st.status ? st.status.toon : ""}" style="width:${Math.min(100, st.pct * 100).toFixed(1)}%"></span>
+          ${st.expected != null ? `<i style="left:${(st.expected * 100).toFixed(1)}%" title="verwachte stand vandaag"></i>` : ""}
+        </div><div class="muted" style="font-size:11px; margin-top:3px;">${Math.round(st.pct * 100)}%</div>`
+      : `<span class="muted">—</span>`;
+    const bronTekst = [st.m ? st.m.label : "", st.bron, st.note].filter(Boolean).join(" · ");
+    return `<tr>
+      <td>${escapeHtml(g.title)}${g.note ? `<div class="muted" style="font-size:11px;">${escapeHtml(g.note)}</div>` : ""}</td>
+      <td>${escapeHtml(st.r ? st.r.label : (g.period || "—"))}</td>
+      <td class="right">${g.target ? goalFmt(st.target, st.unit) : `<span class="muted">${escapeHtml(g.targetRaw || "—")}</span>`}</td>
+      <td class="right">${goalFmt(st.actual, st.unit)}</td>
+      <td style="min-width:130px;">${bar}</td>
+      <td>${st.status ? `<span class="goal-status ${st.status.toon}">${escapeHtml(st.status.tekst)}</span>` : `<span class="muted">—</span>`}</td>
+      <td class="muted" style="font-size:11px;">${escapeHtml(bronTekst || "—")}</td>
+    </tr>`;
+  }
+
+  function goalTable(rows) {
+    return `<div class="lib-table"><table>
+      <thead><tr><th>Doel</th><th>Periode</th><th class="right">Streef</th><th class="right">Stand</th><th>Voortgang</th><th>Status</th><th>Bron</th></tr></thead>
+      <tbody>${rows.map(goalRow).join("")}</tbody>
+    </table></div>`;
+  }
+
+  function renderBrand() {
+    const root = $("#brand-content");
+    if (!root) return;
+    if (state.brandLoading) {
+      root.innerHTML = `<div class="skel-line" style="height:120px; border-radius:14px; margin-bottom:16px;"></div>
+        <div class="skel-line" style="height:220px; border-radius:14px;"></div>`;
+      return;
+    }
+    if (state.brandError || (state.brand && !state.brand.available)) {
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">${escapeHtml(state.brandError || state.brand.reason || "Merkgegevens niet beschikbaar.")}</p>
+        <button class="btn primary" style="margin-top:14px;" onclick="window.__refreshBrand()">Opnieuw proberen</button>`);
+      return;
+    }
+    const d = state.brand;
+    if (!d) { root.innerHTML = ""; return; }
+    const b = d.brand || {};
+    const naam = b.brandName?.value || state.session?.brandName || "Merk";
+
+    const veld = (f, hint) => `<div class="panel">
+        <h3 class="label-head">${escapeHtml(f.label)}</h3>
+        ${f.value
+          ? `<p style="margin:8px 0 0; line-height:1.6; white-space:pre-line;">${escapeHtml(f.value)}</p>
+             ${f.source && f.source !== f.label ? `<p class="source-line" style="margin:8px 0 0;">uit het veld '${escapeHtml(f.source)}'</p>` : ""}`
+          : `<p class="muted" style="margin:8px 0 0;">Niet ingevuld. Voeg in de tab Merkcontext een rij <b>${escapeHtml(hint)}</b> toe.</p>`}
+      </div>`;
+
+    const velden = d.hasContextTab
+      ? `<div class="brand-grid">
+          ${veld(b.mission, "Missie")}
+          ${veld(b.audiences, "Doelgroepen")}
+          ${veld(b.offer, "Aanbod / niche")}
+          ${veld(b.objectives, "Doelstellingen")}
+        </div>`
+      : callout("watch", "!", "Geen tab Merkcontext", "De klantsheet heeft (nog) geen tab <b>Merkcontext</b>. Maak hem aan met de kolommen VELD en WAARDE.");
+
+    const goals = d.goals || [];
+    const kpis = goals.filter(g => g.kind === "kpi");
+    const objectives = goals.filter(g => g.kind === "objective");
+    const losseKr = goals.filter(g => g.kind === "kr");
+
+    const uitleg = `<p class="source-line" style="margin:10px 0 0;">Tab <b>Doelen</b> met de kolommen
+      <b>Soort</b> (KPI, O of KR) · <b>Periode</b> (2026, 2026-Q4 of 2026-09) · <b>Doel</b> · <b>Streef</b> · <b>Huidig</b> · <b>Meetbron</b>.
+      Een KR hoort bij de O erboven. Met een meetbron meet het dashboard de stand zelf, over de periode van het doel:
+      ${Object.keys(GOAL_METRICS).map(k => `<code>${k}</code>`).join(", ")}.</p>`;
+
+    let doelen;
+    if (!d.hasGoalsTab) {
+      doelen = callout("info", "i", "Nog geen tab Doelen", "Zet de KPI's en OKR's in een tab <b>Doelen</b> in de klantsheet." ) + uitleg;
+    } else if (!goals.length) {
+      doelen = callout("info", "i", "De tab Doelen is leeg", "Er staat nog geen KPI of OKR in, of de kopregel wordt niet herkend.") + uitleg;
+    } else {
+      doelen = `<section style="margin-bottom:28px;">
+          <div class="panel-header"><div>
+            <h3 class="label-head">KPI's</h3>
+            <div class="panel-sub">Jaardoelen · de streep in de balk is waar je vandaag zou moeten staan</div>
+          </div></div>
+          ${kpis.length ? goalTable(kpis) : `<p class="source-line" style="margin:0;">Nog geen KPI's (Soort = KPI).</p>`}
+        </section>
+        <section>
+          <div class="panel-header"><div>
+            <h3 class="label-head">OKR's</h3>
+            <div class="panel-sub">Kwartaaldoelen · per objective de key results</div>
+          </div></div>
+          ${objectives.length || losseKr.length
+            ? objectives.map(o => `<div style="margin-bottom:18px;">
+                <p style="margin:0 0 8px; font-weight:600;">${escapeHtml(o.title)}
+                  <span class="muted" style="font-weight:400;"> · ${escapeHtml(goalRange(o.period)?.label || o.period || "geen periode")}</span></p>
+                ${(o.keyResults || []).length ? goalTable(o.keyResults) : `<p class="source-line" style="margin:0;">Nog geen key results onder dit objective.</p>`}
+              </div>`).join("")
+              + (losseKr.length ? `<p style="margin:0 0 8px; font-weight:600;">Key results zonder objective</p>${goalTable(losseKr)}` : "")
+            : `<p class="source-line" style="margin:0;">Nog geen OKR's (Soort = O en KR).</p>`}
+        </section>` + uitleg;
+    }
+
+    root.innerHTML = `<div class="report-head">
+        <p class="eyebrow">Merk</p>
+        <h2 class="report-title">${escapeHtml(naam)}</h2>
+        <p class="report-lede">Uit de klantsheet — tabs Merkcontext en Doelen. Aanpassen doe je daar; deze tab leest alleen.</p>
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+        <button class="btn tiny" onclick="window.__refreshBrand()">↻ Verversen</button>
+      </div>
+      ${velden}
+      <div style="margin-top:32px;">${doelen}</div>`;
+  }
 
   /* ==========================================================
      Bronnen — welke data dit dashboard gebruikt
@@ -2781,19 +3224,106 @@
       + `Sinds iOS 14 modelleert Meta een deel van de conversies per groep; lees dit als verdeling, niet als exacte telling.${adsWindowNote()}</p>`;
   }
 
-  function bindOverviewTabs() {
-    const bar = $("#ov-subtabs");
-    if (!bar) return;
-    bar.addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-ovtab]");
-      if (!btn) return;
-      const naam = btn.dataset.ovtab;
-      $$("#ov-subtabs [data-ovtab]").forEach(b => {
-        const on = b === btn;
-        b.classList.toggle("on", on);
-        b.setAttribute("aria-selected", String(on));
-      });
-      $$("[data-ovpane]").forEach(p => p.classList.toggle("on", p.dataset.ovpane === naam));
+  /* ---------- Social & Ads: sub-tabs ---------- */
+
+  // Kanaaltabs van Social. `filter` is de sleutel van librarySourceOf();
+  // `connector` + `config` beschrijven een kanaal dat nog geen datakoppeling
+  // heeft, zodat de tab zegt wat er moet gebeuren in plaats van leeg te staan.
+  const SOCIAL_TABS = [
+    { key: "samenvatting", label: "Samenvatting" },
+    { key: "ig-posts", label: "Instagram posts", filter: "ig-posts" },
+    { key: "ig-reels", label: "Instagram reels", filter: "ig-reels" },
+    { key: "fb-posts", label: "Facebook posts",  filter: "fb-posts" },
+    { key: "fb-reels", label: "Facebook reels",  filter: "fb-reels" },
+    { key: "tiktok",   label: "TikTok",   connector: "tiktok_organic",   config: "TikTok account" },
+    { key: "linkedin", label: "LinkedIn", connector: "linkedin_organic", config: "LinkedIn account" },
+  ];
+
+  // De bibliotheek bestaat één keer (#lib-host) en verhuist naar het paneel dat
+  // hem toont. Twee kopieën zouden dubbele ids geven, en een hertekening van de
+  // werkbalk neemt de focus uit het zoekveld.
+  function mountLibrary(pane) {
+    const host = $("#lib-host");
+    if (host && pane && host.parentElement !== pane) pane.appendChild(host);
+  }
+
+  function markTabs(barSel, attr, key) {
+    $$(`${barSel} [${attr}]`).forEach(b => {
+      const on = b.getAttribute(attr) === key;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", String(on));
+    });
+  }
+
+  function setSocialTab(key) {
+    const tab = SOCIAL_TABS.find(t => t.key === key) || SOCIAL_TABS[0];
+    state.socialTab = tab.key;
+    markTabs("#social-subtabs", "data-soctab", tab.key);
+    const pane = tab.key === "samenvatting" ? "samenvatting" : (tab.filter ? "channel" : "unlinked");
+    $$("[data-socpane]").forEach(p => p.classList.toggle("on", p.dataset.socpane === pane));
+    if (tab.filter) {
+      state.libraryFilter = tab.filter;
+      mountLibrary($('[data-socpane="channel"]'));
+      renderLibrary();
+    } else if (pane === "unlinked") {
+      renderSocialUnlinked(tab);
+    }
+  }
+  window.__socialTab = setSocialTab;
+
+  function setAdsTab(key) {
+    state.adsTab = key === "advertenties" ? "advertenties" : "campagnes";
+    markTabs("#ads-subtabs", "data-adstab", state.adsTab);
+    $$("[data-adspane]").forEach(p => p.classList.toggle("on", p.dataset.adspane === state.adsTab));
+    if (state.adsTab === "advertenties") {
+      state.libraryFilter = "ads";
+      mountLibrary($('[data-adspane="advertenties"]'));
+      renderLibrary();
+    }
+  }
+
+  // TikTok en LinkedIn organisch: er staat nog geen account in Windsor, dus er
+  // zijn geen veldnamen om tegen te verifiëren. Nooit nullen tonen — zeg wat er
+  // ontbreekt. Met een account-id in de Config-tab maar zonder koppeling in de
+  // code zeggen we dat ook, in plaats van te doen alsof er niets gepost is.
+  function renderSocialUnlinked(tab) {
+    const root = $("#social-unlinked");
+    if (!root) return;
+    const acc = state.session?.brand?.accounts?.[tab.connector];
+    root.innerHTML = `<div class="report-head">
+        <p class="eyebrow">${escapeHtml(tab.label)}</p>
+        <h2 class="report-title">${acc ? `${escapeHtml(tab.label)} staat in de Config-tab, de data volgt nog` : `${escapeHtml(tab.label)} is nog niet gekoppeld`}</h2>
+        <p class="report-lede">${acc
+          ? `Het account is ingesteld, maar het dashboard haalt ${escapeHtml(tab.label)} nog niet op. Die koppeling wordt gebouwd zodra het account in Windsor.ai staat, zodat de veldnamen eerst gecontroleerd kunnen worden.`
+          : `Koppel het account in Windsor.ai (connector <b>${escapeHtml(tab.connector)}</b>) en zet de account-id in de Config-tab onder <b>${escapeHtml(tab.config)}</b>.`}</p>
+      </div>`;
+  }
+
+  function setHomeTab(key) {
+    state.homeTab = ["analyse", "merk"].includes(key) ? key : "overzicht";
+    markTabs("#home-subtabs", "data-hometab", state.homeTab);
+    $$("[data-homepane]").forEach(p => p.classList.toggle("on", p.dataset.homepane === state.homeTab));
+    if (state.homeTab === "overzicht") renderHome();
+    if (state.homeTab === "analyse") renderAnalysis();
+    if (state.homeTab === "merk") brandFetch();
+  }
+  window.__openAnalysis = () => { state.homeTab = "analyse"; switchPage("overview"); };
+
+  function bindSubtabs() {
+    const home = $("#home-subtabs");
+    if (home) home.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-hometab]");
+      if (btn) setHomeTab(btn.dataset.hometab);
+    });
+    const soc = $("#social-subtabs");
+    if (soc) soc.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-soctab]");
+      if (btn) setSocialTab(btn.dataset.soctab);
+    });
+    const ads = $("#ads-subtabs");
+    if (ads) ads.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-adstab]");
+      if (btn) setAdsTab(btn.dataset.adstab);
     });
   }
 
@@ -2989,7 +3519,10 @@
   // Tab-key per platform & type
   function librarySourceOf(post) {
     if (post.platform === "ig") return post.type === "Reel" ? "ig-reels" : "ig-posts";
-    if (post.platform === "fb") return "fb-posts";
+    if (post.platform === "fb") {
+      const video = post.type === "Reel" || post.type === "Video" || /video|reel/i.test(post.kind || "");
+      return video ? "fb-reels" : "fb-posts";
+    }
     if (post.platform === "ads") return "ads";
     return "other";
   }
@@ -3009,6 +3542,7 @@
       { key: "ig-posts", label: "Instagram posts", count: count("ig-posts") },
       { key: "ig-reels", label: "Instagram reels", count: count("ig-reels") },
       { key: "fb-posts", label: "Facebook posts",  count: count("fb-posts") },
+      { key: "fb-reels", label: "Facebook reels",  count: count("fb-reels") },
       { key: "ads",      label: "Meta Ads",        count: count("ads") },
     ];
     // Verberg chips zonder data (count 0) — "Alle" blijft altijd staan.
@@ -3309,35 +3843,18 @@
   }
 
   function renderLibrary() {
-    const filtersEl = $("#lib-filters");
     const resultsEl = $("#lib-results");
     const countEl   = $("#lib-count");
     const sortEl    = $("#lib-sort");
-    if (!filtersEl || !resultsEl) return;
+    if (!resultsEl) return;
 
     // Sidebar-badge volgt het werkelijke aantal posts (was hardcoded "14").
-    const navBadge = $('.nav-link[data-page="library"] .badge');
+    const navBadge = $('.nav-link[data-page="social"] .badge');
     if (navBadge) {
-      const total = getLibraryAllPosts().length;
+      const total = arrayOrEmpty(state.overview?.allPosts).length;
       if (total > 0) { navBadge.textContent = total; navBadge.style.display = ""; }
       else navBadge.style.display = "none";
     }
-
-    // Filter chips — derived counts from live data.
-    const defs = getLibraryFilterDefs();
-    // Actief filter wees naar een chip die nu verborgen is (0 data) → reset naar "Alle".
-    if (!defs.some(f => f.key === state.libraryFilter)) state.libraryFilter = "all";
-    filtersEl.innerHTML = defs.map(f => `
-      <button class="chip ${state.libraryFilter === f.key ? "on" : ""}" data-filter="${f.key}">
-        ${f.label} <span class="count">${f.count}</span>
-      </button>
-    `).join("");
-    $$("#lib-filters .chip").forEach(b => {
-      b.addEventListener("click", () => {
-        state.libraryFilter = b.dataset.filter;
-        renderLibrary();
-      });
-    });
 
     // Sort dropdown — sync to current state, default desc op key-change.
     if (sortEl) {
@@ -3364,7 +3881,7 @@
 
     // Loading / error states (overview owns het foutbericht — library toont enkel skeleton/lege staat).
     if (state.overviewError && !state.overview) {
-      resultsEl.innerHTML = `<div class="panel"><p class="muted" style="margin:0;">Library is niet beschikbaar zolang het dashboard niet laadt.</p></div>`;
+      resultsEl.innerHTML = `<div class="panel"><p class="muted" style="margin:0;">De posts zijn niet beschikbaar zolang het dashboard niet laadt.</p></div>`;
       if (countEl) countEl.textContent = "—";
       return;
     }
@@ -3384,8 +3901,12 @@
          </div>`
       : "";
 
+    // Facebook heeft geen apart reel-type: zeg welke posts hier staan.
+    const fbNote = state.libraryFilter === "fb-reels"
+      ? `<p class="source-line" style="margin:0 0 12px;">Facebook onderscheidt reels niet van andere video's — hier staan alle video-posts van de pagina.</p>`
+      : "";
     const list = getFilteredLibrary();
-    resultsEl.innerHTML = adNote + (state.libraryView === "grid"
+    resultsEl.innerHTML = adNote + fbNote + (state.libraryView === "grid"
       ? renderLibraryGrid(list)
       : renderLibraryTable(list));
     if (countEl) countEl.textContent = `${list.length} posts`;
@@ -5511,6 +6032,7 @@
         state.website = res;
         state.websiteLoading = false;
         renderWebsite();
+        if (state.page === "overview") renderHome();
       })
       .catch((err) => {
         if (state.websiteKey !== key) return;
@@ -5518,6 +6040,7 @@
         state.websiteError = err.message || "Onbekende fout bij laden websitedata.";
         if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
         renderWebsite();
+        if (state.page === "overview") renderHome();
       });
   }
   window.__refreshWebsite = () => { state.website = null; state.websiteKey = null; websiteFetch(); };
@@ -8342,7 +8865,7 @@
     bindLogin();
     bindTweaks();
     bindSidebarNav();
-    bindOverviewTabs();
+    bindSubtabs();
     bindManualContext();
 
     const existing = loadSession();

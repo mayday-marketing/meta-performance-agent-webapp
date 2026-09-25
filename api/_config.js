@@ -224,6 +224,10 @@ const CONFIG_FIELDS = {
   klaviyoaccount:    { path: 'accounts.klaviyo',           check: okAccount },
   mailerliteaccount: { path: 'accounts.mailerlite',        check: okAccount },
   convertkitaccount: { path: 'accounts.convertkit',        check: okAccount },
+  // Organische TikTok/LinkedIn (Social-tab). Nog geen datakoppeling: de tab
+  // meldt 'staat ingesteld, data volgt' tot de veldnamen geverifieerd zijn.
+  tiktokaccount:     { path: 'accounts.tiktok_organic',    check: okAccount },
+  linkedinaccount:   { path: 'accounts.linkedin_organic',  check: okAccount },
 
   // --- ROAS-tab: omzetbron + betaalde kanalen (zie _channels.js) ------------
   // Elk kanaal verschijnt in de ROAS-tab zodra hier een account-id staat. De

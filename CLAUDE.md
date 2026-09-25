@@ -237,6 +237,48 @@ door extra calls in `getDashboard` (`adsExtra` in de respons). Getest op
   `ad_name` en een paar tellers. Dan haalt `adLevelCore()` het ad-niveau live op
   (`skipSheet`), anders valt er niets op te mergen.
 
+## Navigatie: Overview · Social · Ads
+
+- **Overview** (`#page-overview`, `renderHome()`) is overkoepelend: één blok per
+  domein (Social, Ads, Website), elk met een link naar zijn pagina. Hij rekent
+  niets zelf — de social-kaarten zijn een kopie van `#kpi-grid`, de websitekaarten
+  komen uit `renderWebsiteKpis()` — zodat hij nooit iets anders zegt dan de pagina
+  erachter. De websitedata haalt hij lui op (`homeFetch()`).
+- **Overview heeft drie tabs** (`state.homeTab`): Overzicht, AI-analyse
+  (`#analysis-content`, vroeger een eigen pagina — `switchPage("analysis")` en
+  `window.__openAnalysis()` sturen daarheen) en Merk.
+- **Merk-tab** (`renderBrand()`, `sheets.js` action `brand`): vaste velden uit de
+  tab Merkcontext (op aliassen, want de veldnamen verschillen per klant) en de
+  tab **Doelen** (`Soort` KPI/O/KR · `Periode` 2026 / 2026-Q4 / 2026-09 · `Doel` ·
+  `Streef` · `Huidig` · `Meetbron`). Een KR hoort bij de O erboven.
+  - **Meetbron** = een sleutel uit `GOAL_METRICS` (`ga4.omzet`, `meta.leads`, …).
+    `windsor.js` action `getGoalMetrics` meet die over de periode van het doel
+    (tot gisteren), niet over de dashboardperiode. Alleen optelbare maatstaven —
+    bereik en gebruikers ontdubbelen niet over dagrijen. Zonder meetbron of bij
+    een fout geldt `Huidig`; onbekend is een streepje.
+  - **'Op schema'** alleen bij een gemeten, optelbare bron in een lopende periode
+    (stand ÷ verstreken deel van de periode). Een handmatige stand kan een
+    momentopname zijn, dus daar geen tempo-oordeel.
+- **Social** (`#page-social`) = de vroegere Overview-samenvatting + publicaties,
+  plus kanaaltabs (IG posts/reels, FB posts/reels, TikTok, LinkedIn). **Ads**
+  (`#page-ads`) = het vroegere blad Advertenties plus de advertenties als
+  bibliotheek. De Library-pagina bestaat niet meer.
+- **De bibliotheek bestaat één keer** (`#lib-host`) en verhuist met
+  `mountLibrary()` naar het actieve paneel; het filter is `state.libraryFilter`
+  (sleutels uit `librarySourceOf()`). Twee kopieën gaven dubbele ids.
+- **Facebook kent geen reel-type**: Windsor geeft `video_inline`,
+  `video_direct_response`, `photo`, `album` (gecontroleerd 25-09-2026). 'Facebook
+  reels' = alle video-posts, via het ruwe veld `kind`; `type` blijft ongewijzigd
+  omdat die de performance-formule stuurt.
+- **TikTok/LinkedIn organisch** hebben nog geen fetch: geen account in Windsor,
+  dus geen veldnamen om te verifiëren. Config-velden `TikTok account` /
+  `LinkedIn account` (→ `accounts.tiktok_organic` / `linkedin_organic`) staan
+  klaar, de slugs zitten al in `ACCOUNT_ID_CONNECTORS`.
+- **Topbar-vergelijking** (`state.compare`: `prev`/`yoy`) geldt voor álle tabs
+  met een dashboardperiode; datums en vergelijking gaan pas in bij *Bijwerken*.
+  `getDashboard` neemt `compareStartDate/EndDate` over (datums, geen resource-id).
+  De Rapport-sleutel `overview` is bewust blijven staan (localStorage-keuzes).
+
 ## Datasheet-eerst (api/_sheetdata.js)
 
 Windsor exporteert per klant elke nacht naar een **Windsor.ai-data-sheet**. De

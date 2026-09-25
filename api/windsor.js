@@ -121,6 +121,9 @@ module.exports = async (req, res) => {
     // ROAS-tab: omzetbron + betaalde kanalen (zie _channels.js).
     'googleanalytics4', 'tiktok', 'google_ads', 'bing', 'linkedin', 'pinterest',
     'snapchat', 'amazon_ads',
+    // Social-tab: organisch TikTok en LinkedIn (nog zonder fetch, wel alvast
+    // fail-closed zodra er iets mee opgehaald wordt).
+    'tiktok_organic', 'linkedin_organic',
     // Website-tab: organisch zoeken. account_id = de property ('sc-domain:merk.be'
     // of 'https://www.merk.be/'), dus scoping werkt hier net als bij de rest.
     'searchconsole',
@@ -953,6 +956,67 @@ module.exports = async (req, res) => {
           totalSessions: total,
           groups: [...groups.values()].sort((a, b) => b.sessions - a.sessions),
           origin: d && d.__sheet ? 'sheet' : 'api',
+        });
+      }
+
+      // Merk-tab: de stand van een KPI of key result over de periode van dát doel
+      // (jaar, kwartaal, maand), niet over de dashboardperiode. Alleen een vaste
+      // lijst meetbronnen, allemaal optelbaar over dagen — daarom geen bereik en
+      // geen gebruikers: die ontdubbelen niet over een optelling van dagrijen.
+      // Datums zijn geen resource-id's; ze worden gevalideerd en begrensd.
+      case 'getGoalMetrics': {
+        const isoOk = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+        const DAY_MS = 86400000;
+        const ranges = (Array.isArray(req.body?.ranges) ? req.body.ranges : [])
+          .filter(r => r && isoOk(r.start) && isoOk(r.end) && r.start <= r.end
+            && (Date.parse(r.end) - Date.parse(r.start)) / DAY_MS <= 400)
+          .slice(0, 6);
+        const hasGa4 = !!scopedAccounts.googleanalytics4;
+        const hasMeta = !!scopedAccounts.facebook;
+        const goalEvent = (clientConfig?.website?.goalEvent && /^[a-z0-9_]+$/i.test(clientConfig.website.goalEvent))
+          ? clientConfig.website.goalEvent : null;
+        const num = (v) => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : 0; };
+        const rowsOf = (d) => (d && Array.isArray(d.data) ? d.data : []);
+        const sum = (rows, f) => rows.reduce((a, r) => a + num(r[f]), 0);
+        // omni bevat de gewone aankopen al: per rij omni ?? gewoon, nooit de som.
+        const omni = (rows, o, g) => rows.reduce((a, r) => a + (r[o] != null && r[o] !== '' ? num(r[o]) : num(r[g])), 0);
+
+        const results = await Promise.all(ranges.map(async (r) => {
+          const params = { date_from: r.start, date_to: r.end };
+          const [ga4, goal, meta] = await Promise.all([
+            hasGa4 ? windsorScoped('googleanalytics4', 'sessions,conversions,purchase_revenue,transactions', params, 40000, 'goal-ga4') : null,
+            hasGa4 && goalEvent ? windsorScoped('googleanalytics4', `conversions_${goalEvent}`, params, 30000, 'goal-ga4-doel') : null,
+            hasMeta ? windsorScoped('facebook', 'spend,clicks,actions_purchase,actions_omni_purchase,action_values_purchase,action_values_omni_purchase,actions_lead', params, 40000, 'goal-meta') : null,
+          ]);
+          const values = {}, errors = {};
+          const ga4Rows = ga4 && !ga4.__error ? rowsOf(ga4) : null;
+          if (ga4 && ga4.__error) errors.ga4 = ga4.__error;
+          if (ga4Rows) {
+            values['ga4.sessies'] = sum(ga4Rows, 'sessions');
+            values['ga4.conversies'] = sum(ga4Rows, 'conversions');
+            values['ga4.omzet'] = sum(ga4Rows, 'purchase_revenue');
+            values['ga4.transacties'] = sum(ga4Rows, 'transactions');
+          }
+          if (goal && !goal.__error) values['ga4.doel'] = sum(rowsOf(goal), `conversions_${goalEvent}`);
+          const metaRows = meta && !meta.__error ? rowsOf(meta) : null;
+          if (meta && meta.__error) errors.meta = meta.__error;
+          if (metaRows) {
+            const kosten = sum(metaRows, 'spend');
+            const omzet = omni(metaRows, 'action_values_omni_purchase', 'action_values_purchase');
+            values['meta.kosten'] = kosten;
+            values['meta.klikken'] = sum(metaRows, 'clicks');
+            values['meta.leads'] = sum(metaRows, 'actions_lead');
+            values['meta.aankopen'] = omni(metaRows, 'actions_omni_purchase', 'actions_purchase');
+            values['meta.omzet'] = omzet;
+            values['meta.roas'] = kosten ? omzet / kosten : null;
+          }
+          return { start: r.start, end: r.end, values, errors };
+        }));
+
+        return res.status(200).json({
+          results,
+          available: { ga4: hasGa4, ga4Goal: hasGa4 && !!goalEvent, meta: hasMeta },
+          goalEvent,
         });
       }
 

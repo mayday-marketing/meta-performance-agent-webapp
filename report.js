@@ -32,8 +32,10 @@
   /* ---------- 1. Wat er te kiezen valt ---------- */
 
   const PAGES = [
-    { key: "overview", label: "Overview", sub: "Organisch en ads samengevat" },
-    { key: "analysis", label: "Analyse",  sub: "AI-analyse van de periode" },
+    // Sleutel blijft 'overview': daaronder staan de gekozen blokken per klant in
+    // localStorage, en de data is nog altijd state.overview (getDashboard).
+    { key: "overview", label: "Social & Ads", sub: "Organisch en ads samengevat" },
+    { key: "analysis", label: "AI-analyse",   sub: "AI-analyse van de periode" },
     { key: "website",  label: "Website",  sub: "GA4 en Search Console" },
     { key: "roas",     label: "ROAS",     sub: "Blended MER en kanalen" },
     { key: "email",    label: "E-mail",   sub: "Klaviyo of ConvertKit" },

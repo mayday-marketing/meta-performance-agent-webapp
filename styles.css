@@ -2822,3 +2822,33 @@ th.c, td.c { text-align: center; }
 .rp-deck[data-ds="on"] .rp-slide.divider .rp-foot {
   color: var(--ds-cover-fg, var(--fg));
 }
+
+/* ---------- Merk-tab (Overview) ---------- */
+.brand-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--grid-gap);
+}
+@media (max-width: 760px) { .brand-grid { grid-template-columns: 1fr; } }
+
+/* Voortgang van een doel: de balk is de stand, het streepje de verwachte stand
+   vandaag (alleen bij een optelbare meetbron in een lopende periode). */
+.goal-bar {
+  position: relative; height: 6px; border-radius: 3px;
+  background: var(--surface-strong);
+}
+.goal-bar > span {
+  position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px;
+  background: var(--accent-data);
+}
+.goal-bar > span.good { background: var(--positive); }
+.goal-bar > span.warn { background: var(--warning); }
+.goal-bar > span.bad  { background: var(--negative); }
+.goal-bar > i {
+  position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px;
+  background: var(--fg); border-radius: 1px;
+}
+.goal-status { font-size: 11px; font-weight: 600; white-space: nowrap; }
+.goal-status::before { content: "● "; }
+.goal-status.good { color: var(--positive); }
+.goal-status.warn { color: var(--warning); }
+.goal-status.bad  { color: var(--negative); }
