@@ -646,6 +646,10 @@ module.exports = async (req, res) => {
           },
           // Venster dat de ad-level data écht dekt (kan korter zijn dan de selectie, zie cap).
           adLevelWindow: adLevelCapped ? { startDate: adFrom, endDate, maxDays: AD_LEVEL_MAX_DAYS } : null,
+          // Herkomst van de hoofdblokken: 'sheet', 'api' of null (niets binnen).
+          // De Bronnen-pagina leest dit; zonder zag je alleen de Website-tab.
+          origin: Object.fromEntries(Object.entries({ instagram: igData, fbOrganic: fbOrgData, ads: adsData })
+            .map(([k, d]) => [k, !d || d.__error || !Array.isArray(d.data) || !d.data.length ? null : (d.__sheet ? 'sheet' : 'api')])),
           instagram: igData,
           fbOrganic: fbOrgData, // Facebook organic pagina-posts
           ads: adsData,        // campagne-niveau (trend/KPI + fallback)
@@ -870,8 +874,14 @@ module.exports = async (req, res) => {
           }
           if (!totalsAvailable) { totals.revenue = null; totals.sessions = null; totals.transactions = null; }
 
+          // Herkomst per bron, zelfde vorm als getDashboard/getWebsite.
+          const originOf = (d) => (!d || d.__error || !Array.isArray(d.data) || !d.data.length ? null : (d.__sheet ? 'sheet' : 'api'));
+          const origin = { ga4Totals: originOf(ga4Totals), ga4Split: originOf(ga4Split) };
+          active.forEach((ch, i) => { origin[ch.key] = originOf((channelResults[i] || {}).data); });
+
           return {
             window: { startDate: from, endDate: to },
+            origin,
             totals,
             daily: Array.from(daily.values()).sort((a, b) => a.date.localeCompare(b.date)),
             channels,

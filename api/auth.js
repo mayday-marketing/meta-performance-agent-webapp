@@ -53,5 +53,7 @@ module.exports = async (req, res) => {
     hasWindsor: !!(client.windsor_api_key || client.dataSheetId),
     // Waar die data vandaan komt, zodat de UI het verschil kan tonen.
     windsorSource: client.windsor_api_key ? 'api' : (client.dataSheetId ? 'sheet' : null),
+    // Alleen of er een datasheet is, nooit de id zelf.
+    hasDataSheet: !!client.dataSheetId,
   });
 };

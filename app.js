@@ -548,6 +548,8 @@
         hasMetricool: !!data.hasMetricool,
         hasDrive: !!data.hasDrive,
         hasWindsor: !!data.hasWindsor,
+        windsorSource: data.windsorSource || null,
+        hasDataSheet: !!data.hasDataSheet,
       });
       $("#source-brand").textContent = data.brandName;
       $("#sidebar-brand").textContent = `Klant: ${data.brandName}`;
@@ -2292,27 +2294,58 @@
 
     const kaarten = [];
 
+    // Herkomst per tab, uit wat de server per blok meestuurt ('sheet' | 'api' |
+    // null). De backend probeert voor élke tab eerst de datasheet (windsorScoped);
+    // deze kaart laat zien waar dat per tab gelukt is.
+    const herkomst = (origins) => {
+      if (!origins) return null;
+      const v = Object.values(origins).filter(x => x === "sheet" || x === "api");
+      if (!v.length) return { sheet: 0, api: 0, n: 0 };
+      return { sheet: v.filter(x => x === "sheet").length, api: v.filter(x => x === "api").length, n: v.length };
+    };
+    const ovRaw = state.overview && state.overview._raw;
+    const perTab = [
+      ["Overzicht", ovRaw ? herkomst({ ...(ovRaw.origin || {}), ...((ovRaw.adsExtra && ovRaw.adsExtra.origin) || {}) }) : null],
+      ["ROAS", r && r.current ? herkomst(r.current.origin) : null],
+      ["Website", w && w.current ? herkomst(w.current.origin) : null],
+    ];
+    const sheetLabel = (h) => {
+      if (!h) return nogNiet;
+      if (!h.n) return "geen data";
+      if (h.sheet === h.n) return "datasheet";
+      if (!h.sheet) return "live — datasheet dekt dit niet";
+      return `${h.sheet} van ${h.n} blokken uit datasheet`;
+    };
+    const liveLabel = (h) => {
+      if (!h) return nogNiet;
+      if (!h.n) return "geen data";
+      if (!h.api) return "niet nodig";
+      return h.api === h.n ? "alles live" : `${h.api} van ${h.n} blokken live`;
+    };
+    const ooitSheet = perTab.some(([, h]) => h && h.sheet > 0);
+    const ooitGemeten = perTab.some(([, h]) => h);
+    const hasApi = s.windsorSource ? s.windsorSource === "api" : s.hasWindsor;
+
     kaarten.push(bronKaart({
-      naam: "Windsor.ai — live", staat: s.hasWindsor ? "ok" : "uit",
-      rol: "Advertentie- en kanaaldata rechtstreeks uit de API",
+      naam: "Windsor-datasheet",
+      staat: !s.hasDataSheet ? "uit" : (ooitSheet ? "ok" : "wacht"),
+      rol: "Nachtelijke export, per tabblad gelezen — altijd de eerste bron",
       rijen: [
-        ["Voedt", "Overzicht, ROAS"],
-        ["Periode", escapeHtml(periodLabel() || "—")],
-        ["Advertenties", state.overview ? (state.overview.adsLoading ? "laden…" : `${(state.overview.adsCampaigns || []).length} campagnes`) : nogNiet],
+        ["Ingesteld", s.hasDataSheet ? "ja" : "nee, alles gaat live"],
+        ...(s.hasDataSheet ? perTab.map(([k, h]) => [k, sheetLabel(h)]) : []),
       ],
-      niet: "advertenties per stuk over meer dan 35 dagen — Meta loopt dan vast.",
+      niet: "unieke gebruikers en ontdubbeld bereik — die zijn niet over dagen op te tellen.",
     }));
 
-    const ds = w?.dataSheet;
     kaarten.push(bronKaart({
-      naam: "Windsor-datasheet", staat: !w ? "wacht" : (ds?.used ? "ok" : (ds?.configured ? "wacht" : "uit")),
-      rol: "Nachtelijke export, per tabblad gelezen",
+      naam: "Windsor.ai — live",
+      staat: !hasApi ? "uit" : (ooitGemeten ? "ok" : "wacht"),
+      rol: "Terugval: alleen wat de datasheet niet dekt",
       rijen: [
-        ["Voedt", "Website: kanalen, bronnen, dagreeks"],
-        ["Ingesteld", !w ? nogNiet : (ds?.configured ? "ja" : "nee, alles gaat live")],
-        ["Gebruikt", !w ? nogNiet : (ds?.used ? "ja, voor deze periode" : "nee — zie Dekking")],
+        ["Periode", escapeHtml(periodLabel() || "—")],
+        ...(hasApi ? perTab.map(([k, h]) => [k, s.hasDataSheet ? liveLabel(h) : (h ? "alles live" : nogNiet)]) : [["Gekoppeld", "nee — alleen de datasheet"]]),
       ],
-      niet: "unieke gebruikers — die zijn niet over dagen op te tellen.",
+      niet: "advertenties per stuk over meer dan 35 dagen — Meta loopt dan vast.",
     }));
 
     const dc = state.driveContext;
