@@ -291,8 +291,13 @@ module.exports = async (req, res) => {
         prevEnd.setUTCDate(prevEnd.getUTCDate() - 1);
         const prevStart = new Date(prevEnd);
         prevStart.setUTCDate(prevStart.getUTCDate() - (spanDays - 1));
-        const prevStartDate = prevStart.toISOString().slice(0, 10);
-        const prevEndDate = prevEnd.toISOString().slice(0, 10);
+        // De topbar kan een eigen vergelijkingsperiode meegeven (bv. vorig jaar).
+        // Datums zijn geen resource-id's, dus dat mag — mits geldig en op volgorde.
+        const isoOk = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+        const cmpFrom = req.body?.compareStartDate, cmpTo = req.body?.compareEndDate;
+        const eigenVergelijking = isoOk(cmpFrom) && isoOk(cmpTo) && cmpFrom <= cmpTo;
+        const prevStartDate = eigenVergelijking ? cmpFrom : prevStart.toISOString().slice(0, 10);
+        const prevEndDate = eigenVergelijking ? cmpTo : prevEnd.toISOString().slice(0, 10);
         const prevDateParams = { date_from: prevStartDate, date_to: prevEndDate };
 
         const IG_FIELDS = [

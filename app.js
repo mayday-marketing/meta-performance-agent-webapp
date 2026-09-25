@@ -80,7 +80,7 @@
     websiteLoading: false,
     websiteError: null,
     websiteKey: null,                 // klant+periode waarvoor de tab geladen is (lazy refresh)
-    websiteCompare: "prev",           // 'prev' (vorige periode) | 'yoy' (vorig jaar)
+    compare: "prev",                  // topbar: 'prev' (vorige periode) | 'yoy' (vorig jaar)
     websiteTab: "overzicht",          // actief sub-blad van de Website-tab
     webDemoGender: "all",             // filter in de Doelgroep-sub-tab: all / female / male
     roasTab: "blended",               // actief sub-blad van de ROAS-tab
@@ -582,6 +582,7 @@
     state.period.end = fmt.dateISO(today);
     $$(".date-filter input[type=date]")[0].value = state.period.start;
     $$(".date-filter input[type=date]")[1].value = state.period.end;
+    $("#compare-select").value = state.compare;
     bindDateFilter();
     bindPeriodToggle();
 
@@ -605,7 +606,7 @@
   }
 
   function bindPeriodToggle() {
-    const buttons = $$(".period-toggle button");
+    const buttons = $$("#page-overview .period-toggle button");
     const setPeriod = (days, label) => {
       const today = new Date();
       const start = new Date(today);
@@ -615,14 +616,7 @@
       $$(".date-filter input[type=date]")[0].value = state.period.start;
       $$(".date-filter input[type=date]")[1].value = state.period.end;
       buttons.forEach(b => b.classList.toggle("on", b.dataset.days === String(days)));
-      refreshOverview();
-      state.emailKey = null; // e-mail-cache verloopt bij periode-wissel
-      if (state.page === "email") refreshEmail();
-      state.websiteKey = null;
-      if (state.page === "website") websiteFetch();
-      // De Rapport-tab heeft een eigen opgehaalde set (ROAS, duiding, slides)
-      // die aan deze periode hangt; die moet mee verlopen.
-      if (window.__report) window.__report.periodChanged();
+      applyPeriod();
     };
     const presets = [
       { label: "90 dagen", days: 90 },
@@ -661,7 +655,6 @@
       bronnen:     { title: "Bronnen",     crumbs: ["Dashboard", "Bronnen"] },
     };
     const t = titles[page] || titles.overview;
-    $(".page-title").textContent = t.title;
     $(".crumbs").innerHTML = t.crumbs.map((c, i) =>
       i === 0 ? `<span>${c}</span>` : `<span class="sep">/</span><span>${c}</span>`
     ).join("");
@@ -704,27 +697,60 @@
   }
   window.__goToAd = goToAd;
 
+  // Eén plek waar een nieuwe periode of vergelijking doorwerkt: de Overview
+  // haalt opnieuw op, de lui geladen tabs verlopen. Website heeft beide
+  // vergelijkingsperiodes al in huis, dus die hertekent alleen bij een
+  // vergelijkingswissel.
+  function applyPeriod() {
+    $(".date-filter").classList.remove("dirty");
+    refreshOverview();
+    state.emailKey = null; // e-mail-cache verloopt bij periode-wissel
+    if (state.page === "email") refreshEmail();
+    state.websiteKey = null;
+    if (state.page === "website") websiteFetch();
+    // De Rapport-tab heeft een eigen opgehaalde set (ROAS, duiding, slides)
+    // die aan deze periode hangt; die moet mee verlopen.
+    if (window.__report) window.__report.periodChanged();
+  }
+
+  // De vergelijkingsperiode bij de topbar-periode: even lang direct ervoor, of
+  // dezelfde dagen een jaar eerder.
+  function compareRange(start, end) {
+    return state.compare === "yoy" ? roasCompareRange({ start, end }) : webPrevRange(start, end);
+  }
+  function compareLabel() {
+    return state.compare === "yoy" ? "vs vorig jaar" : "vs vorige periode";
+  }
+
+  // Datums en vergelijking gaan pas in bij 'Bijwerken': anders start er bij
+  // elke getypte cijfer een fetch van tientallen seconden.
   function bindDateFilter() {
     const inputs = $$(".date-filter input[type=date]");
-    let timer;
-    const onChange = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const s = inputs[0].value;
-        const e = inputs[1].value;
-        if (!s || !e || s > e) return;
-        state.period.start = s;
-        state.period.end = e;
-        $$(".period-toggle button").forEach(b => b.classList.remove("on"));
-        refreshOverview();
-        state.emailKey = null; // e-mail-cache verloopt bij periode-wissel
-        if (state.page === "email") refreshEmail();
-        state.websiteKey = null;
-        if (state.page === "website") websiteFetch();
-        if (window.__report) window.__report.periodChanged();
-      }, 400);
+    const select = $("#compare-select");
+    const markDirty = () => {
+      const s = inputs[0].value, e = inputs[1].value;
+      const changed = s !== state.period.start || e !== state.period.end || select.value !== state.compare;
+      $(".date-filter").classList.toggle("dirty", changed);
     };
-    inputs.forEach((inp) => { inp.onchange = onChange; });
+    inputs.forEach((inp) => { inp.oninput = markDirty; inp.onchange = markDirty; });
+    select.onchange = markDirty;
+    $("#period-apply").onclick = () => {
+      const s = inputs[0].value;
+      const e = inputs[1].value;
+      if (!s || !e || s > e) {
+        inputs[0].value = state.period.start;
+        inputs[1].value = state.period.end;
+        $(".date-filter").classList.remove("dirty");
+        return;
+      }
+      if (s !== state.period.start || e !== state.period.end) {
+        $$("#page-overview .period-toggle button").forEach(b => b.classList.remove("on"));
+      }
+      state.period.start = s;
+      state.period.end = e;
+      state.compare = select.value === "yoy" ? "yoy" : "prev";
+      applyPeriod();
+    };
   }
 
   /* ---------- Overview: fetch + render ---------- */
@@ -757,9 +783,12 @@
     adsFetchId++;
 
     try {
+      const cmp = compareRange(state.period.start, state.period.end);
       const raw = await metricoolCall("getDashboard", {
         startDate: state.period.start,
         endDate: state.period.end,
+        compareStartDate: cmp.start,
+        compareEndDate: cmp.end,
       });
       state.overview = transformDashboard(raw, null); // ads still loading
       state.overview._rawDashboard = raw;
@@ -1613,9 +1642,12 @@
     if (typeof renderAnalysis === "function") renderAnalysis();
 
     try {
+      const cmp = compareRange(state.period.start, state.period.end);
       const raw = await windsorCall("getDashboard", {
         startDate: state.period.start,
         endDate: state.period.end,
+        compareStartDate: cmp.start,
+        compareEndDate: cmp.end,
       });
       state.overview = transformWindsorDashboard(raw);
       state.overviewLoading = false;
@@ -1677,7 +1709,7 @@
       delta: delta != null ? Math.abs(delta) : null,
       direction: delta == null ? null : (delta >= 0 ? "up" : "down"),
       state,
-      vs: "vs vorige periode",
+      vs: compareLabel(),
       unit: deltaUnit,
       spark: [],
     };
@@ -2191,8 +2223,8 @@
     const zonderVergelijking = (ov.kpis || []).filter(k => k.state === "none").length;
     const let_op = [];
     if (zonderVergelijking) {
-      let_op.push(`<b>${zonderVergelijking} van de ${ov.kpis.length} cijfers</b> heeft geen vergelijkbare vorige periode, `
-        + `dus daar staat geen verandering bij. Kies een kortere periode om wél te kunnen vergelijken.`);
+      let_op.push(`<b>${zonderVergelijking} van de ${ov.kpis.length} cijfers</b> heeft geen data in de vergelijkingsperiode, `
+        + `dus daar staat geen verandering bij. Kies een kortere periode of een andere vergelijking.`);
     }
     if (ov.adsLoading) {
       let_op.push("De advertentiecijfers laden nog; de reeks Meta Ads kan nog veranderen.");
@@ -3375,7 +3407,7 @@
         missing: [
           ["Facebook organic", "Connector-slug nog niet bevestigd in Windsor — tijdelijk niet opgehaald."],
           ["Retentiecurve organic", "Instagram's API exposeert dit niet voor organic content; alleen gem. kijktijd is beschikbaar."],
-          ["KPI-delta's vs vorige periode", "Even lange periode direct ervoor. Organisch bereik, interacties, publicaties en kliks; niet op advertentieniveau. Uit de datasheet als die ver genoeg terugloopt, anders live."],
+          ["KPI-delta's", "Tegen de vergelijking uit de topbar: even lange periode direct ervoor, of dezelfde dagen vorig jaar. Organisch bereik, interacties, publicaties en kliks; niet op advertentieniveau. Uit de datasheet als die ver genoeg terugloopt, anders live."],
         ],
       };
     }
@@ -5489,7 +5521,6 @@
       });
   }
   window.__refreshWebsite = () => { state.website = null; state.websiteKey = null; websiteFetch(); };
-  window.__webCompare = (k) => { state.websiteCompare = k; renderWebsite(); };
 
   /* ---------- Formatters ---------- */
 
@@ -5521,10 +5552,10 @@
   function webBase() {
     const w = state.website;
     if (!w) return null;
-    return state.websiteCompare === "yoy" ? w.yearAgo : w.previous;
+    return state.compare === "yoy" ? w.yearAgo : w.previous;
   }
   function webCompareLabel() {
-    return (WEB_COMPARE.find(c => c.key === state.websiteCompare) || WEB_COMPARE[0]).label;
+    return (WEB_COMPARE.find(c => c.key === state.compare) || WEB_COMPARE[0]).label;
   }
 
   // invert: bij zoekpositie is lager beter, dus daar kleurt een daling groen.
@@ -5728,7 +5759,7 @@
     }
 
     const start = state.period.start, end = state.period.end;
-    const cmp = state.websiteCompare === "yoy" ? roasCompareRange({ start, end }) : webPrevRange(start, end);
+    const cmp = state.compare === "yoy" ? roasCompareRange({ start, end }) : webPrevRange(start, end);
     const soort = w.website.type === "webshop" ? "Webshop" : "Leadgeneratie";
     const soortBron = w.website.typeSource === "config" ? "uit de Config-tab" : "afgeleid uit de data";
 
@@ -5742,13 +5773,9 @@
   }
 
   function renderWebsiteControls() {
-    const knoppen = WEB_COMPARE.map(c =>
-      `<button class="${c.key === state.websiteCompare ? "on" : ""}" onclick="window.__webCompare('${c.key}')">${escapeHtml(c.label)}</button>`
-    ).join("");
     return `<div class="controls-row">
-      <div class="period-toggle" title="Waartegen de veranderingen afgezet worden">${knoppen}</div>
+      <span class="source-line" style="margin:0;">Vergeleken ${escapeHtml(webCompareLabel())} — wissel dat in de balk bovenaan.</span>
       <span style="flex-grow:1;"></span>
-      <span class="source-line" style="margin:0;">Beide vergelijkingsperiodes zitten in dezelfde aanroep — de knop hertekent zonder nieuwe fetch.</span>
       <button class="btn" onclick="window.__refreshWebsite()">Ververs data</button>
     </div>`;
   }
@@ -5814,12 +5841,9 @@
   function renderWebsiteBar() {
     const w = state.website;
     const start = state.period.start, end = state.period.end;
-    const cmp = state.websiteCompare === "yoy"
+    const cmp = state.compare === "yoy"
       ? roasCompareRange({ start, end })
       : webPrevRange(start, end);
-    const buttons = WEB_COMPARE.map(c =>
-      `<button class="${c.key === state.websiteCompare ? "on" : ""}" onclick="window.__webCompare('${c.key}')">${escapeHtml(c.label)}</button>`
-    ).join("");
     const typeLine = w
       ? `${w.website.type === "webshop" ? "Webshop" : "Leadgeneratie"} · ${w.website.typeSource === "config" ? "uit de Config-tab" : "afgeleid uit de data"}`
       : "";
@@ -5832,11 +5856,10 @@
           <div class="muted" style="font-size:11px; margin-top:2px;">vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}${typeLine ? ` · ${escapeHtml(typeLine)}` : ""}</div>
         </div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <div class="period-toggle" title="Waartegen de veranderingen afgezet worden">${buttons}</div>
           <button class="btn tiny" onclick="window.__refreshWebsite()">↻ Verversen</button>
         </div>
       </div>
-      <div class="muted" style="font-size:11px; margin-top:8px;">De periode komt uit de balk bovenaan — pas hem daar aan.</div>
+      <div class="muted" style="font-size:11px; margin-top:8px;">Periode en vergelijking komen uit de balk bovenaan — pas ze daar aan.</div>
     </section>`;
   }
 

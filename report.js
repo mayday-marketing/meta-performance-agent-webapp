@@ -45,7 +45,10 @@
   // sub-tab stond de gebruiker. In een rapport moet dat vastliggen, anders
   // hangt de inhoud van een slide af van waar iemand toevallig was blijven
   // staan. borrow() zet die sleutels synchroon om en daarna terug.
-  const web  = (fn, ...a) => B.borrow({ websiteCompare: "prev" }, () => fn(...a));
+  // De vergelijking is uitzondering: die kiest de gebruiker in de topbar en
+  // geldt voor élke pagina, dus ook voor de Overview-slides. Die volgt het
+  // rapport dus gewoon.
+  const web  = (fn, ...a) => fn(...a);
   const roas = (fn, ...a) => B.borrow({ roas: RS.roas || state.roas }, () => fn(...a));
 
   const BLOCKS = [

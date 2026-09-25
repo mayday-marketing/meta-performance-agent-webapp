@@ -102,8 +102,12 @@ module.exports = async (req, res) => {
         const startMs = Date.parse(startDate);
         const endMs = Date.parse(endDate);
         const windowMs = endMs - startMs;
-        const prevStartDate = new Date(startMs - windowMs - 86400000).toISOString().slice(0, 10);
-        const prevEndDate = new Date(startMs - 86400000).toISOString().slice(0, 10);
+        // Eigen vergelijkingsperiode uit de topbar (bv. vorig jaar), als die geldig is.
+        const isoOk = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+        const cmpFrom = req.body?.compareStartDate, cmpTo = req.body?.compareEndDate;
+        const eigenVergelijking = isoOk(cmpFrom) && isoOk(cmpTo) && cmpFrom <= cmpTo;
+        const prevStartDate = eigenVergelijking ? cmpFrom : new Date(startMs - windowMs - 86400000).toISOString().slice(0, 10);
+        const prevEndDate = eigenVergelijking ? cmpTo : new Date(startMs - 86400000).toISOString().slice(0, 10);
         const prevStart = toMetricoolDate(prevStartDate);
         const prevEnd = toMetricoolDate(prevEndDate);
 
