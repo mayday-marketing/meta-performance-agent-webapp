@@ -291,6 +291,12 @@ Gemeten: een sheet-tab lezen duurt 0,3–2,3 s, een koude Windsor-fetch over 90 
   en **niet** in de Config-tab: die tab staat in een sheet dat met de klant gedeeld
   kán worden, en een sheet-id daaruit accepteren zou een klant laten kiezen wiens
   data hij leest.
+- **Kiezen op de kopregel, dan pas lezen.** Eén `batchGet` haalt rij 1 van elke tab;
+  daarop valt de tabkeuze, en alleen de winnaar wordt volledig gelezen. De cache
+  (5 min, per klant) bewaart de lópende lezing, zodat tien gelijktijdige vragen
+  één fetch delen. Vroeger las elke vraag elke passende tab volledig, één voor één:
+  op 29-09-2026 liepen `getDashboard` en `getWebsite` bij Spotto daardoor allebei
+  tegen de 150 s. `[tijd]`-regels in de log geven per call de duur en herkomst.
 - **Tabs worden op patroon herkend**, niet op naam: de exportnamen verschillen per
   klant (`Google Analytics 4 - dag - MERKNAAM - windsor.ai`). `_windsor_staging_*` is
   een restant van een lopende export en wordt overgeslagen.
@@ -772,6 +778,20 @@ registratie. Plan, stateless met ondertekende blobs:
   `/api/oauth/authorize`) via de Vercel Firewall, plus een timing-veilige
   wachtwoordvergelijking in `auth.js`. Nu kan inloggen onbeperkt geprobeerd
   worden.
+
+### MCP-roadmap (stand 29-09-2026)
+
+1. Login verharden (`auth.js`): voorwaarde voor elke OAuth-login.
+2. **Nu: V2 voor één klant.** Inloggen in claude.ai/Cowork met klantcode +
+   wachtwoord; de connector ziet alleen die klant. Per klant een eigen
+   connectoradres (`/api/mcp/<klant>`, vult alleen de login voor; het token
+   bepaalt de scope), zodat één Project per klant één connector heeft. Testklant:
+   SENJA (dummydata).
+3. **Later: cross-client login + MCP.** Een aparte agency-login in claude.ai die
+   over klanten heen mag vragen, gescheiden van de klantconnectors. Tot dan
+   blijft cross-client alleen via de agency-sleutel in Claude Code.
+4. Ideeën: vergelijkingstool of voorverwarmde cache (koude fetch 75 s),
+   SEO/GEO alleen uit de dagcache, Metricool naar `summary.js`.
 
 ## Sessie-einde: state leegmaken is niet genoeg
 
