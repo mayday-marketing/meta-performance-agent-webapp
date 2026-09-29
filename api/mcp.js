@@ -279,7 +279,7 @@ const TOOLS = [
   {
     name: 'list_clients',
     title: 'Klanten',
-    description: 'Alle klanten met hun klantcode, merknaam en welke bronnen gekoppeld zijn (Windsor-connectors uit de Config-tab, Drive, klantsheet, break-even-instellingen). Roep dit eerst aan: een bron die hier ontbreekt levert elders geen cijfers op, en dat is onbekend, geen nul.',
+    description: "Alle klanten met hun klantcode, merknaam en welke bronnen gekoppeld zijn: connectors (Windsor-accounts uit de Config-tab of de serverconfiguratie; 'facebook' = Meta Ads, 'googleanalytics4' = GA4), Drive, klantsheet en break-even-instellingen. Roep dit eerst aan. Een klant zonder Config-tab kan wel data hebben: kijk naar connectors, en vraag bij twijfel de tool zelf op in plaats van 'geen cijfers' te concluderen. Ontbrekende data is onbekend, geen nul.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     run: runListClients,
   },
@@ -348,8 +348,18 @@ async function runListClients(scope) {
       windsor: c.windsor_api_key ? 'api' : (c.dataSheetId ? 'datasheet' : null),
       drive: !!c.driveFolderId,
       clientSheet: !!c.sheetId,
-      // Alleen wélke connectors een account hebben, nooit de id's zelf.
-      connectors: cfg ? Object.keys(cfg.accounts || {}).sort() : null,
+      // Alleen wélke connectors een account hebben, nooit de id's zelf. Zelfde
+      // samenvoeging als windsor.js: de Config-tab wint, CLIENTS.windsor_accounts
+      // is de terugval (klanten zonder klantsheet staan alleen daar).
+      connectors: Object.keys({ ...(c.windsor_accounts || {}), ...((cfg && cfg.accounts) || {}) }).sort(),
+      configTab: !!(c.sheetId && cfg && !cfgWarning),
+      // Zonder één geconfigureerd account filtert windsor.js niet: dan komt alles
+      // binnen wat op de eigen Windsor-sleutel van de klant staat. Dat is data,
+      // geen lege klant — zonder deze regel concludeert een model 'geen cijfers'.
+      windsorScoping: !(c.windsor_api_key || c.dataSheetId) ? null
+        : (Object.keys({ ...(c.windsor_accounts || {}), ...((cfg && cfg.accounts) || {}) }).length
+          ? 'per connector op het ingestelde account'
+          : 'geen filter: alle accounts op de eigen Windsor-sleutel van deze klant'),
       breakEvenConfigured: cfg ? typeof (cfg.roas || {}).grossMargin === 'number' : null,
       verdictSource: cfg ? ((cfg.roas || {}).verdictSource || 'ga4') : null,
       websiteGoalEvent: cfg ? ((cfg.website || {}).goalEvent || null) : null,
