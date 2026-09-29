@@ -744,6 +744,13 @@ geen dependencies. Koppelen: `docs/MCP.md`.
   `getDashboard` duurde bij de test 75 s; de tweede keer komt uit de cache.
 - **Tijdzone.** De server rekent in UTC. Weekindelingen en 'gisteren' kunnen
   rond middernacht een dag verschillen van de browser; totalen niet.
+- **Demoklanten.** `DEMO_CLIENTS` (komma-gescheiden klantcodes) markeert klanten
+  met dummydata, zoals SENJA. `list_clients` zet er `demo: true` bij en elk
+  toolresultaat krijgt een waarschuwing. Zonder die markering werd SENJA's
+  verzonnen ROAS de hoofdbevinding van een vraag over alle klanten.
+- **`list_clients` voegt accounts samen zoals `windsor.js`**: Config-tab plus
+  `CLIENTS[id].windsor_accounts`. BAJA en Just Jane hebben geen klantsheet en
+  staan alleen in die terugval; zonder samenvoeging leken ze leeg.
 - **Metricool-klanten** worden niet ondersteund: er is er geen (stand
   26-09-2026), en `transformDashboard` staat nog in app.js.
 
@@ -828,8 +835,8 @@ Sources-sub-tab van GEO leeg met een uitleg; de rest van het dashboard — inclu
 de GEO-baseline, die uit Drive komt — merkt er niets van). Optional prompt
 overrides: `AGENT_SYSTEM_PROMPT`, `ANALYSIS_SYSTEM_PROMPT`, `REPORT_SYSTEM_PROMPT`.
 MCP-koppeling: `MCP_AGENCY_KEYS` (JSON naam → sleutel ≥ 32 tekens, mark Sensitive;
-zonder deze variabele antwoordt `/api/mcp` 503), optioneel `MCP_DISABLED=1` en
-`MCP_ALLOWED_ORIGINS`.
+zonder deze variabele antwoordt `/api/mcp` 503), optioneel `MCP_DISABLED=1`,
+`MCP_ALLOWED_ORIGINS` en `DEMO_CLIENTS`.
 
 ## Deploy
 
