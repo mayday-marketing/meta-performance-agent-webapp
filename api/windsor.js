@@ -136,7 +136,11 @@ module.exports = async (req, res) => {
   const normId = (v) => String(v == null ? '' : v).replace(/^act_/, '').replace(/^sc-domain:/i, '').toLowerCase();
   // Velden die een rij identificeren of in de tijd plaatsen. Vraagt een call er
   // één en heeft de sheettab hem niet, dan kan de sheet die vraag niet beantwoorden.
-  const SHEET_IDENTITY_FIELDS = ['timestamp', 'post_created_time', 'media_id', 'post_id', 'ad_id'];
+  // media_product_type hoort erbij: zonder dat veld valt summary.js terug op
+  // media_type, en wordt een reel 'Video' en een feedfoto 'Foto' in plaats van
+  // 'Post'. Dan verschuiven de prestatiebuckets stil. Alleen verplicht voor een
+  // call die het veld vraagt (de Instagram-calls).
+  const SHEET_IDENTITY_FIELDS = ['timestamp', 'post_created_time', 'media_id', 'post_id', 'ad_id', 'media_product_type'];
   // opts.skipSheet: sla de datasheet over. Alleen voor de ad-level terugval in
   // getDashboard: een sheettab zonder ad_id kan geen advertentie-detail leveren.
   // Tijd per call in de log, met herkomst. Zonder meting gokten we waar de 150 s
@@ -249,7 +253,11 @@ module.exports = async (req, res) => {
   }
 
   const tAction = Date.now();
-  res.on('finish', () => console.info(`[tijd] ${clientId} ${action} totaal: ${Date.now() - tAction} ms`));
+  // mcp.js roept deze handler in-process aan met een nagebootste res zonder
+  // events; daar meet mcp.js zelf de duur ("ms" in zijn logregel).
+  if (typeof res.on === 'function') {
+    res.on('finish', () => console.info(`[tijd] ${clientId} ${action} totaal: ${Date.now() - tAction} ms`));
+  }
 
   try {
     switch (action) {

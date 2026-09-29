@@ -220,8 +220,16 @@ function readHeaders(clientId, sheetId, titles, token) {
 function readTab(clientId, sheetId, title, token) {
   return cached(tabCache, `${clientId}|${title}`, async () => {
     const t0 = Date.now();
-    const data = await fetchJson(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(a1(title))}`, token);
+    let data;
+    try {
+      data = await fetchJson(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(a1(title))}`, token);
+    } catch (e) {
+      // Zonder deze regel viel een trage tab stil terug op de API: elke call
+      // duurde dan 20 s plus de API-tijd, en niets in de log zei waarom.
+      console.warn(`[sheetdata] tab '${title}' mislukt na ${Date.now() - t0} ms: ${e.name === 'AbortError' ? 'timeout' : e.message}`);
+      throw e;
+    }
     const rows = data.values || [];
     console.info(`[sheetdata] tab '${title}': ${rows.length} rijen in ${Date.now() - t0} ms`);
     return rows;
@@ -669,6 +677,17 @@ const FIELD_ALIASES = {
   actionspurchase: ['actionspurchase', 'actionpurchase'],
   actionslead: ['actionslead', 'leads'],
   age: ['age', 'agerange'],
+  // Instagram en Facebook organisch: weergavenamen uit get_fields, 29-09-2026.
+  // Zonder 'mediacreated' viel Spotto's Instagram-tab af op een ontbrekende
+  // timestamp, terwijl de export hem wél had — en ging Instagram 21 s live.
+  timestamp: ['timestamp', 'mediacreated'],
+  mediacommentscount: ['mediacommentscount', 'commentscount'],
+  mediareelavgwatchtime: ['mediareelavgwatchtime', 'mediareelaveragewatchtime'],
+  mediathumbnailurl: ['mediathumbnailurl', 'videothumbnailurl'],
+  type: ['type', 'posttype'],
+  permalinkurl: ['permalinkurl', 'postpermalinkurl'],
+  fullpicture: ['fullpicture', 'postfullpicture'],
+  postactivitybyactiontypeshare: ['postactivitybyactiontypeshare', 'postactivitytimesstorieshavebeenshared'],
 };
 
 // Kolommen die een tabel fijner maken dan een totaal, gegroepeerd per niveau.
