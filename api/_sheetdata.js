@@ -27,8 +27,9 @@ const FETCH_TIMEOUT_MS = 20000;
 
 // Altijd per klant gekeyed — een gedeelde cache zonder klant in de sleutel was
 // eerder al een cross-tenant lek in deze app.
-const tabCache = new Map();   // `${clientId}|${title}` -> { rows, ts }
-const metaCache = new Map();  // clientId -> { titles, ts }
+const tabCache = new Map();    // `${clientId}|${title}` -> { promise, ts }
+const metaCache = new Map();   // clientId -> { promise, ts }  (tabnamen)
+const headerCache = new Map(); // clientId -> { promise, ts }  (kopregel per tab)
 
 function resolveDataSheetId(clientId) {
   try {
@@ -171,25 +172,60 @@ async function fetchJson(url, token) {
   }
 }
 
-async function listTabs(clientId, sheetId, token) {
-  const hit = metaCache.get(clientId);
-  if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return hit.titles;
-  const data = await fetchJson(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`, token);
-  const titles = (data.sheets || []).map(s => s.properties.title);
-  metaCache.set(clientId, { titles, ts: Date.now() });
-  return titles;
+// Eén lopende lezing per sleutel. getDashboard start een tiental vragen tegelijk;
+// zonder dit misten ze allemaal tegelijk de cache en haalde elk dezelfde tab
+// opnieuw op (bij Spotto vijf Meta-tabs, elk tot 11.000 rijen, per vraag).
+// De cache bewaart daarom de belofte, niet het resultaat. Een mislukte lezing
+// gaat eruit, zodat de volgende vraag het opnieuw probeert.
+function cached(cache, key, load) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return hit.promise;
+  const promise = load();
+  cache.set(key, { promise, ts: Date.now() });
+  promise.catch(() => { if (cache.get(key)?.promise === promise) cache.delete(key); });
+  return promise;
 }
 
-async function readTab(clientId, sheetId, title, token) {
-  const cacheKey = `${clientId}|${title}`;
-  const hit = tabCache.get(cacheKey);
-  if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return hit.rows;
-  const data = await fetchJson(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(title)}`, token);
-  const rows = data.values || [];
-  tabCache.set(cacheKey, { rows, ts: Date.now() });
-  return rows;
+function listTabs(clientId, sheetId, token) {
+  return cached(metaCache, clientId, async () => {
+    const data = await fetchJson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`, token);
+    return (data.sheets || []).map(s => s.properties.title);
+  });
+}
+
+// A1-notatie voor een tabnaam: tussen enkele aanhalingstekens, een aanhalingsteken
+// in de naam verdubbeld.
+const a1 = (title) => `'${String(title).replace(/'/g, "''")}'`;
+
+// Alleen de kopregel van élke tab, in één batchGet. De tabkeuze hangt volledig
+// aan de kopregel; vroeger werd elke kandidaat eerst volledig gelezen om daarna
+// te zien dat hij niet paste. Staging-tabs doen nooit mee, die vragen we niet op.
+function readHeaders(clientId, sheetId, titles, token) {
+  return cached(headerCache, clientId, async () => {
+    const wanted = titles.filter(t => !/^_windsor_staging/i.test(t));
+    const out = new Map();
+    // Per blok van 40, zodat de URL kort genoeg blijft.
+    for (let i = 0; i < wanted.length; i += 40) {
+      const chunk = wanted.slice(i, i + 40);
+      const qs = chunk.map(t => `ranges=${encodeURIComponent(`${a1(t)}!1:1`)}`).join('&');
+      const data = await fetchJson(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${qs}`, token);
+      (data.valueRanges || []).forEach((vr, j) => out.set(chunk[j], (vr.values && vr.values[0]) || []));
+    }
+    return out;
+  });
+}
+
+function readTab(clientId, sheetId, title, token) {
+  return cached(tabCache, `${clientId}|${title}`, async () => {
+    const t0 = Date.now();
+    const data = await fetchJson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(a1(title))}`, token);
+    const rows = data.values || [];
+    console.info(`[sheetdata] tab '${title}': ${rows.length} rijen in ${Date.now() - t0} ms`);
+    return rows;
+  });
 }
 
 /* ---------- Periodedekking ----------
@@ -316,6 +352,8 @@ async function getWebsiteSheetData(clientId, startDate, endDate) {
     result.warnings.push('Geen herkenbare exporttabs in de datasheet.');
     return result;
   }
+  // Kopregels vooraf. Mislukt dat, dan kiezen we zoals vroeger: tab lezen en kijken.
+  const headers = await readHeaders(clientId, sheetId, titles, token).catch(() => null);
 
   const load = async (key) => {
     const table = TABLES.find(t => t.key === key) || {};
@@ -323,8 +361,10 @@ async function getWebsiteSheetData(clientId, startDate, endDate) {
     if (!candidates.length) { result.coverage[key] = { ok: false, reason: 'tab ontbreekt' }; return null; }
     // Eerste kandidaat waarvan de kopregel past. Leesfouten onthouden we: als geen
     // enkele tab past, is 'niet leesbaar' een betere reden dan 'ontbreekt'.
+    // Eerst op de kopregel kiezen, pas dan de ene tab volledig lezen.
     let title = null, rows = null, readErr = null;
     for (const t of candidates) {
+      if (headers && !fitsHeaders(table, headers.get(t))) continue;
       let r;
       try { r = await readTab(clientId, sheetId, t, token); }
       catch (e) { readErr = readErr || e.message; continue; }
@@ -753,15 +793,25 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
   // Een tab die een verplicht veld mist doet niet mee aan de keuze. Anders won
   // bij Spotto de oude tab zonder ad_id van de nieuwe advertentietab en ging
   // alles alsnog live. Alleen als géén tab volledig is, melden we wat ontbreekt.
+  // De keuze valt op de kopregel alleen; pas de winnaar wordt volledig gelezen.
+  // Vroeger las deze lus elke passende tab helemaal, één voor één — bij Spotto
+  // zeven Google Ads-tabs tot 40.000 rijen om er één van te gebruiken.
+  const headerRows = await readHeaders(clientId, sheetId, titles, token).catch(() => null);
+  const headerRowOf = async (title) => {
+    if (headerRows) return headerRows.get(title) || [];
+    const rows = await readTab(clientId, sheetId, title, token);
+    return rows[0] || [];
+  };
+
   let best = null, bestIncompleet = null;
   for (const title of titles) {
     if (/^_windsor_staging/i.test(title) || !pattern.test(title)) continue;
-    let rows;
-    try { rows = await readTab(clientId, sheetId, title, token); }
+    let headerRow;
+    try { headerRow = await headerRowOf(title); }
     catch { continue; }
-    if (!rows.length) continue;
+    if (!headerRow.length) continue;
 
-    const headers = rows[0].map(normHeader);
+    const headers = headerRow.map(normHeader);
     // Te fijn voor deze vraag → overslaan (zou dubbel tellen).
     // Een grovere korrel die volledig in de gevraagde valt, splitst niets: een
     // advertentie hoort bij precies één campagne. Zonder deze regel viel de
@@ -782,7 +832,7 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
       if (i !== -1) { colOf[f] = i; score++; }
     }
     if (score < 2) continue;
-    const cand = { title, rows, headers, colOf, score };
+    const cand = { title, headers, colOf, score };
     const mist = verplicht.filter(f => colOf[f] == null);
     if (mist.length) {
       if (!bestIncompleet || score > bestIncompleet.score) bestIncompleet = { ...cand, mist };
@@ -793,6 +843,9 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
 
   if (!best && bestIncompleet) return { __missing: bestIncompleet.mist, __sheet: { tab: bestIncompleet.title } };
   if (!best) return null;
+  try { best.rows = await readTab(clientId, sheetId, best.title, token); }
+  catch (e) { return { __error: `Datasheet-tab '${best.title}' niet leesbaar: ${e.message}` }; }
+  if (!best.rows.length) return null;
   for (const f of extraFields) {
     if (best.colOf[f] != null) continue;
     const cands = headerCandidates(f);

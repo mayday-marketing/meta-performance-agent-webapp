@@ -36,12 +36,22 @@
     "api/mcp.js": {
       "maxDuration": 150,
       "memory": 1024
+    },
+    "api/cron-demo.js": {
+      "maxDuration": 300,
+      "memory": 1024
     }
   },
   "rewrites": [
     {
       "source": "/",
       "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron-demo",
+      "schedule": "0 2 * * *"
     }
   ]
 }

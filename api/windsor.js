@@ -139,7 +139,19 @@ module.exports = async (req, res) => {
   const SHEET_IDENTITY_FIELDS = ['timestamp', 'post_created_time', 'media_id', 'post_id', 'ad_id'];
   // opts.skipSheet: sla de datasheet over. Alleen voor de ad-level terugval in
   // getDashboard: een sheettab zonder ad_id kan geen advertentie-detail leveren.
+  // Tijd per call in de log, met herkomst. Zonder meting gokten we waar de 150 s
+  // van een login heen gingen (29-09-2026: getDashboard én getWebsite liepen bij
+  // Spotto allebei tegen de limiet).
   async function windsorScoped(connector, fieldsCsv, params, timeout, label, opts = {}) {
+    const t0 = Date.now();
+    const out = await windsorScopedInner(connector, fieldsCsv, params, timeout, label, opts);
+    const origin = out && out.__sheet && Array.isArray(out.data) ? 'sheet' : 'api';
+    const n = out && Array.isArray(out.data) ? out.data.length : 0;
+    console.info(`[tijd] ${clientId} ${label || connector}: ${Date.now() - t0} ms, ${origin}, ${n} rijen${out && out.__error ? ' (fout)' : ''}`);
+    return out;
+  }
+
+  async function windsorScopedInner(connector, fieldsCsv, params, timeout, label, opts = {}) {
     const sharedMode = hasScopeConfig; // gedeeld Windsor-account (meerdere klanten)
     const wantRaw = scopedAccounts[connector];
     const scopable = ACCOUNT_ID_CONNECTORS.has(connector);
@@ -235,6 +247,9 @@ module.exports = async (req, res) => {
     }
     return data;
   }
+
+  const tAction = Date.now();
+  res.on('finish', () => console.info(`[tijd] ${clientId} ${action} totaal: ${Date.now() - tAction} ms`));
 
   try {
     switch (action) {
