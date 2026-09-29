@@ -20,6 +20,7 @@ Klanten zelf koppelen via claude.ai komt in V2 (inloggen met OAuth).
 | `list_clients` | Alle klanten en welke bronnen gekoppeld zijn |
 | `get_dashboard` | Social en Meta Ads: KPI's, beste en slechtste posts, advertenties |
 | `get_roas` | Blended ROAS, break-even, oordeel per kanaal en campagne |
+| `get_google_ads` | Google Ads: kosten per conversie, conversieacties, vertoningsaandeel, zoektermen, apparaten |
 | `get_website` | GA4 en Search Console |
 | `get_goals` | Doelen uit de tab Doelen, met stand en status |
 | `get_brand_context` | Merkcontext uit de klantsheet en Drive |

@@ -1388,6 +1388,12 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
  .perf-button:hover {
    opacity: 0.8;
  }
+/* Kolom 't.o.v. gemiddelde' (bibliotheek en Ads-tabel): afwijking t.o.v. het groepsgemiddelde.
+   Kleur volgt alleen de richting; binnen ±10% blijft hij neutraal. */
+.bench { font-variant-numeric: tabular-nums; font-weight: 600; }
+.bench.up { color: var(--positive); }
+.bench.down { color: var(--negative); }
+.bench.flat { color: var(--fg-muted); }
 .lib-table .platform-tag {
   font-size: 10px;
   padding: 3px 8px;
@@ -1400,84 +1406,6 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
 .lib-table .platform-tag.ads { background: rgba(var(--heat), 0.14); color: var(--accent-text); }
 :root[data-theme="dark"] .lib-table .platform-tag.ig { background: rgba(225, 48, 108, 0.22); color: #ff80a8; }
 :root[data-theme="dark"] .lib-table .platform-tag.fb { background: rgba(24, 119, 242, 0.22); color: #7faaff; }
-
-/* ==========================================================
-   Analysis page
-   ========================================================== */
-.insight-grid {
-  display: grid; gap: var(--grid-gap);
-  grid-template-columns: 1fr 1fr 1fr;
-}
-.insight-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--pad);
-  display: flex; flex-direction: column; gap: 14px;
-}
-.insight-card .head {
-  display: flex; align-items: center; gap: 10px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 14px;
-}
-.insight-card .head .pill {
-  font-size: 10px; letter-spacing: 0.12em;
-  text-transform: uppercase; font-weight: 700;
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-.insight-card.win .head .pill { background: var(--positive-bg); color: var(--positive); }
-.insight-card.lose .head .pill { background: rgba(193, 77, 77, 0.14); color: var(--negative); }
-.insight-card.rec .head .pill { background: var(--accent-10); color: var(--accent); }
-.insight-card .head h3 {
-  margin: 0;  font-size: 18px; font-weight: 400;
-  color: var(--fg);
-}
-.insight-list { display: flex; flex-direction: column; gap: 14px; }
-.insight-item {
-  display: flex; flex-direction: column; gap: 4px;
-}
-.insight-item .heading {
-  font-size: 13px; font-weight: 700;
-  color: var(--fg);
-  line-height: 1.4;
-}
-.insight-item .body {
-  font-size: 12px; color: var(--fg-muted);
-  line-height: 1.65;
-  text-wrap: pretty;
-}
-.insight-item .tag {
-  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--fg-muted); font-weight: 700;
-  margin-top: 2px;
-}
-.insight-item .delta {
-  font-size: 18px;
-  margin-bottom: 2px;
-}
-.insight-item .delta.up { color: var(--positive); }
-.insight-item .delta.down { color: var(--negative); }
-
-.analysis-narrative {
-  margin-top: var(--grid-gap);
-}
-.narrative-body {
-  font-size: 14px; line-height: 1.8;
-  color: var(--fg-muted);
-  max-width: 760px;
-  text-wrap: pretty;
-}
-.narrative-body strong { color: var(--fg); font-weight: 600; }
-.narrative-body .tag-pill {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--accent-10);
-  color: var(--accent);
-  font-weight: 700; font-size: 12px;
-  letter-spacing: 0.04em;
-}
 
 /* ==========================================================
    Chat panel
@@ -1792,7 +1720,6 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .row-2 { grid-template-columns: 1fr; }
   .row-3 { grid-template-columns: 1fr; }
-  .insight-grid { grid-template-columns: 1fr; }
 }
 
 /* Skeleton loaders (stap 3 — live data fetch) */
@@ -1821,40 +1748,6 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
   background-size: 200px 100%;
 }
 
-
-/* ========== Methodology page (Blok E) ========== */
-#methodology-content .panel-title { font-weight: 400; }
-.method-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 28px;
-}
-@media (max-width: 760px) { .method-grid { grid-template-columns: 1fr; } }
-.method-subhead {
-  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--fg-muted); font-weight: 700; margin-bottom: 8px;
-}
-.method-list { margin: 0; padding-left: 18px; }
-.method-list li { font-size: 13px; line-height: 1.6; color: var(--fg); margin-bottom: 7px; }
-.method-list.muted-list li { color: var(--fg-muted); }
-.method-list strong { color: var(--fg); }
-.method-thresholds {
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 14px; margin-top: 14px;
-}
-@media (max-width: 620px) { .method-thresholds { grid-template-columns: 1fr; } }
-.method-thresholds .thr {
-  border: 1px solid var(--border); border-radius: 12px;
-  padding: 16px; background: var(--surface);
-}
-.method-thresholds .thr-val { font-size: 26px; line-height: 1; }
-.method-thresholds .thr-lbl { font-weight: 700; margin: 8px 0 4px; font-size: 13px; }
-.method-thresholds .thr .muted { font-size: 12px; line-height: 1.45; }
-.method-thresholds .thr.good { border-color: color-mix(in oklch, var(--positive) 40%, transparent); }
-.method-thresholds .thr.good .thr-val, .method-thresholds .thr.good .thr-lbl { color: var(--positive); }
-.method-thresholds .thr.avg .thr-val, .method-thresholds .thr.avg .thr-lbl { color: var(--fg); }
-.method-thresholds .thr.bad { border-color: var(--negative-bg); }
-.method-thresholds .thr.bad .thr-val, .method-thresholds .thr.bad .thr-lbl { color: var(--negative); }
 
 /* ==========================================================
    Merklogo — rechtsboven in de topbar (design system §3).
@@ -1886,8 +1779,6 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
      ≤ 760    sub-tabs horizontaal scrollbaar · callouts onder de grafiek
      ≤ 520    tabellen scrollen horizontaal met de eerste kolom vastgezet
 
-   Het oudere component-breekpunt (620 voor .method-thresholds) staat nog
-   zoals het was; dat hoort bij één blok en botst niet met de ladder.
    ========================================================== */
 
 /* ---- Navigatiestanden -----------------------------------------------------
@@ -2349,6 +2240,19 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
 .geo-tabs button:hover, .subtabs button:hover { color: var(--fg); }
 .geo-tabs button:focus-visible, .subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
+/* Platformlogo in een tab: een masker in de tekstkleur, zodat het meekleurt met
+   actief/inactief en met dark mode. Zelfde recept als .geo-logo. */
+.tab-logo {
+  display: inline-block; width: 14px; height: 14px; margin-right: 7px; vertical-align: -2px; flex: none;
+  background: currentColor;
+  -webkit-mask: var(--logo) center / contain no-repeat; mask: var(--logo) center / contain no-repeat;
+}
+
+/* Meta heeft twee weergaven binnen één tab (campagnes, advertenties). */
+.ads-meta-toggle { margin-bottom: 18px; }
+.ads-metapane { display: none; }
+.ads-metapane.on { display: block; }
+
 
 .geo-delta { font-size: 12px; font-weight: 600; margin-top: 2px; }
 .geo-delta.bad { color: var(--negative); }
@@ -2477,37 +2381,6 @@ th.c, td.c { text-align: center; }
 .geo-th-engine .geo-logo { width: 13px; height: 13px; }
 .geo-plat { display: inline-flex; align-items: center; }
 .geo-plat .geo-logo { width: 12px; height: 12px; margin-right: 6px; }
-
-/* Actiekaarten */
-.geo-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap, 16px); }
-@media (max-width: 900px) { .geo-actions { grid-template-columns: 1fr; } }
-.geo-action {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: var(--kpi-pad, 20px);
-}
-/* Prioriteit: hoog rood, middel oranje, laag groen — de tekst staat er altijd bij. */
-.geo-prio {
-  font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 999px;
-  background: var(--accent-10); color: var(--fg);
-}
-/* Via .meta, anders wint de algemene regel .geo-action .meta span. */
-.geo-action .meta .geo-prio.hoog { background: var(--negative-bg); color: var(--negative); }
-.geo-action .meta .geo-prio.middel { background: var(--warning-bg); color: var(--warning); }
-.geo-action .meta .geo-prio.laag { background: var(--positive-bg); color: var(--positive); }
-.geo-action .meta .geo-prio.ongoing { background: var(--info-bg); color: var(--info); }
-.geo-action .meta { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-.geo-action .meta span {
-  font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 999px;
-  background: var(--accent-10); color: var(--fg);
-}
-.geo-action h3 { margin: 0 0 6px; font-size: 15px; }
-.geo-action p { font-size: 13px; color: var(--fg-muted); margin: 0 0 6px; line-height: 1.6; }
-.geo-action .done { font-size: 12px; color: var(--positive); font-weight: 500; }
-.geo-action .moves { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 11px; color: var(--fg-muted); margin-bottom: 8px; }
-.geo-action .moves span {
-  font-size: 11px; font-weight: 600; padding: 1px 9px; border-radius: 999px;
-  border: 1px solid var(--border); background: var(--surface); color: var(--fg);
-}
 
 
 /* ==========================================================
@@ -2659,13 +2532,10 @@ th.c, td.c { text-align: center; }
 .rp-body .kpi-grid      { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .rp-body .row-2         { grid-template-columns: 2fr 1fr; }
 .rp-body .row-3         { grid-template-columns: 1fr 1fr 1fr; }
-.rp-body .insight-grid  { grid-template-columns: 1fr 1fr 1fr; }
 .rp-body .web-mini-grid { grid-template-columns: repeat(3, 1fr); }
 .rp-body .geo-grid2     { grid-template-columns: 1fr 1fr; }
 .rp-body .geo-score     { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .rp-body .geo-lanes     { grid-template-columns: 1fr 1fr; }
-.rp-body .geo-actions   { grid-template-columns: 1fr 1fr; }
-.rp-body .method-grid   { grid-template-columns: 1fr 1fr; }
 .rp-body .table-wrap, .rp-body .tablewrap { overflow-x: visible; }
 
 @media (max-width: 900px) {
@@ -2852,3 +2722,8 @@ th.c, td.c { text-align: center; }
 .goal-status.good { color: var(--positive); }
 .goal-status.warn { color: var(--warning); }
 .goal-status.bad  { color: var(--negative); }
+
+/* Google Ads- en platformtabellen: bedragen en percentages breken nooit af
+   ('€' boven '2.622'); de tabel schuift dan liever horizontaal. */
+.gads-table td.right, .gads-table th.right { white-space: nowrap; }
+.gads-table .row-caption { display: inline-block; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }

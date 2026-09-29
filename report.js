@@ -35,7 +35,7 @@
     // Sleutel blijft 'overview': daaronder staan de gekozen blokken per klant in
     // localStorage, en de data is nog altijd state.overview (getDashboard).
     { key: "overview", label: "Social & Ads", sub: "Organisch en ads samengevat" },
-    { key: "analysis", label: "AI-analyse",   sub: "AI-analyse van de periode" },
+    { key: "ads",      label: "Ads",      sub: "Meta en Google Ads per platform" },
     { key: "website",  label: "Website",  sub: "GA4 en Search Console" },
     { key: "roas",     label: "ROAS",     sub: "Blended MER en kanalen" },
     { key: "email",    label: "E-mail",   sub: "Klaviyo of ConvertKit" },
@@ -52,6 +52,9 @@
   // rapport dus gewoon.
   const web  = (fn, ...a) => fn(...a);
   const roas = (fn, ...a) => B.borrow({ roas: RS.roas || state.roas }, () => fn(...a));
+  // Google Ads: alle campagnes (de slide knipt zelf op MAX_ROWS) en nooit een
+  // zoekfilter dat iemand in de tab had laten staan.
+  const gads = (fn) => B.borrow({ googleAdsShowAll: true, googleAdsTermQuery: "" }, () => fn());
 
   const BLOCKS = [
     // Overview. De renderers van die tab schrijven rechtstreeks in DOM-knopen
@@ -63,8 +66,14 @@
     { id: "overview.mix",   page: "overview", label: "Kanaal-mix",            html: ovMix },
     { id: "overview.top",   page: "overview", label: "Top performers",        html: ovTop },
 
-    { id: "analysis.insights", page: "analysis", label: "AI-analyse",   html: anInsights },
-    { id: "analysis.ads",      page: "analysis", label: "Ads-ranking",  html: () => R.analysisAds() },
+    { id: "ads.overview",       page: "ads", label: "Platforms naast elkaar",        html: () => R.adsOverview() },
+    { id: "ads.google.kpis",    page: "ads", label: "Google Ads · kerncijfers",       html: () => gads(R.googleAdsKpis) },
+    { id: "ads.google.actions", page: "ads", label: "Google Ads · conversieacties",   html: () => gads(R.googleAdsActions) },
+    { id: "ads.google.daily",   page: "ads", label: "Google Ads · per dag",           html: () => gads(R.googleAdsDaily) },
+    { id: "ads.google.camps",   page: "ads", label: "Google Ads · campagnes",         html: () => gads(R.googleAdsCampaigns) },
+    { id: "ads.google.share",   page: "ads", label: "Google Ads · vertoningsaandeel", html: () => gads(R.googleAdsShare) },
+    { id: "ads.google.terms",   page: "ads", label: "Google Ads · zoektermen",        html: () => gads(R.googleAdsTerms) },
+    { id: "ads.google.devices", page: "ads", label: "Google Ads · apparaten",         html: () => gads(R.googleAdsDevices) },
 
     { id: "website.kpis",     page: "website", label: "Kerncijfers",     html: () => web(R.websiteKpis) },
     { id: "website.chart",    page: "website", label: "Verkeer per dag", html: () => web(R.websiteChart) },
@@ -81,7 +90,7 @@
     { id: "roas.social",    page: "roas", label: "Paid social",   html: () => roas(R.roasGroup, "social", "Paid social") },
     { id: "roas.search",    page: "roas", label: "Paid search",   html: () => roas(R.roasGroup, "search", "Paid search") },
     { id: "roas.breakeven", page: "roas", label: "Break-even",    html: () => roas(R.roasBreakEven) },
-    { id: "roas.advice",    page: "roas", label: "Advies per campagne", html: () => roas(R.roasAdvice) },
+    { id: "roas.advice",    page: "roas", label: "Campagnes t.o.v. break-even", html: () => roas(R.roasAdvice) },
 
     { id: "email.all", page: "email", label: "E-mailprestaties", html: emailAll },
 
@@ -92,7 +101,6 @@
     { id: "geo.overview", page: "geo", label: "Overzicht",  html: () => R.geoOverview() },
     { id: "geo.prompts",  page: "geo", label: "Prompts",    html: () => R.geoPrompts() },
     { id: "geo.website",  page: "geo", label: "Website",    html: () => R.geoWebsite() },
-    { id: "geo.actions",  page: "geo", label: "Acties",     html: () => R.geoActions() },
   ];
 
   const blocksOf = (page) => BLOCKS.filter(b => b.page === page);
@@ -232,11 +240,6 @@
     </section>`;
   }
 
-  function anInsights() {
-    const a = state.analysisCache?.[B.analysisPeriodKey()];
-    return a ? R.analysisInsights(a) : "";
-  }
-
   function emailAll() {
     const e = state.email;
     return (e && e.connector) ? R.email(e) : "";
@@ -270,6 +273,18 @@
       ready: () => !!state.overview,
       failed: () => state.overviewError,
       ms: 90000,
+    },
+    // Ads leunt op twee bronnen: Meta komt uit getDashboard (state.overview),
+    // Google Ads uit een eigen call. Beide moeten er zijn, anders zegt het
+    // platformoverzicht 'laden…' op een slide.
+    ads: {
+      start: () => {
+        if (!state.overview && !state.overviewLoading) B.ensure.overview();
+        B.ensure.googleAds();
+      },
+      ready: () => !!state.googleAds && !state.googleAdsLoading && !!state.overview && !state.overviewLoading,
+      failed: () => state.googleAdsError || state.overviewError,
+      ms: 120000,    // Google Ads uit de sheet ~10–25 s, live met zoektermen tot 75 s
     },
     website: {
       start: () => B.ensure.website(),
@@ -319,19 +334,6 @@
       catch (e) { return done(false, e.message || "fout bij ophalen"); }
     }
 
-    if (key === "analysis") {
-      // De analyse draait op de Overview-data, dus die moet er eerst zijn.
-      const base = await runLoader("overview");
-      if (!base.ok) return done(false, "Overview-data ontbreekt");
-      const cached = state.analysisCache?.[B.analysisPeriodKey()];
-      if (!cached) B.ensure.analysis();
-      const r = await waitFor(
-        () => !!state.analysisCache?.[B.analysisPeriodKey()],
-        () => state.analysisError,
-        180000);   // analysis.js staat op maxDuration 300
-      return done(r.ok, r.note);
-    }
-
     const r = await runLoader(key);
     return done(r.ok, r.note);
   }
@@ -355,7 +357,7 @@
   const STRIP = [
     "button", "input", "select", "textarea",
     ".panel-actions", ".subtabs", ".geo-tabs", ".toggle-group",
-    ".period-toggle", ".search-input", ".roas-bar > button",
+    ".period-toggle", ".search-input", ".web-search", ".roas-bar > button",
   ].join(", ");
 
   function strip(root) {
@@ -614,8 +616,8 @@
         <label class="rp-toggle">
           <input type="checkbox" id="rp-analysis" ${RS.withAnalysis ? "checked" : ""}>
           <span>
-            <strong>Met analyse</strong>
-            <em>Een samenvatting vooraan en per blok een korte duiding. Zonder vinkje bevat het rapport alleen de cijfers.</em>
+            <strong>Met duiding</strong>
+            <em>Een samenvatting vooraan en per blok een korte, neutrale duiding van wat de cijfers laten zien — geen advies. Zonder vinkje bevat het rapport alleen de cijfers.</em>
             <em class="rp-tpl">${tplNote()}</em>
           </span>
         </label>
@@ -739,7 +741,7 @@
           <div>
             <div class="info-label">Presentatie</div>
             <div style="font-size:20px; color:var(--fg); margin-top:2px;">${RS.slides.length} slides · ${esc(periodLabel())}</div>
-            <div class="muted" style="font-size:11px; margin-top:2px;">${esc(RS.notesError ? "Zonder duiding: " + RS.notesError : (RS.withAnalysis ? "Met analyse" : "Zonder analyse"))}${dsNote() ? " · " + dsNote() : ""}</div>
+            <div class="muted" style="font-size:11px; margin-top:2px;">${esc(RS.notesError ? "Zonder duiding: " + RS.notesError : (RS.withAnalysis ? "Met duiding" : "Zonder duiding"))}${dsNote() ? " · " + dsNote() : ""}</div>
           </div>
           <div class="rp-presets">
             <button class="btn tiny" id="rp-back">← Selectie</button>
@@ -765,10 +767,10 @@
   function sourcesHtml() {
     const used = new Set(RS.slides.filter(s => s.page).map(s => s.page));
     const items = [];
-    if (used.has("overview") || used.has("analysis"))
+    if (used.has("overview"))
       items.push(["Social en ads", "Instagram-organisch en Meta Ads via Windsor.ai. Ad-niveau is gemaximeerd op de laatste 35 dagen; campagne-niveau en organisch beslaan de volle periode."]);
-    if (used.has("analysis"))
-      items.push(["Analyse", "Gegenereerd door Claude op de geaggregeerde dashboardcijfers van deze periode, niet op de ruwe posts."]);
+    if (used.has("ads"))
+      items.push(["Ads", "Meta Ads en Google Ads via Windsor.ai, elk in de termen van het eigen platform: resultaten tellen niet op over platforms. Meta-resultaten dekken hoogstens de laatste 35 dagen, Google Ads-zoektermen hoogstens 30. Omzet en ROAS staan bij ROAS."]);
     if (used.has("website"))
       items.push(["Website", "GA4 en Search Console via Windsor.ai. Unieke gebruikers zijn niet optelbaar over dagen; Search Console loopt 2 tot 3 dagen achter. Landingspagina's en zoekopdrachten beslaan hoogstens 30 dagen."]);
     if (used.has("roas"))

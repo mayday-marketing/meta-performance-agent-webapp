@@ -43,25 +43,6 @@
     dateISO: (d) => d.toISOString().slice(0, 10),
   };
 
-  /* ---------- Performance classifier config (single source of truth) ----------
-     Zowel classifyPerformance() als renderMethodology() lezen hieruit, zodat
-     de code en de klantuitleg automatisch synchroon blijven. */
-  const PERFORMANCE_CONFIG = {
-    thresholds: { good: 1.2, bad: 0.7 },   // ratio t.o.v. bucket-mediaan
-    minBucketSize: 3,                       // < 3 posts in bucket → label "n/a"
-    // Gewichten per content-type. engagement = engagement_lite, save = save_rate,
-    // watchTime = watch_time_ratio (schaal-onafhankelijk t.o.v. bucket-mediaan).
-    formulas: {
-      photo:    { engagement: 0.5, save: 0.5, watchTime: 0 },
-      carousel: { engagement: 0.3, save: 0.7, watchTime: 0 },
-      reel:     { engagement: 0.2, save: 0.1, watchTime: 0.7 },
-      fbVideo:  { engagement: 0.3, save: 0.1, watchTime: 0.6 },
-      story:    { engagement: 0.4, save: 0.0, watchTime: 0, reachShare: 0.6 },
-    },
-    // Fallback voor reels/video's zonder watch-time data (oudere posts).
-    fallback: { engagement: 0.7, save: 0.3, watchTime: 0 },
-  };
-
   function safeUrl(s) {
     // Block javascript:, data: (except images), and weird schemes.
     if (!s) return "";
@@ -106,122 +87,65 @@
 
   function arrayOrEmpty(x) { return Array.isArray(x) ? x : []; }
 
-  function formulaKeyFor(post) {
-    const t = (post.type || "").toLowerCase();
-    if (t.startsWith("carrousel") || t.startsWith("carousel")) return "carousel";
-    if (t.startsWith("foto") || t.startsWith("photo")) return "photo";
-    if (t.startsWith("reel")) return "reel";
-    if (t.startsWith("story")) return "story";
-    if (t.startsWith("video")) return post.platform === "fb" ? "fbVideo" : "reel"; // IG-video → reel-formule
-    return "photo"; // "Post"/"Status"/"Link" e.d. → foto-achtige content
-  }
+  /* ---------- Benchmark per post ----------
+     Geen oordeel, geen gewogen formule: één maatstaf per post tegenover het
+     gemiddelde van dezelfde groep in de gekozen periode. De groepen zijn de
+     kanaaltabs (IG posts, IG reels, FB posts, FB reels, advertenties), zodat
+     een reel nooit tegen een foto wordt gelegd en de kolom hetzelfde gemiddelde
+     gebruikt als de rij 'Gemiddelde' bovenaan de tabel.
+     - Organisch: engagement rate (interacties / bereik).
+     - Advertenties: ROAS zodra de set aankopen heeft, anders CTR.
+     Het gemiddelde is dat van de posts zelf (elke post telt één keer), niet
+     interacties/bereik over de hele groep: anders bepaalt één virale post de
+     lat. Onder 3 posts met een waarde is er geen benchmark (null, geen 0). */
+  const BENCH_MIN_N = 3;
+  const GROUP_LABELS = {
+    "ig-posts": "Instagram posts", "ig-reels": "Instagram reels",
+    "fb-posts": "Facebook posts", "fb-reels": "Facebook reels",
+    ads: "advertenties", other: "overige posts",
+  };
 
-  // engagement_lite — saves bewust NIET meegerekend (dubbeltelling met save_rate vermijden).
-  function engagementLite(p) {
-    return p.reach ? ((p.likes || 0) + (p.comments || 0) + (p.shares || 0)) / p.reach * 100 : 0;
-  }
-
-  function saveRate(p) {
-    return p.reach ? (p.saves || 0) / p.reach * 100 : 0;
-  }
-
-  function median(nums) {
-    const arr = nums.filter(n => typeof n === "number" && !Number.isNaN(n)).sort((a, b) => a - b);
-    if (!arr.length) return 0;
-    const mid = Math.floor(arr.length / 2);
-    return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
-  }
-
-  function bucketLabel(platform, formulaKey) {
-    const plat = { ig: "IG", fb: "FB" }[platform] || (platform || "").toUpperCase();
-    const type = { photo: "foto's", carousel: "carrousels", reel: "reels", fbVideo: "video's", story: "stories" }[formulaKey] || formulaKey;
-    return `${plat}-${type}`;
-  }
-
-  function classifyPerformance(allPosts) {
-    const { thresholds, minBucketSize, fallback } = PERFORMANCE_CONFIG;
-
-    // 1. Groepeer in (platform × formule-type)-buckets — ads overslaan.
-    const buckets = {};
-    for (const p of allPosts) {
-      if (!p || p.platform === "ads") continue;
-      const fk = formulaKeyFor(p);
-      const key = `${p.platform}::${fk}`;
-      (buckets[key] = buckets[key] || []).push(p);
+  // Zelfde indeling als de kanaaltabs in de bibliotheek (librarySourceOf in app.js).
+  function postGroupOf(post) {
+    if (post.platform === "ig") return post.type === "Reel" ? "ig-reels" : "ig-posts";
+    if (post.platform === "fb") {
+      const video = post.type === "Reel" || post.type === "Video" || /video|reel/i.test(post.kind || "");
+      return video ? "fb-reels" : "fb-posts";
     }
+    if (post.platform === "ads") return "ads";
+    return "other";
+  }
 
-    for (const key of Object.keys(buckets)) {
-      const posts = buckets[key];
-      const fk = key.split("::")[1];
-      const f = PERFORMANCE_CONFIG.formulas[fk] || PERFORMANCE_CONFIG.formulas.photo;
-      const label = bucketLabel(key.split("::")[0], fk);
-
-      // Noemer voor watch_time_ratio: mediaan avg-kijktijd over posts mét watch-data.
-      const medianWatch = median(posts.map(p => p.avgWatchTime || 0).filter(v => v > 0));
-
-      // 2. Multi-score per post.
-      const scored = posts.map(p => {
-        const eng = engagementLite(p);
-        const sav = saveRate(p);
-        const hasWatch = f.watchTime > 0 && medianWatch > 0 && (p.avgWatchTime || 0) > 0;
-        const wtr = hasWatch ? (p.avgWatchTime / medianWatch) : 0;
-        // Edge case: watch-gewogen type zonder watch-data → fallback-formule voor die post.
-        const w = (f.watchTime > 0 && !hasWatch) ? fallback : f;
-        const score = eng * (w.engagement || 0) + sav * (w.save || 0) + wtr * (w.watchTime || 0);
-        return { p, score };
-      });
-
-      // 3. Benchmark = mediaan van de bucket-scores.
-      const medianScore = median(scored.map(s => s.score));
-      const tooSmall = posts.length < minBucketSize;
-
-      for (const s of scored) {
-        s.p.perfScore = +s.score.toFixed(3);
-        s.p.perfBucket = label;
-        if (tooSmall || !medianScore) {
-          s.p.performance = null;   // "n/a"
-          s.p.perfRatio = null;
-          continue;
-        }
-        const ratio = s.score / medianScore;
-        s.p.perfRatio = +ratio.toFixed(2);
-        s.p.performance = ratio >= thresholds.good ? "Good" : (ratio < thresholds.bad ? "Bad" : "Average");
+  function benchmarkPosts(list) {
+    const groups = {};
+    for (const p of list || []) {
+      if (!p) continue;
+      (groups[postGroupOf(p)] = groups[postGroupOf(p)] || []).push(p);
+    }
+    for (const [key, posts] of Object.entries(groups)) {
+      let metric, label, valueOf;
+      if (key === "ads") {
+        const roas = posts.some(a => (a.purchases || 0) > 0);
+        metric = roas ? "roas" : "ctr";
+        label = roas ? "ROAS" : "CTR";
+        valueOf = roas ? (a => (a.spend > 0 && a.roas != null) ? a.roas : null)
+                       : (a => (a.impressions > 0) ? (a.ctr || 0) : null);
+      } else {
+        metric = "engagement"; label = "Engagement";
+        valueOf = (p => (p.reach > 0) ? (p.engagement || 0) : null);
       }
+      const vals = posts.map(valueOf);
+      const known = vals.filter(v => v != null);
+      const avg = known.length ? known.reduce((a, v) => a + v, 0) / known.length : null;
+      const ok = known.length >= BENCH_MIN_N && avg > 0;
+      posts.forEach((p, i) => {
+        const v = vals[i];
+        p.benchIndex = (ok && v != null) ? +(v / avg).toFixed(3) : null;
+        p.bench = { group: key, groupLabel: GROUP_LABELS[key] || key, metric, label,
+                    value: v, avg: ok ? avg : null, n: known.length };
+      });
     }
-    return allPosts;
-  }
-
-  // Aparte classifier voor Meta Ads — paid heeft andere dynamiek dan organic, dus niet de
-  // engagement/save/watch-formule. AUTOMATISCH: heeft de ads-set conversies (purchases > 0)
-  // → scoor op ROAS (return on ad spend); anders op efficiëntie (CTR/CPM). Eén bucket (ads
-  // vs ads), ratio t.o.v. de mediaan, met dezelfde thresholds/minBucketSize als de organic-
-  // classifier (PERFORMANCE_CONFIG → één source of truth). Zet performance/perfRatio/
-  // perfBucket/perfBasis in-place; degradeert veilig naar n/a als er te weinig of geen data is.
-  function classifyAdsPerformance(ads) {
-    const list = (ads || []).filter(a => a && a.platform === "ads");
-    if (!list.length) return ads;
-    const { thresholds, minBucketSize } = PERFORMANCE_CONFIG;
-
-    const hasConversions = list.some(a => (a.purchases || 0) > 0);
-    const basis = hasConversions ? "ROAS" : "Efficiëntie (CTR/CPM)";
-    const rawScore = (a) => {
-      if (hasConversions) return a.roas != null ? a.roas : 0; // spend zonder return → 0 = zwak
-      return (a.cpm > 0) ? (a.ctr || 0) / a.cpm : 0;          // hoge CTR + lage CPM = efficiënt
-    };
-
-    const scored = list.map(a => ({ a, score: rawScore(a) }));
-    const med = median(scored.map(s => s.score).filter(v => v > 0));
-    const tooSmall = list.length < minBucketSize;
-    for (const s of scored) {
-      s.a.perfScore = +s.score.toFixed(3);
-      s.a.perfBucket = `Meta Ads · ${basis}`;
-      s.a.perfBasis = basis;
-      if (tooSmall || !med) { s.a.performance = null; s.a.perfRatio = null; continue; }
-      const ratio = s.score / med;
-      s.a.perfRatio = +ratio.toFixed(2);
-      s.a.performance = ratio >= thresholds.good ? "Good" : (ratio < thresholds.bad ? "Bad" : "Average");
-    }
-    return ads;
+    return list;
   }
 
   function normalizeWindsorIgPost(raw) {
@@ -285,7 +209,7 @@
       // Ruw posttype ('video_inline', 'video_direct_response', 'photo', 'album').
       // Facebook onderscheidt reels niet van andere video's; de tab 'Facebook
       // reels' leest daarom dit veld. Bewust niet in `type`: dat stuurt de
-      // performance-formule (formulaKeyFor) en die blijft zoals hij was.
+      // groepsindeling (postGroupOf) en de KPI's.
       kind: typeof raw.type === "string" ? raw.type : "",
       date,
       dateLabel: date ? fmt.dateNL(date) : "—",
@@ -522,11 +446,11 @@
     const adsAdRows = adsAdRaw.map(normalizeWindsorAdRow).filter(Boolean);
 
     const allPosts = [...igPosts, ...fbPosts]; // IG + FB organic
-    classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
     // Library: per advertentie zodra de ad-level fetch rijen gaf; anders fallback per campagne.
     const adsExtra = raw.adsExtra || {};
     const adsCampaigns = aggregateWindsorAds(adsAdRows.length ? adsAdRows : adsRows, adsExtra);
-    classifyAdsPerformance(adsCampaigns); // paid-classifier (ROAS of CTR/CPM, automatisch)
+    benchmarkPosts([...allPosts, ...adsCampaigns]); // kolom 't.o.v. gemiddelde'
+
 
     const curAgg = aggregatePosts(allPosts);
     const adsReachCur = adsRows.reduce((s, r) => s + (r.reach || 0), 0);
@@ -636,6 +560,14 @@
       cadence,
       allPosts,
       adsCampaigns, // geaggregeerde campagne-cards uit daily rows (Blok B)
+      // Kosten, vertoningen en kliks uit de campagnerijen: die dekken de hele
+      // periode, de advertentiekaarten hierboven hooguit het ad-venster (35 d).
+      // Geen conversies — die vraagt getDashboard alleen op advertentieniveau op.
+      adsPeriodTotals: adsRows.length ? {
+        spend: adsRows.reduce((a, r) => a + (r.spend || 0), 0),
+        impressions: adsRows.reduce((a, r) => a + (r.impressions || 0), 0),
+        clicks: adsClicksCur,
+      } : null,
       adsLoading: false, // Windsor levert ads in dezelfde call → geen aparte wachttijd
       adLevelWindow: raw.adLevelWindow || null, // venster dat de ad-detail dekt (Hobby-cap)
       // Accountbereik, demografie en regio (null = niet gemeten). Zie getDashboard.
@@ -906,10 +838,10 @@
       comments: p.comments || 0,
       shares: p.shares || 0,
       saves: p.saves || 0,
-      // Classifier-output (Blok A) — door de agent te gebruiken als voor-geclassificeerd signaal.
-      performance: p.performance || null,      // "Good" | "Average" | "Bad" | null (=n/a)
-      perfRatio: p.perfRatio != null ? p.perfRatio : null, // ratio t.o.v. bucket-mediaan
-      perfBucket: p.perfBucket || null,        // bv. "Instagram · Reel"
+      // Benchmark: engagement ÷ gemiddelde engagement van dezelfde groep in deze
+      // periode (1 = gemiddeld). null = te weinig posts in de groep.
+      benchIndex: p.benchIndex != null ? p.benchIndex : null,
+      benchGroup: p.bench ? p.bench.groupLabel : null,
     });
 
     const byEngagement = [...posts].filter(p => p.reach >= 100).sort((a, b) => b.engagement - a.engagement);
@@ -925,30 +857,13 @@
     const busiestIdx = dayCounts.indexOf(Math.max(...dayCounts));
     const quietestIdx = dayCounts.indexOf(Math.min(...dayCounts.filter(v => v >= 0)));
 
-    // Classifier-signaal (Blok A) — per bucket de Good/Average/Bad-verdeling, plus
-    // expliciete over- en onderpresteerders. De agent hoeft niets te herrekenen.
-    const buckets = {};
-    for (const p of posts) {
-      const b = p.perfBucket;
-      if (!b) continue;
-      const bd = buckets[b] || (buckets[b] = { bucket: b, count: 0, good: 0, average: 0, bad: 0, na: 0 });
-      bd.count += 1;
-      if (p.performance === "Good") bd.good += 1;
-      else if (p.performance === "Average") bd.average += 1;
-      else if (p.performance === "Bad") bd.bad += 1;
-      else bd.na += 1;
-    }
-    const performanceBreakdown = Object.values(buckets).sort((a, b) => b.count - a.count);
-
-    const rated = posts.filter(p => p.perfRatio != null);
-    const overperformers = rated
-      .filter(p => p.performance === "Good")
-      .sort((a, b) => b.perfRatio - a.perfRatio)
-      .slice(0, 5).map(slimPost);
-    const underperformers = rated
-      .filter(p => p.performance === "Bad")
-      .sort((a, b) => a.perfRatio - b.perfRatio)
-      .slice(0, 5).map(slimPost);
+    // Boven- en onder het gemiddelde van de eigen groep (benchmarkPosts). Een
+    // plaats, geen oordeel: de index zegt hoe ver een post van het gemiddelde zit.
+    const rated = posts.filter(p => p.benchIndex != null);
+    const aboveAverage = rated.filter(p => p.benchIndex > 1)
+      .sort((a, b) => b.benchIndex - a.benchIndex).slice(0, 5).map(slimPost);
+    const belowAverage = rated.filter(p => p.benchIndex < 1)
+      .sort((a, b) => a.benchIndex - b.benchIndex).slice(0, 5).map(slimPost);
 
     return {
       kpis: ov.kpis.map(k => ({
@@ -971,10 +886,10 @@
       topPostsByEngagement: top10,
       bottomPostsByEngagement: bottom5,
       topPostsByReach: byReach.slice(0, 5).map(slimPost),
-      // Classifier-signaal (Blok A): verdeling per bucket + concrete over/onderpresteerders.
-      performanceBreakdown,
-      overperformers,
-      underperformers,
+      // Benchmark: engagement t.o.v. het gemiddelde van dezelfde groep (IG posts,
+      // IG reels, FB posts, FB reels) in deze periode.
+      aboveAverage,
+      belowAverage,
       ads: buildAdsSummary(ads, ov.adsExtra),
       // Websitecijfers meesturen zodra de Website-tab geladen is. Zonder die tab
       // is er geen websitedata in het geheugen; dan blijft dit weg i.p.v. nullen
@@ -1109,6 +1024,9 @@
         checkouts: a.checkouts || 0,
         igProfileVisits: a.igProfileVisits || 0,
         frequency: a.frequency != null ? +a.frequency.toFixed(2) : null,
+        // ROAS (bij aankopen) of CTR ÷ het gemiddelde van alle advertenties; 1 = gemiddeld.
+        benchIndex: a.benchIndex != null ? a.benchIndex : null,
+        benchMetric: a.bench ? a.bench.metric : null,
         objective: a.objective ? objectiveLabel(a.objective) : null,
         avgWatchSec: a.avgWatchTime > 0 ? +a.avgWatchTime.toFixed(1) : null,
       };
@@ -1276,17 +1194,18 @@
   // we simpelweg niets meten.
   const safeRoas = (rev, spend) => (spend > 0 && rev != null && isFinite(rev) ? rev / spend : null);
 
-  // Oordeel t.o.v. de minimum-ROAS. De marges rond de drempel zijn bewust ruim:
-  // onder 0,8× break-even is het verlies structureel, boven 1,3× is er ruimte om
-  // te schalen. Daartussen is bijsturen zinvoller dan aan/uit zetten.
+  // Oordeel t.o.v. de break-even-ROAS: boven of onder de drempel, meer niet.
+  // Geen 'schalen' of 'uitzetten' — het dashboard stelt niets voor (beslissing
+  // eigenaar, 29-09-2026); wat je ermee doet hoort in het gesprek via de MCP.
+  // `note` beschrijft alleen de afstand tot de drempel.
   function roasVerdict(roas, minRoas, spend, minSpend) {
-    if (spend < minSpend) return { key: "nodata", label: "Te weinig spend", tone: "mute", advice: "Nog geen oordeel — te weinig besteed om betrouwbaar te meten." };
-    if (roas == null) return { key: "nodata", label: "Geen data", tone: "mute", advice: "Geen omzet gemeten op dit kanaal." };
-    if (minRoas == null) return { key: "unknown", label: "Geen doel", tone: "mute", advice: "Vul brutomarge in om een break-even te berekenen." };
-    if (roas < minRoas * 0.8) return { key: "off", label: "Uitzetten", tone: "bad", advice: "Structureel onder break-even — pauzeren of grondig herzien." };
-    if (roas < minRoas) return { key: "fix", label: "Bijsturen", tone: "warn", advice: "Net onder break-even — bied, doelgroep of creatie bijstellen." };
-    if (roas > minRoas * 1.3) return { key: "scale", label: "Schalen", tone: "good", advice: "Ruim boven break-even — budget verhogen kan uit." };
-    return { key: "hold", label: "Houden", tone: "ok", advice: "Boven break-even, maar zonder marge om te schalen." };
+    if (spend < minSpend) return { key: "nodata", label: "Te weinig spend", tone: "mute", note: "Te weinig besteed om betrouwbaar te meten." };
+    if (roas == null) return { key: "nodata", label: "Geen data", tone: "mute", note: "Geen omzet gemeten op dit kanaal." };
+    if (minRoas == null) return { key: "unknown", label: "Geen drempel", tone: "mute", note: "Zonder brutomarge is er geen break-even." };
+    const pct = Math.round((roas / minRoas - 1) * 100);
+    const gap = `${pct >= 0 ? "+" : "−"}${Math.abs(pct)}% t.o.v. de drempel`;
+    if (roas < minRoas) return { key: "below", label: "Onder break-even", tone: "bad", note: gap };
+    return { key: "above", label: "Boven break-even", tone: "good", note: gap };
   }
 
   // GA4 kan omzet niet per campagne toewijzen zonder sluitende UTM-tagging, dus
@@ -1301,7 +1220,7 @@
       const d = r.current.channels[c.key];
       if (!d || !d.campaigns?.length) continue;
       // Zonder omzetveld van de connector is er per campagne géén omzet bekend.
-      // Een ROAS van 0 zou dan 'uitzetten' opleveren terwijl we simpelweg niets
+      // Een ROAS van 0 zou dan 'onder break-even' opleveren terwijl we niets
       // meten — die campagnes krijgen expliciet geen oordeel.
       const noRevenue = d.platformRevenueAvailable === false;
       const ratio = (!noRevenue && d.platformRevenue > 0 && d.ga4Revenue != null)
@@ -1316,7 +1235,7 @@
           platformRevenue: noRevenue ? null : camp.platformRevenue,
           platRoas, corrected, judged, ratio, noRevenue,
           verdict: noRevenue
-            ? { key: "norevenue", label: "Geen omzetdata", tone: "mute", advice: `Deze connector levert geen omzet per campagne — beoordeel ${c.label} op kanaalniveau.` }
+            ? { key: "norevenue", label: "Geen omzetdata", tone: "mute", note: `${c.label} levert geen omzet per campagne; alleen het kanaaltotaal is gemeten.` }
             : roasVerdict(judged, min.value, camp.spend, 25),
         });
       }
@@ -1532,7 +1451,7 @@
       roasPlatform: round(c.platRoas),
       roasCorrectedToGa4: round(c.corrected),
       verdict: c.verdict.label,
-      advice: c.verdict.advice,
+      verdictNote: c.verdict.note,
     }));
 
     const daily = Array.isArray(cur.daily) ? cur.daily : [];
@@ -1621,10 +1540,9 @@
 
   return {
     // basis en opmaak
-    fmt, PERFORMANCE_CONFIG, safeUrl, TYPE_LABELS, friendlyType, arrayOrEmpty,
-    // organisch: normalisatie en classifier
-    aggregatePosts, formulaKeyFor, engagementLite, saveRate, median, bucketLabel,
-    classifyPerformance, classifyAdsPerformance,
+    fmt, safeUrl, TYPE_LABELS, friendlyType, arrayOrEmpty,
+    // organisch: normalisatie en benchmark
+    aggregatePosts, postGroupOf, benchmarkPosts,
     // Windsor → dashboardvorm
     normalizeWindsorIgPost, normalizeWindsorFbPost, numFromAction, normalizeWindsorAdRow,
     sumAdsRowsInWeek, adCreativeType, aggregateWindsorAds, transformWindsorDashboard,

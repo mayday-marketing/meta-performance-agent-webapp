@@ -293,16 +293,23 @@ const TOOLS = [
   {
     name: 'get_dashboard',
     title: 'Social en Meta Ads',
-    description: "Samenvatting van het dashboard voor Instagram, Facebook (organisch) en Meta Ads: KPI's met vergelijking, verdeling per platform en type, publicatieritme, beste en slechtste posts met een voorgeclassificeerd oordeel (Good/Average/Bad t.o.v. de mediaan van hun eigen bucket), en de advertenties met ROAS, CAC, funnel, creatievarianten en doelgroep. Standaard de laatste 28 volledige dagen. Let op: advertentiedetail dekt hooguit de laatste 35 dagen (zie adLevelWindow); aankopen zijn omni; doelgroepcijfers zijn aandelen en niet op te tellen bij de totalen; bereik over dagen opgeteld overschat unieke personen.",
+    description: "Samenvatting van het dashboard voor Instagram, Facebook (organisch) en Meta Ads: KPI's met vergelijking, verdeling per platform en type, publicatieritme, posts boven en onder het gemiddelde van hun eigen groep (benchIndex = engagement ÷ gemiddelde engagement van IG posts, IG reels, FB posts of FB reels in de periode; 1 = gemiddeld), en de advertenties met ROAS, CAC, funnel, creatievarianten en doelgroep. Standaard de laatste 28 volledige dagen. Let op: advertentiedetail dekt hooguit de laatste 35 dagen (zie adLevelWindow); aankopen zijn omni; doelgroepcijfers zijn aandelen en niet op te tellen bij de totalen; bereik over dagen opgeteld overschat unieke personen.",
     inputSchema: { type: 'object', properties: { clientId: CLIENT_ARG, startDate: START_ARG, endDate: END_ARG, compare: COMPARE_ARG }, required: ['clientId'], additionalProperties: false },
     run: runDashboard,
   },
   {
     name: 'get_roas',
     title: 'ROAS en break-even',
-    description: "Blended MER en ROAS per kanaal en per campagne, met de break-even-drempel uit de Config-tab (brutomarge en seizoenskorting) en een oordeel per kanaal en campagne (Schalen / Houden / Bijsturen / Uitzetten / Te weinig spend / Geen data). Standaard van de eerste van deze maand tot vandaag, vergeleken met dezelfde dagen vorig jaar. Twee omzetdefinities die NOOIT opgeteld worden: GA4 (last click) en platform (wat het kanaal claimt, inclusief view-through). revenueBasis kiest welke het oordeel bepaalt; zonder keuze geldt 'Oordeel op' uit de Config-tab. Campagnes worden beoordeeld op platformomzet, geschaald naar GA4. null = niet gemeten.",
+    description: "Blended MER en ROAS per kanaal en per campagne, met de break-even-drempel uit de Config-tab (brutomarge en seizoenskorting) en een oordeel per kanaal en campagne (Boven break-even / Onder break-even / Te weinig spend / Geen data / Geen drempel). Standaard van de eerste van deze maand tot vandaag, vergeleken met dezelfde dagen vorig jaar. Twee omzetdefinities die NOOIT opgeteld worden: GA4 (last click) en platform (wat het kanaal claimt, inclusief view-through). revenueBasis kiest welke het oordeel bepaalt; zonder keuze geldt 'Oordeel op' uit de Config-tab. Campagnes worden beoordeeld op platformomzet, geschaald naar GA4. null = niet gemeten.",
     inputSchema: { type: 'object', properties: { clientId: CLIENT_ARG, startDate: START_ARG, endDate: END_ARG, revenueBasis: { type: 'string', enum: ['ga4', 'platform'], description: 'Omzetdefinitie voor het oordeel.' } }, required: ['clientId'], additionalProperties: false },
     run: runRoas,
+  },
+  {
+    name: 'get_google_ads',
+    title: 'Google Ads',
+    description: "Google Ads voor één klant: kosten, vertoningen, kliks, conversies en kosten per conversie (totaal, per campagne en per dag), met de vergelijkingsperiode; welke conversieacties 'een conversie' zijn; vertoningsaandeel en het deel gemist door budget of door rang (gewogen, niet gemiddeld); zoektermen naar kosten en de kosten zonder één conversie; apparaten. Standaard de laatste 28 volledige dagen. Zoektermen dekken hooguit 30 dagen (detailWindow) en tellen nooit op tot het totaal (privacydrempel). Geen omzet of ROAS: die staan in get_roas. Conversies zijn de primaire acties van het account, niet 'alle conversies'. linked: false = geen Google Ads-account in de Config-tab.",
+    inputSchema: { type: 'object', properties: { clientId: CLIENT_ARG, startDate: START_ARG, endDate: END_ARG, compare: COMPARE_ARG }, required: ['clientId'], additionalProperties: false },
+    run: runGoogleAds,
   },
   {
     name: 'get_website',
@@ -431,6 +438,55 @@ async function runRoas(scope, args, ctx) {
     ga4Connected: raw.hasGa4 !== false,
     origin: raw.current && raw.current.origin ? raw.current.origin : null,
     errors: errorsOf({ ...(raw.current && raw.current.errors), previous: raw.previousError }),
+  };
+}
+
+// Dezelfde respons als de Google Ads-tab (windsor.js getGoogleAds, rekenwerk in
+// _googleads.js), alleen ingekort en afgerond: zo zegt de tool nooit iets anders
+// dan het scherm.
+async function runGoogleAds(scope, args, ctx) {
+  needWindsor(ctx);
+  const p = resolvePeriod(args, last28);
+  const cmp = args.compare === 'yoy' ? Summary.yearAgoPeriod(p) : Summary.prevPeriod(p.start, p.end);
+  const raw = await dashboardCall(ctx, 'windsor', {
+    action: 'getGoogleAds', startDate: p.start, endDate: p.end,
+    compareStartDate: cmp.start, compareEndDate: cmp.end,
+  });
+  if (!raw || !raw.linked) {
+    return { period: { startDate: p.start, endDate: p.end }, linked: false, reason: "Geen 'Google Ads account' in de Config-tab." };
+  }
+  const r = (v, d = 2) => (v == null || !isFinite(v) ? null : Math.round(v * 10 ** d) / 10 ** d);
+  const tot = (t) => t ? {
+    cost: r(t.cost), impressions: t.impressions, clicks: t.clicks, conversions: r(t.conversions, 1),
+    ctr: r(t.ctr, 4), cpc: r(t.cpc), costPerConversion: r(t.cpa), conversionRate: r(t.convRate, 4),
+  } : null;
+  const share = (s) => s ? {
+    impressionShare: r(s.share, 4), lostToBudget: r(s.lostBudget, 4), lostToRank: r(s.lostRank, 4),
+    belowTenPercentDays: r(s.belowTenShare, 3),
+  } : null;
+  const cur = raw.current || {};
+  const st = raw.searchTerms;
+  return {
+    period: raw.period,
+    comparePeriod: raw.compare ? { ...raw.compare, kind: args.compare === 'yoy' ? 'vorig jaar' : 'vorige periode' } : null,
+    totals: tot(cur.totals),
+    previousTotals: raw.previous ? tot(raw.previous.totals) : null,
+    impressionShare: share(raw.impressionShare),
+    conversionActions: (raw.conversionActions || []).map(a => ({ name: a.name, conversions: r(a.conversions, 1), share: r(a.share, 3) })),
+    campaigns: (cur.campaigns || []).slice(0, 40).map(c => ({
+      name: c.name, type: c.type, status: c.status, ...tot(c), impressionShare: share(c.impressionShare),
+    })),
+    daily: (cur.daily || []).map(d => ({ date: d.date, cost: r(d.cost), clicks: d.clicks, conversions: r(d.conversions, 1) })),
+    devices: (raw.devices || []).map(d => ({ device: d.device, ...tot(d) })),
+    searchTerms: st ? {
+      distinctTerms: st.count,
+      costWithoutConversion: st.wasted ? { cost: r(st.wasted.cost), terms: st.wasted.terms } : null,
+      top: st.rows.slice(0, 50).map(t => ({ term: t.search_term, cost: r(t.cost), clicks: t.clicks, conversions: r(t.conversions, 1), costPerConversion: r(t.cpa), campaigns: t.campaigns })),
+    } : null,
+    detailWindow: raw.detailWindow || null,
+    sheetThrough: raw.sheetThrough && Object.keys(raw.sheetThrough).length ? raw.sheetThrough : null,
+    origin: raw.origin || null,
+    errors: raw.errors && raw.errors.length ? raw.errors.slice(0, 10) : null,
   };
 }
 

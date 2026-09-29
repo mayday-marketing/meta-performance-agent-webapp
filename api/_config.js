@@ -64,6 +64,18 @@ function okDriveFile(v) {
   return /^[A-Za-z0-9_-]{20,}$/.test(s) ? s : null;
 }
 
+// Connectors waarvoor de datasheet overgeslagen wordt, komma-gescheiden. Alleen
+// bekende slugs: een tikfout moet als ongeldig gemeld worden, niet stil niets doen.
+// Veilig binnen de isolatieregel: dit kiest geen sheet of account, het zet alleen
+// de sheet uit voor een connector van déze klant, zodat die live gaat.
+const SHEET_CONNECTORS = ['instagram', 'facebook_organic', 'facebook', 'googleanalytics4',
+  'searchconsole', 'google_ads', 'klaviyo', 'mailerlite', 'convertkit'];
+function okConnectorList(v) {
+  const items = String(v).toLowerCase().split(/[\s,;]+/).filter(Boolean);
+  if (!items.length || items.some(x => !SHEET_CONNECTORS.includes(x))) return null;
+  return [...new Set(items)];
+}
+
 // Een mapnaam, geen pad en geen id: geen slashes, geen quotes (die zouden de
 // Drive-query kunnen breken), en begrensd op lengte.
 function okFolderName(v) {
@@ -282,6 +294,13 @@ const CONFIG_FIELDS = {
   // De toggle in de ROAS-tab blijft altijd beschikbaar; dit zet alleen de default.
   oordeelop:     { path: 'roas.verdictSource', check: okVerdictSource },
 
+  // --- Datasheet ------------------------------------------------------------
+  // Een export die nog vult (backfill) ziet er voor de code compleet uit: alle
+  // kolommen, alleen te weinig rijen. Bij Spotto toonde de Facebook-tab 3 posts
+  // tegenover 35 live. Met deze schakelaar gaat die connector live tot de tab
+  // klaar is — zonder tabs te hernoemen. Waarde: bv. 'facebook_organic'.
+  datasheetoverslaan: { path: 'sheetSkip', check: okConnectorList },
+
   // --- Losse links naar materiaal buiten het dashboard ----------------------
   // Een rapportagedeck, een brandbook, een contentkalender: dingen waar het
   // dashboard zelf niets mee rekent, maar waar de klant en de agent wel naartoe
@@ -346,7 +365,7 @@ function roasTargets(roas) {
 }
 
 function emptyConfig() {
-  return { brandName: null, accent: null, accentText: null, support: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null, website: {}, seo: {} };
+  return { brandName: null, accent: null, accentText: null, support: null, logoUrl: null, accounts: {}, links: {}, roas: {}, roasTargets: null, website: {}, seo: {}, sheetSkip: [] };
 }
 
 function setPath(obj, path, value) {

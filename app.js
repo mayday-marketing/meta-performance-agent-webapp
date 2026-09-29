@@ -13,8 +13,8 @@
   // dunne wrappers die `state` doorgeven; de logica zelf staat in summary.js.
   const S = window.Summary;
   const {
-    fmt, PERFORMANCE_CONFIG, safeUrl, friendlyType, arrayOrEmpty, aggregatePosts,
-    classifyPerformance, classifyAdsPerformance, enumerateWeeks, inWeek, sumPostsField,
+    fmt, safeUrl, friendlyType, arrayOrEmpty, aggregatePosts,
+    postGroupOf, benchmarkPosts, enumerateWeeks, inWeek, sumPostsField,
     countPostsInWeek, gradientFor, humanCode, objectiveLabel, ctaLabel, GOAL_METRICS, goalRange,
     GEO_SPLIT, GEO_UNBRANDED, geoCell, geoPct, geoMention, geoReadiness, geoSov, geoSplitCounts,
     geoBlocks, roasScenarios, safeRoas, roasVerdict,
@@ -63,7 +63,14 @@
     goalMetrics: null,                // { "<start>|<end>": { values, errors } } uit getGoalMetrics
     goalMetricsLoading: false,
     socialTab: "samenvatting",        // sub-tab van Social: samenvatting | ig-posts | … | linkedin
-    adsTab: "campagnes",              // sub-tab van Ads: campagnes | advertenties
+    adsTab: "overzicht",              // sub-tab van Ads: overzicht | meta | google | tiktok | linkedin | chatgpt
+    adsMetaView: "campagnes",         // weergave binnen Meta: campagnes | advertenties
+    googleAds: null,                  // getGoogleAds-respons
+    googleAdsKey: null,               // clientId|periode|vergelijking waarvoor googleAds geldt
+    googleAdsLoading: false,
+    googleAdsError: null,
+    googleAdsShowAll: false,
+    googleAdsTermQuery: "",           // zoekterm in de zoektermentabel (alleen deze sessie)
     adsDemoGender: "all", // filter boven de doelgroepgrafiek: all / female / male
     adsSort: { key: "spend", dir: "desc" }, // sortering van de advertentietabel
     adsShowAll: false,
@@ -74,10 +81,6 @@
     overview: null,                   // populated by fetchOverview()
     overviewLoading: false,
     overviewError: null,
-    analysisCache: {},                // { [periodKey]: { summary, winners, losers, recs } }
-    analysisLoading: false,
-    analysisError: null,
-    analysisGenId: 0,                 // guard tegen out-of-order responses bij periode-wissel
     email: null,                      // ruwe getEmail-respons voor de huidige periode
     emailLoading: false,
     emailError: null,
@@ -122,7 +125,7 @@
     geoLoading: false,
     geoError: null,
     geoMeta: null,                    // bestandsnaam, waarschuwingen, waar gezocht is
-    geoTab: "overzicht",              // overzicht | prompts | sources | website | acties
+    geoTab: "overzicht",              // overzicht | prompts | sources | website | meting
     geoSources: null,                 // live DataForSEO-mentions
     geoSourcesLoading: false,
     geoSourcesError: null,
@@ -442,9 +445,6 @@
     clearSession();
     state.overview = null;
     state.overviewError = null;
-    state.analysisCache = {};
-    state.analysisLoading = false;
-    state.analysisError = null;
     // E-mailstate wissen bij logout — anders lekt de vorige klant z'n e-maildata door.
     state.email = null;
     state.emailKey = null;
@@ -461,6 +461,14 @@
     state.websiteError = null;
     state.websiteLoading = false;
     state.websiteLandingQuery = "";
+    state.googleAds = null;
+    state.googleAdsKey = null;
+    state.googleAdsError = null;
+    state.googleAdsLoading = false;
+    state.googleAdsShowAll = false;
+    state.googleAdsTermQuery = "";
+    state.adsTab = "overzicht";
+    state.adsMetaView = "campagnes";
     // SEO-state wissen: de keywordlijst van klant A hoort niet in de tab van klant B.
     // De lijst zelf staat per klant in localStorage en wordt bij het inloggen opnieuw
     // geladen (zie seoFetch).
@@ -504,11 +512,12 @@
   // klantwissel zichtbaar door.
   const RENDER_TARGETS = [
     "#kpi-grid", "#trend-chart", "#trend-legend", "#channel-mix", "#cadence",
-    "#top-posts", "#lib-results", "#analysis-content", "#website-content",
+    "#top-posts", "#lib-results", "#website-content",
     "#overview-content", "#social-unlinked", "#brand-content",
     "#seo-content", "#geo-content", "#roas-content", "#email-content",
     "#report-content", "#chat-body",
     "#ads-table", "#ads-funnel", "#ads-creative", "#ads-demo",
+    "#ads-overview", "#ads-google", "#ads-unlinked",
   ];
 
   function clearRenderedData() {
@@ -612,8 +621,6 @@
     bindPeriodToggle();
 
     renderLibrary();
-    renderAnalysis();
-    renderMethodology();  // statische pagina o.b.v. PERFORMANCE_CONFIG (Blok E)
     renderChat();
     bindNav();
     bindChatPanel();
@@ -664,8 +671,8 @@
   const REPORT_PAGES = new Set(["overview", "social", "ads", "website", "roas", "bronnen"]);
 
   function switchPage(page) {
-    // De AI-analyse is een tab van de Overview geworden; oude links blijven werken.
-    if (page === "analysis") { state.homeTab = "analyse"; page = "overview"; }
+    // AI-analyse en Methodology bestaan niet meer; oude links landen op Overview.
+    if (page === "analysis" || page === "methodology") page = "overview";
     state.page = page;
     document.documentElement.setAttribute("data-report", REPORT_PAGES.has(page) ? "on" : "off");
     $$(".nav-link").forEach((l) => l.classList.toggle("on", l.dataset.page === page));
@@ -680,7 +687,6 @@
       geo:         { title: "GEO",         crumbs: ["Dashboard", "GEO"] },
       roas:        { title: "ROAS",        crumbs: ["Dashboard", "ROAS"] },
       report:      { title: "Rapport",     crumbs: ["Dashboard", "Rapport"] },
-      methodology: { title: "Methodology", crumbs: ["Dashboard", "Methodology"] },
       bronnen:     { title: "Bronnen",     crumbs: ["Dashboard", "Bronnen"] },
     };
     const t = titles[page] || titles.overview;
@@ -713,7 +719,8 @@
   // Spring vanuit de Analyse naar een specifieke advertentie: Ads → Advertenties,
   // render, scroll naar de rij/kaart en licht 'm even op.
   function goToAd(adId) {
-    state.adsTab = "advertenties";
+    state.adsTab = "meta";
+    state.adsMetaView = "advertenties";
     switchPage("ads");
     setTimeout(() => {
       const sel = (window.CSS && CSS.escape) ? CSS.escape(adId) : adId;
@@ -740,6 +747,10 @@
     state.websiteKey = null;
     // De Overview toont de websitecijfers ook, dus daar ook opnieuw ophalen.
     if (state.page === "website" || state.page === "overview") websiteFetch();
+    // Google Ads volgt de dashboardperiode; de Overview toont hem ook.
+    state.googleAdsKey = null;
+    if (state.page === "ads") setAdsTab(state.adsTab);
+    else if (state.page === "overview") googleAdsFetch();
     // De Rapport-tab heeft een eigen opgehaalde set (ROAS, duiding, slides)
     // die aan deze periode hangt; die moet mee verlopen.
     if (window.__report) window.__report.periodChanged();
@@ -790,11 +801,6 @@
   let adsFetchId = 0;
 
   async function refreshOverview() {
-    // Een periode-wissel invalideert elke lopende analyse-generatie.
-    state.analysisGenId++;
-    state.analysisLoading = false;
-    state.analysisError = null;
-
     // Windsor-flow voor klanten met windsor_api_key — voorrang boven Metricool.
     if (state.session?.hasWindsor) {
       return refreshOverviewWindsor();
@@ -803,13 +809,11 @@
     if (!state.session?.hasMetricool) {
       state.overviewError = "Voor deze klant is geen Metricool- of Windsor-koppeling geconfigureerd.";
       renderOverview();
-      renderAnalysis();
       return;
     }
     state.overviewLoading = true;
     state.overviewError = null;
     renderOverview();
-    renderAnalysis();
 
     // Cancel any in-flight ads fetch from previous period.
     adsFetchId++;
@@ -826,7 +830,6 @@
       state.overview._rawDashboard = raw;
       state.overviewLoading = false;
       renderOverview();
-      renderAnalysis();
 
       // Fire ads-campaigns async — don't block dashboard.
       refreshAdsCampaigns(state.period.start, state.period.end);
@@ -838,7 +841,6 @@
         setTimeout(() => showScreen("login-screen"), 600);
       }
       renderOverview();
-      renderAnalysis();
     }
   }
 
@@ -959,11 +961,9 @@
     return Math.round(total);
   }
 
-  /* ---------- Performance classifier (Blok A) ----------
-     Wijst per organic post een Good/Average/Bad/n-a-label toe, op basis van een
-     multi-score vergeleken met de mediaan van dezelfde (platform × type)-bucket
-     in de geselecteerde periode. Leest gewichten/thresholds uit PERFORMANCE_CONFIG.
-     Zet labels in-place op de post-objecten; ads worden overgeslagen (andere KPI's). */
+  /* ---------- Metricool → app shape ----------
+     De benchmarkkolom (benchmarkPosts in summary.js) zet per post een index
+     t.o.v. het gemiddelde van dezelfde groep in de gekozen periode. */
 
   function transformDashboard(raw, adsCampaignsRaw) {
     const igPosts = arrayOrEmpty(raw.posts?.igPosts).map(p => normalizePost(p, "ig", "Post"));
@@ -972,9 +972,8 @@
     const ads = arrayOrEmpty(adsCampaignsRaw).map(c => normalizePost(c, "ads", "Campagne"));
 
     const allPosts = [...igPosts, ...igReels, ...fbPosts].filter(Boolean);
-    classifyPerformance(allPosts); // zet post.performance in-place (Blok A)
     const adsCampaigns = ads.filter(Boolean);
-    classifyAdsPerformance(adsCampaigns); // paid-classifier (ROAS of CTR/CPM, automatisch)
+    benchmarkPosts([...allPosts, ...adsCampaigns]); // kolom 't.o.v. gemiddelde'
 
     // Previous period posts — used for true period-over-period deltas.
     const igPostsPrev = arrayOrEmpty(raw.postsPrev?.igPosts).map(p => normalizePost(p, "ig", "Post"));
@@ -1093,7 +1092,6 @@
     state.overviewLoading = true;
     state.overviewError = null;
     renderOverview();
-    if (typeof renderAnalysis === "function") renderAnalysis();
 
     try {
       const cmp = compareRange(state.period.start, state.period.end);
@@ -1120,8 +1118,7 @@
       if (raw?.errors?.adsAd) console.warn("[windsor] ad-level ads fetch faalde, val terug op campagne-niveau:", raw.errors.adsAd);
       if (raw?.errors?.ads)   console.warn("[windsor] campagne-ads fetch faalde:", raw.errors.ads);
       renderOverview();
-      if (typeof renderAnalysis === "function") renderAnalysis();
-    } catch (err) {
+      } catch (err) {
       state.overviewLoading = false;
       state.overviewError = err.message || "Onbekende fout bij laden Windsor-data.";
       if (err.status === 401) {
@@ -1129,8 +1126,7 @@
         setTimeout(() => showScreen("login-screen"), 600);
       }
       renderOverview();
-      if (typeof renderAnalysis === "function") renderAnalysis();
-    }
+      }
   }
 
   function adsReachInWeek(campaigns, week) {
@@ -1175,6 +1171,7 @@
     renderAdsDemo();
     renderLibrary();
     if (state.page === "overview" && state.homeTab === "overzicht") renderHome();
+    if (state.page === "ads" && state.adsTab === "overzicht") renderAdsOverview();
   }
 
   /* ==========================================================
@@ -1190,6 +1187,7 @@
   // en alleen als er een bron is. Social en Ads komen al mee met getDashboard.
   function homeFetch() {
     if (state.session?.hasWindsor && typeof websiteFetch === "function") websiteFetch();
+    if (state.session?.hasWindsor) googleAdsFetch();
   }
 
   function homeSection(titel, sub, page, body) {
@@ -1237,27 +1235,14 @@
       : homeNote("Geen organische publicaties in deze periode.");
   }
 
+  // Dezelfde kaarten als het overzicht op de Ads-pagina (adsOverviewCards).
   function renderHomeAds() {
-    const ov = state.overview;
     if (state.overviewLoading) return homeSkeleton(4);
-    if (!ov) return homeNote("Nog geen cijfers opgehaald.");
-    if (ov.adsLoading) return homeSkeleton(4);
-    const camps = (ov.adsCampaigns || []).filter(c => c && (c.spend || c.impressions || c.reach));
-    if (!camps.length) return homeNote("Er liep geen Meta Ads-campagne in deze periode, of het advertentieaccount staat niet in de Config-tab.");
-    const som = (k) => camps.reduce((a, c) => a + (Number(c[k]) || 0), 0);
-    const spend = som("spend"), clicks = som("clicks"), reach = som("reach");
-    const omzet = som("purchaseValue") || som("revenue");
-    const leads = som("leads");
-    const metKosten = camps.filter(c => (c.spend || 0) > 0).length;
-    const kaarten = [
-      homeCard("Kosten", `€ ${fmt.int(Math.round(spend))}`, `${camps.length} campagnes · ${metKosten} met kosten`, "--kpi-1"),
-      homeCard("Bereik", fmt.k(reach), "opgeteld per campagne", "--kpi-2"),
-      homeCard("Kliks", fmt.k(clicks), clicks && spend ? `€ ${(spend / clicks).toFixed(2).replace(".", ",")} per klik` : "—", "--kpi-3"),
-      omzet
-        ? homeCard("Opbrengst", `€ ${fmt.int(Math.round(omzet))}`, spend ? `ROAS ${(omzet / spend).toFixed(2).replace(".", ",")} · volgens Meta` : "volgens Meta", "--kpi-4")
-        : homeCard("Leads", leads ? fmt.int(leads) : "—", leads && spend ? `€ ${(spend / leads).toFixed(2).replace(".", ",")} per lead` : "geen leads gemeten", "--kpi-4"),
-    ];
-    return `<div class="kpi-grid">${kaarten.join("")}</div>`;
+    if (!state.overview) return homeNote("Nog geen cijfers opgehaald.");
+    const { meta, google, metaLoading, googleLoading } = adsPlatformTotals();
+    if (metaLoading || googleLoading) return homeSkeleton(4);
+    const kaarten = adsOverviewCards(meta, google);
+    return kaarten || homeNote("Er liep geen advertentiecampagne in deze periode, of het advertentieaccount staat niet in de Config-tab.");
   }
 
   function renderHomeWebsite() {
@@ -1284,7 +1269,7 @@
         <p class="report-lede">Per kanaal de kerncijfers, ${vergelijk}. Elk blok komt uit de pagina erachter — daar staat de uitleg.</p>
       </div>`
       + homeSection("Social", "Instagram en Facebook, organisch en betaald bereik", "social", renderHomeSocial())
-      + homeSection("Ads", "Meta Ads — cijfers zoals Meta ze rapporteert", "ads", renderHomeAds())
+      + homeSection("Ads", "Meta en Google Ads samen — resultaten per platform op de Ads-pagina", "ads", renderHomeAds())
       + homeSection("Website", "GA4 en Search Console", "website", renderHomeWebsite());
   }
 
@@ -1625,12 +1610,10 @@
       niet: "automatisch verversen — elke positiecheck kost geld.",
     }));
 
-    const an = Object.keys(state.analysisCache || {}).length;
     kaarten.push(bronKaart({
-      naam: "De twee AI-agents", staat: "ok",
-      rol: "Analyse eenmalig, chat eenmalig, geen gereedschap",
+      naam: "De chat-agent", staat: "ok",
+      rol: "Eenmalig per vraag, geen gereedschap",
       rijen: [
-        ["Analyse", an ? `${an} periode${an === 1 ? "" : "s"} in het geheugen` : "nog niet gedraaid"],
         ["Chat", `${(state.chatMessages || []).length} berichten deze sessie`],
         ["Context", "het samengevatte dashboard plus de Drive-context"],
       ],
@@ -2010,13 +1993,6 @@
     const zichtbaar = state.adsShowAll ? sorted : sorted.slice(0, 12);
     const rijen = zichtbaar.map(c => {
       const roas = c.roas != null && c.spend > 0 ? c.roas : null;
-      const LABEL = { Good: ["sterk", "good"], Average: ["gemiddeld", "average"], Bad: ["zwak", "bad"] };
-      const [lbl, cls] = LABEL[c.performance] || [];
-      // Een knop, geen losse tekst: klikken opent de agent met deze advertentie
-      // als onderwerp. 'Te klein' heeft geen oordeel en dus ook geen knop.
-      const oordeel = lbl
-        ? `<button type="button" class="perf-button ${cls}" data-ads-ask="${escapeHtml(c.id)}" title="${escapeHtml(perfTooltip(c))} — klik om de agent te vragen waarom">${lbl}</button>`
-        : `<span style="color:var(--fg-muted);" title="${escapeHtml(perfTooltip(c))}">te klein</span>`;
       return `<tr>
         <td>${escapeHtml(c.caption || c.name || "—")}${c.isAd && c.subtitle ? `<br><span class="muted" style="font-size:11px;">${escapeHtml(c.subtitle)}</span>` : ""}</td>
         <td>€ ${fmt.int(Math.round(c.spend || 0))}</td>
@@ -2025,7 +2001,7 @@
         <td>${roas != null ? roas.toFixed(1).replace(".", ",") + "×" : "—"}</td>
         <td>${c.frequency != null ? fmtFreq(c.frequency) : "—"}</td>
         <td>${c.objective ? escapeHtml(objectiveLabel(c.objective)) : "—"}</td>
-        <td>${oordeel}</td>
+        <td>${benchCell(c)}</td>
       </tr>`;
     }).join("");
     root.innerHTML = `<div class="report-table">
@@ -2044,9 +2020,9 @@
     </div>
     <p class="source-line">Bron: Windsor.ai, connector <b>facebook</b> (Meta Ads) · ${camps.length} ${camps.some(c => c.isAd) ? "advertenties" : "campagnes"}, ${metKosten} met kosten`
       + `${camps.length > 12 && !state.adsShowAll ? ` · de eerste twaalf in deze sortering staan hier` : ""}. `
-      + `Het oordeel vergelijkt binnen deze periode tegen de mediaan; bij minder dan vijf campagnes zegt dat te weinig. `
+      + `'t.o.v. gemiddelde' legt elke advertentie naast het gemiddelde van alle advertenties in deze periode: ROAS zodra er aankopen zijn, anders CTR. `
       + `Frequentie = hoe vaak één persoon de advertentie gemiddeld zag; doel = het campagnedoel in Ads Manager. `
-      + `Klik op een kolomkop om te sorteren, op een oordeel om de agent te vragen waarom.</p>`
+      + `Klik op een kolomkop om te sorteren.</p>`
       + (camps.length > 12
         ? `<button type="button" class="btn tiny" style="margin-top:10px;" data-ads-all>${state.adsShowAll ? "Toon de eerste twaalf" : `Toon alle ${camps.length}`}</button>`
         : "");
@@ -2055,7 +2031,7 @@
 
   const ADS_COLS = [
     ["name", "Advertentie"], ["spend", "Kosten"], ["impressions", "Vertoningen"], ["ctr", "CTR"],
-    ["roas", "ROAS"], ["frequency", "Freq."], ["objective", "Doel"], ["performance", "Oordeel"],
+    ["roas", "ROAS"], ["frequency", "Freq."], ["objective", "Doel"], ["benchIndex", "t.o.v. gemiddelde"],
   ];
   // Waarde waarop gesorteerd wordt; null = ontbreekt (komt altijd onderaan).
   function adsSortValue(c, key) {
@@ -2067,7 +2043,7 @@
       case "roas": return c.roas != null && c.spend > 0 ? c.roas : null;
       case "frequency": return c.frequency;
       case "objective": return c.objective ? objectiveLabel(c.objective).toLowerCase() : null;
-      case "performance": return { Good: 3, Average: 2, Bad: 1 }[c.performance] || null;
+      case "benchIndex": return c.benchIndex;
       default: return null;
     }
   }
@@ -2088,40 +2064,6 @@
     });
     const all = root.querySelector("[data-ads-all]");
     if (all) all.onclick = () => { state.adsShowAll = !state.adsShowAll; renderAdsTable(); };
-    root.querySelectorAll("[data-ads-ask]").forEach(b => {
-      b.onclick = () => askAgentAboutAd(camps.find(c => String(c.id) === b.dataset.adsAsk));
-    });
-  }
-
-  // Opent de agent met deze advertentie als onderwerp. De vraag wordt klaargezet,
-  // niet verstuurd: de gebruiker past hem aan of drukt zelf op Enter. De cijfers
-  // gaan mee in de vraag, want de chat krijgt alleen de top-drie advertenties in
-  // zijn context mee en zou deze anders niet kennen.
-  function askAgentAboutAd(c) {
-    if (!c) return;
-    const LBL = { Good: "sterk", Average: "gemiddeld", Bad: "zwak" };
-    const oordeel = LBL[c.performance] || "zonder oordeel";
-    const doel = c.purchases > 0 ? `${fmt.int(c.purchases)} aankopen` : (c.leads > 0 ? `${fmt.int(c.leads)} leads` : "geen conversies");
-    const feiten = [
-      `kosten € ${fmt.int(Math.round(c.spend || 0))}`,
-      `${fmt.int(c.impressions || 0)} vertoningen`,
-      c.ctr != null ? `CTR ${c.ctr.toFixed(2).replace(".", ",")}%` : null,
-      c.cpm ? `CPM € ${c.cpm.toFixed(2).replace(".", ",")}` : null,
-      c.frequency != null ? `frequentie ${fmtFreq(c.frequency)}` : null,
-      c.objective ? `doel ${objectiveLabel(c.objective)}` : null,
-      doel,
-      c.roas != null ? `ROAS ${c.roas.toFixed(2).replace(".", ",")}×` : null,
-    ].filter(Boolean).join(", ");
-    toggleChatPanel(true);
-    // Platte tekst (geen html:true): de advertentienaam komt uit Meta en is dus
-    // niet door ons geschreven.
-    pushBot({ text: `${c.caption || "Deze advertentie"} scoort ${oordeel}. ${perfTooltip(c)}. Stel hieronder je vraag, of verstuur de voorgestelde.` });
-    const input = $("#chat-input-field");
-    if (input) {
-      input.value = `Waarom scoort de advertentie "${c.caption || ""}" ${oordeel} (${feiten})? Wat zou je aanpassen?`;
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    }
   }
 
   /* ---------- Meta Ads: funnel, creatie en doelgroep ----------
@@ -2526,17 +2468,6 @@
   }
   window.__socialTab = setSocialTab;
 
-  function setAdsTab(key) {
-    state.adsTab = key === "advertenties" ? "advertenties" : "campagnes";
-    markTabs("#ads-subtabs", "data-adstab", state.adsTab);
-    $$("[data-adspane]").forEach(p => p.classList.toggle("on", p.dataset.adspane === state.adsTab));
-    if (state.adsTab === "advertenties") {
-      state.libraryFilter = "ads";
-      mountLibrary($('[data-adspane="advertenties"]'));
-      renderLibrary();
-    }
-  }
-
   // TikTok en LinkedIn organisch: er staat nog geen account in Windsor, dus er
   // zijn geen veldnamen om tegen te verifiëren. Nooit nullen tonen — zeg wat er
   // ontbreekt. Met een account-id in de Config-tab maar zonder koppeling in de
@@ -2554,15 +2485,605 @@
       </div>`;
   }
 
+  /* ---------- Ads: één tab per advertentieplatform ----------
+     Zelfde opzet als Social: een overzicht en daarna één tab per platform, elk
+     met zijn logo. Een platform zonder datakoppeling krijgt toch een tab, die
+     zegt wat er moet gebeuren — nooit nullen.
+     Spend en ROAS met oordeel horen in de ROAS-tab. Hier staat wat een platform
+     oplevert in zijn eigen termen (leads, conversies), zonder omzet: anders
+     staan er twee ROAS'en op twee plekken. */
+  const ADS_TABS = [
+    { key: "overzicht", label: "Overzicht" },
+    { key: "meta",     label: "Meta Ads",     icon: "facebook" },
+    { key: "google",   label: "Google Ads",   icon: "googleads" },
+    { key: "tiktok",   label: "TikTok Ads",   icon: "tiktok",   connector: "tiktok",   config: "TikTok ad account" },
+    { key: "linkedin", label: "LinkedIn Ads", icon: "linkedin", connector: "linkedin", config: "LinkedIn ad account" },
+    { key: "chatgpt",  label: "ChatGPT Ads",  icon: "openai",   connector: null },
+  ];
+  const tabLogo = (icon) => icon ? `<span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/${icon}.svg')"></span>` : "";
+
+  function setAdsTab(key) {
+    // Oude sleutels (van vóór de platformtabs) landen op Meta.
+    if (key === "campagnes" || key === "advertenties") { state.adsMetaView = key; key = "meta"; }
+    const tab = ADS_TABS.find(t => t.key === key) || ADS_TABS[0];
+    state.adsTab = tab.key;
+    markTabs("#ads-subtabs", "data-adstab", tab.key);
+    const pane = ["overzicht", "meta", "google"].includes(tab.key) ? tab.key : "unlinked";
+    $$("[data-adspane]").forEach(p => p.classList.toggle("on", p.dataset.adspane === pane));
+    if (tab.key === "meta") setAdsMetaView(state.adsMetaView);
+    if (tab.key === "overzicht" || tab.key === "google") googleAdsFetch();
+    if (tab.key === "overzicht") renderAdsOverview();
+    if (tab.key === "google") renderGoogleAds();
+    if (pane === "unlinked") renderAdsUnlinked(tab);
+  }
+
+  function setAdsMetaView(view) {
+    state.adsMetaView = view === "advertenties" ? "advertenties" : "campagnes";
+    $$("#ads-meta-toggle [data-adsmeta]").forEach(b => {
+      const on = b.dataset.adsmeta === state.adsMetaView;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+    $$("[data-adsmetapane]").forEach(p => p.classList.toggle("on", p.dataset.adsmetapane === state.adsMetaView));
+    if (state.adsMetaView === "advertenties") {
+      state.libraryFilter = "ads";
+      mountLibrary($('[data-adsmetapane="advertenties"]'));
+      renderLibrary();
+    }
+  }
+
+  // TikTok, LinkedIn en ChatGPT: geen gekoppeld account in Windsor, dus geen
+  // veldnamen om tegen te verifiëren. De ROAS-tab haalt voor TikTok/LinkedIn wél
+  // al spend op zodra er een account-id staat (met kandidaat-velden).
+  function renderAdsUnlinked(tab) {
+    const root = $("#ads-unlinked");
+    if (!root) return;
+    const acc = tab.connector ? state.session?.brand?.accounts?.[tab.connector] : null;
+    let titel, lede;
+    if (!tab.connector) {
+      titel = `${escapeHtml(tab.label)} heeft nog geen koppeling`;
+      lede = `Windsor.ai heeft nog geen connector voor ${escapeHtml(tab.label)}, dus het dashboard kan de campagnes niet ophalen. `
+        + `Zodra die er is, komt de data in deze tab.`;
+    } else if (acc) {
+      titel = `${escapeHtml(tab.label)} staat in de Config-tab, de data volgt nog`;
+      lede = `Het account is ingesteld. De kosten verschijnen al in de ROAS-tab; de campagnes in deze tab worden gebouwd `
+        + `zodra het account in Windsor.ai gekoppeld is, zodat de veldnamen eerst gecontroleerd kunnen worden.`;
+    } else {
+      titel = `${escapeHtml(tab.label)} is nog niet gekoppeld`;
+      lede = `Koppel het advertentieaccount in Windsor.ai (connector <b>${escapeHtml(tab.connector)}</b>) en zet de account-id `
+        + `in de Config-tab onder <b>${escapeHtml(tab.config)}</b>.`;
+    }
+    root.innerHTML = `<div class="report-head">
+        <p class="eyebrow">${tabLogo(tab.icon)}${escapeHtml(tab.label)}</p>
+        <h2 class="report-title">${titel}</h2>
+        <p class="report-lede">${lede}</p>
+      </div>`;
+  }
+
+  /* ---------- Google Ads: ophalen ---------- */
+
+  function googleAdsFetch() {
+    if (!state.session?.hasWindsor) return;
+    const start = state.period.start, end = state.period.end;
+    if (!start || !end) return;
+    const cmp = compareRange(start, end);
+    const key = `${state.session.clientId}|${start}|${end}|${cmp.start}|${cmp.end}`;
+    if (state.googleAdsLoading && state.googleAdsKey === key) return;
+    if (state.googleAds && state.googleAdsKey === key) return;
+    state.googleAdsKey = key;
+    state.googleAdsLoading = true;
+    state.googleAdsError = null;
+    state.googleAds = null;
+    windsorCall("getGoogleAds", {
+      startDate: start, endDate: end,
+      compareStartDate: cmp.start, compareEndDate: cmp.end,
+    })
+      .then((res) => {
+        if (state.googleAdsKey !== key) return;   // periode gewisseld tijdens fetch
+        state.googleAds = res;
+      })
+      .catch((err) => {
+        if (state.googleAdsKey !== key) return;
+        state.googleAdsError = err.message || "Onbekende fout bij het laden van Google Ads.";
+        if (err.status === 401) { clearSession(); setTimeout(() => showScreen("login-screen"), 600); }
+      })
+      .finally(() => {
+        if (state.googleAdsKey !== key) return;
+        state.googleAdsLoading = false;
+        if (state.page === "ads" && state.adsTab === "google") renderGoogleAds();
+        if (state.page === "ads" && state.adsTab === "overzicht") renderAdsOverview();
+        if (state.page === "overview" && state.homeTab === "overzicht") renderHome();
+      });
+  }
+  window.__refreshGoogleAds = () => { state.googleAds = null; state.googleAdsKey = null; googleAdsFetch(); renderGoogleAds(); };
+
+  /* ---------- Formatters en delta ---------- */
+
+  const gFmt = {
+    eur: (n) => (n == null || !isFinite(n)) ? "—" : "€ " + Math.round(n).toLocaleString("nl-NL"),
+    eur2: (n) => (n == null || !isFinite(n)) ? "—" : "€ " + n.toFixed(2).replace(".", ","),
+    int: (n) => (n == null || !isFinite(n)) ? "—" : Math.round(n).toLocaleString("nl-NL"),
+    // Google Ads kent fractionele conversies (datagedreven attributie).
+    // Vanaf 100 zegt een decimaal niets meer; daaronder wel (2,5 leads).
+    conv: (n) => (n == null || !isFinite(n)) ? "—" : n.toLocaleString("nl-NL", { maximumFractionDigits: n >= 100 ? 0 : 1 }),
+    pct: (n) => (n == null || !isFinite(n)) ? "—" : (n * 100).toFixed(n < 0.1 ? 1 : 0).replace(".", ",") + "%",
+    pct2: (n) => (n == null || !isFinite(n)) ? "—" : (n * 100).toFixed(2).replace(".", ",") + "%",
+  };
+
+  // mode: 'up' = hoger is beter, 'down' = lager is beter, 'neutral' = geen
+  // richting (kosten: meer uitgeven is geen winst en geen verlies).
+  function gDelta(cur, prev, mode) {
+    if (cur == null || prev == null || !isFinite(cur) || !isFinite(prev) || prev === 0) {
+      return `<div class="delta none">geen vergelijking</div>`;
+    }
+    const d = (cur - prev) / prev;
+    const cls = mode === "neutral" ? "none" : ((mode === "down" ? d <= 0 : d >= 0) ? "up" : "down");
+    return `<div class="delta ${cls}">${d >= 0 ? "↑" : "↓"} ${(Math.abs(d) * 100).toFixed(1).replace(".", ",")}% <span class="vs">${escapeHtml(compareLabel())}</span></div>`;
+  }
+
+  function gCard(label, value, deltaHtml, sub, cvar) {
+    return `<div class="kpi-card">
+      <div class="label"><span class="dot" style="background:var(${cvar})"></span>${escapeHtml(label)}</div>
+      <div class="value">${value}</div>
+      ${deltaHtml}
+      <div class="muted" style="font-size:11px;">${sub}</div>
+    </div>`;
+  }
+
+  /* ---------- Google Ads: tab ---------- */
+
+  const GADS_TYPES = { SEARCH: "Zoeken", DISPLAY: "Display", PERFORMANCE_MAX: "Performance Max", SHOPPING: "Shopping", VIDEO: "Video", DEMAND_GEN: "Demand Gen", DISCOVERY: "Discovery", SMART: "Smart", LOCAL: "Lokaal", MULTI_CHANNEL: "App" };
+  const GADS_STATUS = { ENABLED: "actief", PAUSED: "gepauzeerd", REMOVED: "verwijderd" };
+  const gadsType = (t) => GADS_TYPES[String(t || "").toUpperCase()] || (t ? String(t) : "");
+  const gadsStatus = (s) => GADS_STATUS[String(s || "").toUpperCase()] || (s ? String(s).toLowerCase() : "");
+  const GADS_CAMP_LIMIT = 15;
+  const GADS_TERM_LIMIT = 15;
+
+  function renderGoogleAds() {
+    const root = $("#ads-google");
+    if (!root) return;
+    const tab = ADS_TABS.find(t => t.key === "google");
+    const head = (titel, lede) => `<div class="report-head">
+        <p class="eyebrow">${tabLogo(tab.icon)}Google Ads${periodLabel() ? ` · ${escapeHtml(periodLabel())}` : ""}</p>
+        <h2 class="report-title">${titel}</h2>
+        ${lede ? `<p class="report-lede">${lede}</p>` : ""}
+      </div>`;
+    if (!state.session?.hasWindsor) {
+      root.innerHTML = head("Geen Windsor-koppeling", "Voor deze klant is geen Windsor-koppeling ingesteld, dus geen Google Ads.");
+      return;
+    }
+    if (state.googleAdsLoading || (!state.googleAds && !state.googleAdsError)) {
+      root.innerHTML = head("Google Ads wordt opgehaald…", "")
+        + `<div class="skel-line" style="width:100%; height:200px; border-radius:14px;"></div>`;
+      return;
+    }
+    if (state.googleAdsError) {
+      root.innerHTML = head("Google Ads kon niet geladen worden", escapeHtml(state.googleAdsError))
+        + `<button class="btn primary" onclick="window.__refreshGoogleAds()">Opnieuw proberen</button>`;
+      return;
+    }
+    const g = state.googleAds;
+    if (!g.linked) {
+      root.innerHTML = head("Google Ads is nog niet gekoppeld",
+        `Koppel het advertentieaccount in Windsor.ai (connector <b>google_ads</b>) en zet de account-id in de Config-tab onder <b>Google Ads account</b>, met streepjes: <code>123-456-7890</code>.`);
+      return;
+    }
+    const t = g.current.totals;
+    const p = g.previous ? g.previous.totals : null;
+    if (!t.cost && !t.impressions) {
+      root.innerHTML = head("Geen Google Ads-campagnes in deze periode",
+        `Account ${escapeHtml(g.account)} had geen vertoningen of kosten tussen ${escapeHtml(g.period.startDate)} en ${escapeHtml(g.period.endDate)}.`)
+        + gadsFooter(g);
+      return;
+    }
+    const titel = t.conversions > 0
+      ? `${gFmt.eur(t.cost)} aan Google Ads leverde <b>${gFmt.conv(t.conversions)} conversies</b> op, ${gFmt.eur2(t.cpa)} per conversie`
+      : `${gFmt.eur(t.cost)} aan Google Ads, <b>zonder gemeten conversie</b>`;
+    root.innerHTML = head(titel, "Wat de campagnes kostten en opleverden, hoeveel van de zoekvraag ze zagen, en op welke zoektermen het budget landde.")
+      + gadsKpis(g)
+      + gadsConvActions(g)
+      + gadsDaily(g)
+      + gadsCampaigns(g)
+      + gadsImpressionShare(g)
+      + gadsSearchTerms(g)
+      + gadsDevices(g)
+      + gadsFooter(g);
+  }
+
+  // Heeft deze respons iets om te tonen? Het rapport gebruikt dezelfde toets:
+  // een niet-gekoppeld account of een lege periode levert geen slide op.
+  const gadsHasData = (g) => !!(g && g.linked && g.current && (g.current.totals.cost || g.current.totals.impressions));
+
+  function gadsKpis(g) {
+    if (!gadsHasData(g)) return "";
+    const t = g.current.totals;
+    const p = g.previous ? g.previous.totals : null;
+    const kaarten = [
+      gCard("Kosten", gFmt.eur(t.cost), gDelta(t.cost, p && p.cost, "neutral"),
+        `${g.current.campaigns.length} campagnes`, "--kpi-1"),
+      gCard("Kliks", gFmt.int(t.clicks), gDelta(t.clicks, p && p.clicks, "up"),
+        `CTR ${gFmt.pct2(t.ctr)} · ${gFmt.eur2(t.cpc)} per klik`, "--kpi-2"),
+      gCard("Conversies", gFmt.conv(t.conversions), gDelta(t.conversions, p && p.conversions, "up"),
+        `${gFmt.pct2(t.convRate)} van de kliks`, "--kpi-3"),
+      gCard("Kosten per conversie", gFmt.eur2(t.cpa), gDelta(t.cpa, p && p.cpa, "down"),
+        "kosten ÷ conversies", "--kpi-4"),
+    ];
+    return `<div class="kpi-grid" style="margin-bottom:var(--grid-gap);">${kaarten.join("")}</div>`;
+  }
+
+  // Wat 'een conversie' is, verschilt per account: bij een leadklant een
+  // formulier, bij een webshop een aankoop. Zonder deze lijst leest niemand
+  // het cijfer hierboven juist.
+  function gadsConvActions(g) {
+    if (!gadsHasData(g)) return "";
+    const acts = g.conversionActions || [];
+    if (!acts.length) return "";
+    const max = acts[0].conversions || 1;
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Wat telt als conversie</h2>
+        <div class="panel-sub">De conversieacties achter het totaal, zoals Google Ads ze telt</div>
+      </div></div>
+      ${acts.slice(0, 8).map(a => `<div class="geo-bar">
+        <div class="lbl" style="flex:0 0 42%; min-width:0;"><span class="row-caption" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</span></div>
+        <div class="track" style="flex:1; height:8px; background:var(--panel); border-radius:4px; overflow:hidden;"><div style="width:${Math.max(1, Math.round((a.conversions / max) * 100))}%; height:100%; background:var(--accent-data);"></div></div>
+        <div style="flex:0 0 110px; text-align:right;">${gFmt.conv(a.conversions)} · ${gFmt.pct(a.share)}</div>
+      </div>`).join("")}
+      <p class="source-line">Alleen de acties die Google Ads als 'conversie' meetelt (primaire acties). Secundaire acties zoals paginaweergaven zitten in <i>alle conversies</i> en staan hier bewust niet.${acts.length > 8 ? ` De ${acts.length - 8} kleinste acties zijn weggelaten.` : ""}</p>
+    </section>`;
+  }
+
+  // Twee grafieken onder elkaar, elk met een eigen nulas: kosten en conversies
+  // hebben een andere eenheid, en een tweede as verbergt dat.
+  function gadsDaily(g) {
+    if (!gadsHasData(g)) return "";
+    const days = g.current.daily || [];
+    if (days.length < 2 || !window.Charts) return "";
+    const x = days.map(d => { const [, m, dd] = d.date.split("-"); return `${Number(dd)}/${Number(m)}`; });
+    // Geen kleur meegeven: charts.js leest de datakleur zelf uit de tokens en
+    // bakt een echte hexwaarde in de SVG (nodig voor de pptx-export).
+    const chart = (values, leftFormat) => chartSvg({
+      width: 760, height: 180, x, maxXLabels: 8, leftFormat,
+      series: [{ values, kind: "bar" }],
+    });
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Per dag</h2>
+        <div class="panel-sub">Kosten en conversies, elk op een eigen as</div>
+      </div></div>
+      <p class="label-head" style="margin:10px 0 4px;">Kosten</p>
+      ${chart(days.map(d => d.cost), (v) => "€ " + fmt.k(v))}
+      <p class="label-head" style="margin:14px 0 4px;">Conversies</p>
+      ${chart(days.map(d => d.conversions), (v) => fmt.k(v))}
+    </section>`;
+  }
+
+  function gadsCampaigns(g) {
+    if (!gadsHasData(g)) return "";
+    const camps = g.current.campaigns || [];
+    if (!camps.length) return "";
+    const shown = state.googleAdsShowAll ? camps : camps.slice(0, GADS_CAMP_LIMIT);
+    const rows = shown.map(c => {
+      const is = c.impressionShare;
+      const sub = [gadsType(c.type), gadsStatus(c.status)].filter(Boolean).join(" · ");
+      return `<tr>
+        <td><span class="row-caption" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>${sub ? `<br><span class="muted" style="font-size:11px;">${escapeHtml(sub)}</span>` : ""}</td>
+        <td class="right">${gFmt.eur(c.cost)}</td>
+        <td class="right">${gFmt.int(c.impressions)}</td>
+        <td class="right">${gFmt.int(c.clicks)}</td>
+        <td class="right">${gFmt.pct2(c.ctr)}</td>
+        <td class="right">${gFmt.conv(c.conversions)}</td>
+        <td class="right"><strong>${gFmt.eur2(c.cpa)}</strong></td>
+        <td class="right">${is ? gFmt.pct(is.share) : "—"}</td>
+        <td class="right">${is ? gFmt.pct(is.lostBudget) : "—"}</td>
+        <td class="right">${is ? gFmt.pct(is.lostRank) : "—"}</td>
+      </tr>`;
+    }).join("");
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Campagnes</h2>
+        <div class="panel-sub">Gesorteerd op kosten · ${camps.length} campagnes met vertoningen of kosten</div>
+      </div></div>
+      <div class="lib-table geo-fit gads-table"><table>
+        <thead><tr>
+          <th>Campagne</th><th class="right">Kosten</th><th class="right">Vertoningen</th><th class="right">Kliks</th>
+          <th class="right">CTR</th><th class="right">Conversies</th><th class="right">Per conversie</th>
+          <th class="right" title="Aandeel van de vertoningen waar de campagne recht op had">Vertoningsaandeel</th>
+          <th class="right" title="Gemist omdat het budget op was">Gemist: budget</th>
+          <th class="right" title="Gemist door een te laag bod of een lage advertentiekwaliteit">Gemist: rang</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      ${camps.length > GADS_CAMP_LIMIT ? `<button type="button" class="btn tiny" style="margin-top:10px;" onclick="window.__gadsToggleAll()">${state.googleAdsShowAll ? `Toon de eerste ${GADS_CAMP_LIMIT}` : `Toon alle ${camps.length}`}</button>` : ""}
+      <p class="source-line">Vertoningsaandeel bestaat alleen voor zoekcampagnes; display en video tonen een streepje.</p>
+    </section>`;
+  }
+  window.__gadsToggleAll = () => { state.googleAdsShowAll = !state.googleAdsShowAll; renderGoogleAds(); };
+
+  // Vertoningsaandeel + gemist door budget + gemist door rang = 100%. Eén
+  // gestapelde balk laat zien waar de rest van de zoekvraag heen ging.
+  function gadsImpressionShare(g) {
+    if (!gadsHasData(g)) return "";
+    const s = g.impressionShare;
+    if (!s) return "";
+    const seg = (v, bg, label) => v > 0 ? `<div title="${escapeHtml(label)}: ${gFmt.pct(v)}" style="width:${(v * 100).toFixed(2)}%; background:${bg};"></div>` : "";
+    const rest = Math.max(0, 1 - s.share - s.lostBudget - s.lostRank);
+    const budgetLeidt = s.lostBudget > s.lostRank;
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Hoeveel van de zoekvraag je zag</h2>
+        <div class="panel-sub">Zoekcampagnes samen, gewogen naar de vertoningen waar ze recht op hadden</div>
+      </div></div>
+      <div style="display:flex; height:14px; border-radius:7px; overflow:hidden; gap:2px; margin:14px 0 10px; background:var(--panel);">
+        ${seg(s.share, "var(--accent-data)", "Getoond")}${seg(s.lostBudget, "var(--slice-4)", "Gemist: budget")}${seg(s.lostRank, "var(--slice-7)", "Gemist: rang")}${seg(rest, "var(--panel-grid)", "Overig")}
+      </div>
+      <!-- Een <p>, geen <div>: de balk is geen SVG en valt uit een pptx; de
+           rapportextractor neemt alinea's wél mee, dus zo reizen de cijfers mee. -->
+      <p class="chart-legend" style="margin:0;">
+        <span class="item"><span class="swatch" style="background:var(--accent-data)"></span>Getoond ${gFmt.pct(s.share)}</span>
+        <span class="item"><span class="swatch" style="background:var(--slice-4)"></span>Gemist door budget ${gFmt.pct(s.lostBudget)}</span>
+        <span class="item"><span class="swatch" style="background:var(--slice-7)"></span>Gemist door rang ${gFmt.pct(s.lostRank)}</span>
+      </p>
+      <p class="source-line">${budgetLeidt
+        ? "Het meeste gemiste aandeel komt door het budget: de advertenties mochten tonen, maar het dagbudget was op. Meer budget levert hier direct meer vertoningen op."
+        : "Het meeste gemiste aandeel komt door de rang: een te laag bod of een lage advertentiekwaliteit. Meer budget helpt hier weinig; een beter bod, betere advertenties of een betere landingspagina wel."}
+        ${s.belowTenShare > 0 ? ` Op ${gFmt.pct(s.belowTenShare)} van de campagnedagen meldde Google 'minder dan 10%'; die tellen hier als 9,99%, dus het werkelijke aandeel ligt iets lager.` : ""}</p>
+    </section>`;
+  }
+
+  function gadsTermHits() {
+    const all = state.googleAds?.searchTerms?.rows || [];
+    const q = (state.googleAdsTermQuery || "").trim().toLowerCase();
+    return q ? all.filter(t => String(t.search_term).toLowerCase().includes(q)) : all;
+  }
+  function gadsTermRows() {
+    const q = (state.googleAdsTermQuery || "").trim();
+    const shown = gadsTermHits().slice(0, GADS_TERM_LIMIT);
+    if (!shown.length) return `<tr><td colspan="6" class="muted" style="padding:18px 0;">Geen zoekterm met “${escapeHtml(q)}” in de top ${(state.googleAds?.searchTerms?.rows || []).length}.</td></tr>`;
+    return shown.map(t => `<tr>
+      <td><span class="row-caption" title="${escapeHtml(t.search_term)}">${escapeHtml(t.search_term)}</span></td>
+      <td class="right">${gFmt.eur2(t.cost)}</td>
+      <td class="right">${gFmt.int(t.clicks)}</td>
+      <td class="right">${gFmt.conv(t.conversions)}</td>
+      <td class="right"><strong>${t.conversions > 0 ? gFmt.eur2(t.cpa) : "—"}</strong></td>
+      <td class="right">${t.campaigns != null ? gFmt.int(t.campaigns) : "—"}</td>
+    </tr>`).join("");
+  }
+  function gadsTermCount() {
+    const all = state.googleAds?.searchTerms?.rows || [];
+    const hits = gadsTermHits();
+    return (state.googleAdsTermQuery || "").trim()
+      ? `${Math.min(hits.length, GADS_TERM_LIMIT)} van ${hits.length} treffers`
+      : `top ${Math.min(all.length, GADS_TERM_LIMIT)} van ${gFmt.int(state.googleAds?.searchTerms?.count ?? all.length)} zoektermen`;
+  }
+  // Alleen de tbody hertekenen: een volledige render zou het invoerveld
+  // vervangen en de focus wegnemen.
+  window.__gadsTermSearch = (v) => {
+    state.googleAdsTermQuery = v;
+    const body = $("#gads-term-rows"), count = $("#gads-term-count");
+    if (body) body.innerHTML = gadsTermRows();
+    if (count) count.textContent = gadsTermCount();
+  };
+
+  function gadsSearchTerms(g) {
+    if (!gadsHasData(g)) return "";
+    const st = g.searchTerms;
+    if (!st || !st.rows.length) return "";
+    const win = g.detailWindow;
+    const w = st.wasted;
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Zoektermen</h2>
+          <div class="panel-sub">Wat mensen echt intypten, gesorteerd op kosten · <span id="gads-term-count">${escapeHtml(gadsTermCount())}</span></div>
+        </div>
+        <label class="web-search">
+          <span class="ico">⌕</span>
+          <input type="search" placeholder="Zoek een term" value="${escapeHtml(state.googleAdsTermQuery || "")}"
+            oninput="window.__gadsTermSearch(this.value)" autocomplete="off">
+        </label>
+      </div>
+      ${w && w.terms > 0 ? callout("watch", "!", "Kosten zonder conversie",
+        `${gFmt.eur(w.cost)} ging naar ${gFmt.int(w.terms)} zoektermen die geen enkele conversie opleverden. Daar zitten de kandidaten voor uitsluitingswoorden.`) : ""}
+      <div class="lib-table geo-fit gads-table"><table>
+        <thead><tr>
+          <th>Zoekterm</th><th class="right">Kosten</th><th class="right">Kliks</th><th class="right">Conversies</th>
+          <th class="right">Per conversie</th><th class="right" title="In hoeveel campagnes deze term een advertentie toonde">Campagnes</th>
+        </tr></thead>
+        <tbody id="gads-term-rows">${gadsTermRows()}</tbody>
+      </table></div>
+      <p class="source-line">Google geeft alleen zoektermen vrij boven een privacydrempel, dus de som van deze tabel haalt het totaal niet.
+        ${g.sheetThrough?.searchTerms ? `De datasheet loopt voor zoektermen tot ${escapeHtml(g.sheetThrough.searchTerms)}; de dagen daarna ontbreken in deze tabel.` : ""}
+        ${win ? `Deze tabel dekt ${escapeHtml(win.startDate)} → ${escapeHtml(win.endDate)} (${win.maxDays} dagen), korter dan de gekozen periode: zoektermen komen per dag binnen en over een lange periode duurt dat te lang. De cijfers bovenaan dekken wél de hele periode.` : ""}</p>
+    </section>`;
+  }
+
+  const GADS_DEVICES = { MOBILE: "Mobiel", DESKTOP: "Desktop", TABLET: "Tablet", CONNECTED_TV: "Tv", OTHER: "Overig" };
+  function gadsDevices(g) {
+    if (!gadsHasData(g)) return "";
+    const rows = (g.devices || []).filter(d => d.cost > 0 || d.impressions > 0);
+    if (rows.length < 2) return "";
+    const tot = rows.reduce((a, d) => a + d.cost, 0);
+    return `<section class="panel" style="margin-bottom:16px;">
+      <div class="panel-header"><div>
+        <h2 class="panel-title">Apparaten</h2>
+        <div class="panel-sub">Waar de kosten en conversies vielen</div>
+      </div></div>
+      <div class="lib-table geo-fit"><table>
+        <thead><tr><th>Apparaat</th><th class="right">Aandeel kosten</th><th class="right">Kliks</th><th class="right">CTR</th><th class="right">Conversies</th><th class="right">Per conversie</th></tr></thead>
+        <tbody>${rows.map(d => `<tr>
+          <td>${escapeHtml(GADS_DEVICES[String(d.device).toUpperCase()] || d.device)}</td>
+          <td class="right">${gFmt.pct(tot > 0 ? d.cost / tot : null)}</td>
+          <td class="right">${gFmt.int(d.clicks)}</td>
+          <td class="right">${gFmt.pct2(d.ctr)}</td>
+          <td class="right">${gFmt.conv(d.conversions)}</td>
+          <td class="right"><strong>${gFmt.eur2(d.cpa)}</strong></td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </section>`;
+  }
+
+  function gadsFooter(g) {
+    const LABEL = { campaigns: "campagnes", previous: "vergelijking", impressionShare: "vertoningsaandeel", searchTerms: "zoektermen", devices: "apparaten", conversionActions: "conversieacties" };
+    const tot = g.sheetThrough || {};
+    const dag = (iso) => { const [, m, d] = iso.split("-"); return `${Number(d)}/${Number(m)}`; };
+    const herkomst = Object.entries(g.origin || {}).map(([k, v]) => `${LABEL[k] || k}: ${v === "sheet" ? `datasheet${tot[k] ? ` t/m ${dag(tot[k])}` : ""}` : "live"}`).join(" · ");
+    const fouten = (g.errors || []).length
+      ? ` <span style="color:var(--negative);">Niet geladen: ${g.errors.map(e => escapeHtml(e)).join("; ")}.</span>` : "";
+    return `<p class="source-line">Bron: Windsor.ai, connector <b>google_ads</b>, account ${escapeHtml(g.account || "")}${herkomst ? ` · ${escapeHtml(herkomst)}` : ""}.
+      Geen omzet of ROAS in deze tab: die staan met break-even-oordeel in de ROAS-tab.${fouten}</p>`;
+  }
+
+  /* ---------- Ads: overzicht over de platforms ---------- */
+
+  // Meta: kosten, vertoningen en kliks uit de campagnerijen (hele periode).
+  // Resultaten bestaan alleen op advertentieniveau, en dat dekt hooguit het
+  // ad-venster; de kosten per resultaat rekenen we dus binnen dát venster, met
+  // de kosten van datzelfde venster. Resultaat = aankopen als die er zijn,
+  // anders leads (dezelfde regel als de CAC in summary.js).
+  function metaAdsTotals() {
+    const ov = state.overview;
+    const camps = (ov?.adsCampaigns || []).filter(c => c && (c.spend || c.impressions || c.reach));
+    const per = ov?.adsPeriodTotals;
+    if (!camps.length && !per) return null;
+    const som = (k) => camps.reduce((a, c) => a + (Number(c[k]) || 0), 0);
+    const purchases = som("purchases"), leads = som("leads");
+    const results = purchases > 0 ? purchases : (leads > 0 ? leads : null);
+    const venster = camps.some(c => c.isAd) ? ov.adLevelWindow : null;
+    return {
+      cost: per ? per.spend : som("spend"),
+      impressions: per ? per.impressions : som("impressions"),
+      clicks: per ? per.clicks : som("clicks"),
+      results,
+      resultCost: results ? som("spend") / results : null,
+      resultLabel: purchases > 0 ? "aankopen" : "leads",
+      resultWindow: venster,
+    };
+  }
+
+  function renderAdsOverview() {
+    const root = $("#ads-overview");
+    if (!root) return;
+    root.innerHTML = adsOverviewHtml();
+  }
+
+  // opts.withHead: met de rapportkop erboven (tab), of alleen kaarten + tabel (rapport).
+  function adsOverviewHtml(opts = { withHead: true }) {
+    const g = state.googleAds;
+    const { meta, google, metaLoading, googleLoading } = adsPlatformTotals();
+
+    const accounts = state.session?.brand?.accounts || {};
+    const status = (key) => {
+      if (key === "meta") return metaLoading ? "laden…" : (meta ? "actief" : "geen campagnes");
+      if (key === "google") {
+        if (googleLoading) return "laden…";
+        if (state.googleAdsError) return "fout bij laden";
+        if (!g || !g.linked) return "niet gekoppeld";
+        return google ? "actief" : "geen campagnes";
+      }
+      const tab = ADS_TABS.find(t => t.key === key);
+      if (!tab.connector) return "geen connector";
+      return accounts[tab.connector] ? "data volgt" : "niet gekoppeld";
+    };
+    const data = { meta, google };
+    const actief = [meta, google].filter(Boolean);
+    const cost = actief.reduce((a, x) => a + x.cost, 0);
+
+    const rij = (tab) => {
+      const d = data[tab.key];
+      const st = status(tab.key);
+      const cpr = d ? d.resultCost : null;
+      const win = d && d.resultWindow ? `<sup title="Laatste ${d.resultWindow.maxDays} dagen: ${escapeHtml(d.resultWindow.startDate)} → ${escapeHtml(d.resultWindow.endDate)}">*</sup>` : "";
+      return `<tr>
+        <td>${opts.static
+          // Het rapport haalt knoppen weg (je kunt er niet op drukken), dus daar een gewone naam.
+          ? `<span style="display:inline-flex; align-items:center; white-space:nowrap;">${tabLogo(tab.icon)}${escapeHtml(tab.label)}</span>`
+          : `<button type="button" class="link-btn" style="all:unset; cursor:pointer; display:inline-flex; align-items:center; white-space:nowrap;" onclick="window.__adsTab('${tab.key}')">${tabLogo(tab.icon)}<span style="text-decoration:underline; text-underline-offset:3px;">${escapeHtml(tab.label)}</span></button>`}</td>
+        <td class="muted">${escapeHtml(st)}</td>
+        <td class="right">${d ? gFmt.eur(d.cost) : "—"}</td>
+        <td class="right">${d && cost > 0 ? gFmt.pct(d.cost / cost) : "—"}</td>
+        <td class="right">${d ? gFmt.int(d.impressions) : "—"}</td>
+        <td class="right">${d ? gFmt.int(d.clicks) : "—"}</td>
+        <td class="right">${d ? gFmt.eur2(d.clicks ? d.cost / d.clicks : null) : "—"}</td>
+        <td class="right">${d && d.results != null ? `${gFmt.conv(d.results)} <span class="muted" style="font-size:11px;">${escapeHtml(d.resultLabel)}</span>${win}` : "—"}</td>
+        <td class="right"><strong>${cpr != null ? gFmt.eur2(cpr) : "—"}</strong>${cpr != null ? win : ""}</td>
+      </tr>`;
+    };
+
+    const per = periodLabel();
+    const titel = metaLoading || googleLoading
+      ? "Advertenties worden opgehaald…"
+      : actief.length
+      ? `${gFmt.eur(cost)} aan advertenties over ${actief.length === 1 ? "één platform" : `${actief.length} platforms`}`
+      : "Geen advertenties in deze periode";
+    const kaarten = adsOverviewCards(meta, google);
+
+    return (opts.withHead ? `<div class="report-head">
+        <p class="eyebrow">Alle advertentieplatforms${per ? ` · ${escapeHtml(per)}` : ""}</p>
+        <h2 class="report-title">${titel}</h2>
+        <p class="report-lede">Per platform wat het kostte en opleverde, in de termen van dat platform. Klik op een platform voor de details.</p>
+      </div>` : "")
+      + kaarten
+      + `<section class="panel" style="margin-bottom:16px;">
+        <div class="panel-header"><div>
+          <h2 class="panel-title">Per platform</h2>
+          <div class="panel-sub">Kosten, bereik en resultaten in de termen van elk platform</div>
+        </div></div>
+        <div class="lib-table geo-fit gads-table"><table>
+          <thead><tr>
+            <th>Platform</th><th>Status</th><th class="right">Kosten</th><th class="right">Aandeel</th><th class="right">Vertoningen</th>
+            <th class="right">Kliks</th><th class="right">Per klik</th><th class="right">Resultaten</th><th class="right">Per resultaat</th>
+          </tr></thead>
+          <tbody>${ADS_TABS.filter(t => t.key !== "overzicht").map(rij).join("")}</tbody>
+        </table></div>
+        <p class="source-line">Kosten, vertoningen en kliks zijn optelbaar over de platforms. Resultaten niet: elk platform telt zijn eigen conversies,
+          met een eigen attributievenster, en claimt soms dezelfde klant. Daarom geen totaal in die kolom.
+          Meta telt aankopen als die er zijn, anders leads; Google Ads telt de primaire conversieacties.
+          ${meta && meta.resultWindow ? `* Meta levert resultaten alleen per advertentie, en dat detail dekt de laatste ${meta.resultWindow.maxDays} dagen (${escapeHtml(meta.resultWindow.startDate)} → ${escapeHtml(meta.resultWindow.endDate)}); de kosten per resultaat zijn over diezelfde dagen gerekend. Kosten, vertoningen en kliks dekken de hele periode.` : ""}
+          Omzet en ROAS met een oordeel per campagne staan in de ROAS-tab.</p>
+      </section>`;
+  }
+  window.__adsTab = (key) => setAdsTab(key);
+
+  // De vier kaarten bovenaan het Ads-overzicht. Ook de Overview-pagina toont
+  // precies deze kaarten, zodat die twee nooit iets anders zeggen.
+  function adsOverviewCards(meta, google) {
+    const actief = [meta, google].filter(Boolean);
+    if (!actief.length) return "";
+    const cost = actief.reduce((a, x) => a + x.cost, 0);
+    const clicks = actief.reduce((a, x) => a + x.clicks, 0);
+    const impr = actief.reduce((a, x) => a + x.impressions, 0);
+    const grootste = (meta?.cost || 0) >= (google?.cost || 0) ? "Meta" : "Google Ads";
+    return `<div class="kpi-grid" style="margin-bottom:var(--grid-gap);">
+        ${homeCard("Kosten", gFmt.eur(cost), actief.map(x => x === meta ? "Meta" : "Google Ads").join(" + "), "--kpi-1")}
+        ${homeCard("Vertoningen", fmt.k(impr), "opgeteld over de platforms", "--kpi-2")}
+        ${homeCard("Kliks", fmt.k(clicks), clicks ? `${gFmt.eur2(cost / clicks)} per klik` : "—", "--kpi-3")}
+        ${homeCard("Grootste platform", cost > 0 ? grootste : "—",
+          cost > 0 ? `${gFmt.pct(Math.max(meta?.cost || 0, google?.cost || 0) / cost)} van de kosten` : "—", "--kpi-4")}
+      </div>`;
+  }
+
+  // Meta- en Google Ads-totalen zoals het Ads-overzicht ze gebruikt.
+  function adsPlatformTotals() {
+    const ov = state.overview;
+    const g = state.googleAds;
+    const metaLoading = !ov || state.overviewLoading || ov.adsLoading;
+    const googleLoading = !!state.session?.hasWindsor && (state.googleAdsLoading || (!g && !state.googleAdsError));
+    const meta = metaLoading ? null : metaAdsTotals();
+    const google = g && g.linked && g.current && (g.current.totals.cost || g.current.totals.impressions)
+      ? { cost: g.current.totals.cost, impressions: g.current.totals.impressions, clicks: g.current.totals.clicks,
+          results: g.current.totals.conversions, resultCost: g.current.totals.cpa, resultLabel: "conversies" }
+      : null;
+    return { meta, google, metaLoading, googleLoading };
+  }
+
   function setHomeTab(key) {
-    state.homeTab = ["analyse", "merk"].includes(key) ? key : "overzicht";
+    state.homeTab = key === "merk" ? "merk" : "overzicht";
     markTabs("#home-subtabs", "data-hometab", state.homeTab);
     $$("[data-homepane]").forEach(p => p.classList.toggle("on", p.dataset.homepane === state.homeTab));
     if (state.homeTab === "overzicht") renderHome();
-    if (state.homeTab === "analyse") renderAnalysis();
     if (state.homeTab === "merk") brandFetch();
   }
-  window.__openAnalysis = () => { state.homeTab = "analyse"; switchPage("overview"); };
 
   function bindSubtabs() {
     const home = $("#home-subtabs");
@@ -2579,6 +3100,11 @@
     if (ads) ads.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-adstab]");
       if (btn) setAdsTab(btn.dataset.adstab);
+    });
+    const meta = $("#ads-meta-toggle");
+    if (meta) meta.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-adsmeta]");
+      if (btn) setAdsMetaView(btn.dataset.adsmeta);
     });
   }
 
@@ -2772,15 +3298,8 @@
   function platformShort(p) { return { ig: "IG", fb: "FB", ads: "ADS" }[p] || (p || "").toUpperCase(); }
 
   // Tab-key per platform & type
-  function librarySourceOf(post) {
-    if (post.platform === "ig") return post.type === "Reel" ? "ig-reels" : "ig-posts";
-    if (post.platform === "fb") {
-      const video = post.type === "Reel" || post.type === "Video" || /video|reel/i.test(post.kind || "");
-      return video ? "fb-reels" : "fb-posts";
-    }
-    if (post.platform === "ads") return "ads";
-    return "other";
-  }
+  // Kanaaltab van een post; dezelfde groepen als de benchmark (summary.js).
+  const librarySourceOf = postGroupOf;
 
   function getLibraryAllPosts() {
     if (!state.overview) return [];
@@ -2819,18 +3338,33 @@
     });
   }
 
-  // Label komt nu uit de bucketed classifier (classifyPerformance), gezet op de post.
-  function computePerformance(post) {
-    if (!post) return null;
-    return post.performance || null; // null → "n/a"; ads krijgen label via classifyAdsPerformance
+  // Benchmarkcel: afwijking t.o.v. het gemiddelde van de eigen groep in deze
+  // periode (benchmarkPosts in summary.js). Geen oordeel: alleen boven, rond of
+  // onder het gemiddelde. Binnen ±10% heet 'rond het gemiddelde' en blijft neutraal.
+  const BENCH_FLAT = 0.1;
+  const benchFmt = (b, v) => v == null ? "—"
+    : b.metric === "roas" ? `${v.toFixed(2)}×` : `${v.toFixed(1).replace(".", ",")}%`;
+
+  function benchTooltip(post) {
+    const b = post && post.bench;
+    if (!b) return "";
+    if (b.value == null) return `Geen ${b.label.toLowerCase()} gemeten voor deze post.`;
+    if (post.benchIndex == null) {
+      return `Te weinig ${b.groupLabel} in deze periode voor een gemiddelde (${b.n}, minimaal 3).`;
+    }
+    return `${b.label} ${benchFmt(b, b.value)} tegenover gemiddeld ${benchFmt(b, b.avg)} `
+      + `voor ${b.groupLabel} in deze periode (${b.n} posts).`;
   }
 
-  // Tooltip die het "waarom" achter het label toont (per spec).
-  function perfTooltip(post) {
-    if (!post || post.perfRatio == null) {
-      return "Te weinig vergelijkbare posts in deze periode voor een betrouwbaar oordeel.";
-    }
-    return `Score ${post.perfRatio.toFixed(2)}× benchmark voor ${post.perfBucket || "deze content"} → ${post.performance}`;
+  function benchCell(post) {
+    const tip = escapeHtml(benchTooltip(post));
+    const i = post && post.benchIndex;
+    if (i == null) return `<span class="muted" title="${tip}">—</span>`;
+    const dev = i - 1;
+    const pct = Math.round(dev * 100);
+    const cls = dev >= BENCH_FLAT ? "up" : dev <= -BENCH_FLAT ? "down" : "flat";
+    const txt = pct === 0 ? "±0%" : `${pct > 0 ? "+" : "−"}${Math.abs(pct)}%`;
+    return `<span class="bench ${cls}" title="${tip}">${txt}</span>`;
   }
 
   function getFilteredLibrary() {
@@ -2845,22 +3379,8 @@
     return sortLibrary(list, state.librarySort.key, state.librarySort.dir);
   }
 
-  function performanceExplanation(level) {
-    const brand = state.session?.brandName || "de klant";
-    if (level === "Good")    return `Deze post doet het beter dan ${brand}s gemiddelde. Houd dit format aan en bouw voort op dezelfde contentstijl.`;
-    if (level === "Average") return `Deze post zit rond de klantbenchmark. Er is voldoende engagement om mee te werken, maar de eerste 3 seconden kunnen sterker.`;
-    if (level === "Bad")     return `Deze post presteert duidelijk onder ${brand}s benchmark. Begin bij de hook en het format.`;
-    return "Deze performantie-indicator vergelijkt de post met de klantbenchmark.";
-  }
-
   function findLibraryPost(id) {
     return getLibraryAllPosts().find(p => String(p.id) === String(id)) || null;
-  }
-
-  function openPerformanceChat(level, post) {
-    toggleChatPanel(true);
-    const why = post ? `<br><span class="muted">${escapeHtml(perfTooltip(post))}</span>` : "";
-    pushBot({ text: `<strong>${level}</strong> — ${performanceExplanation(level)}${why}` });
   }
 
   // Open de IG/FB-permalink van een post in een nieuw tabblad.
@@ -2891,14 +3411,7 @@
       if (!hasUrl) return;
       el.style.cursor = "pointer";
       el.onclick = (e) => {
-        if (e.target.closest(".perf-button")) return; // perf-knop heeft eigen actie
         openPostLink(el.dataset.post);
-      };
-    });
-    $$("#lib-results .perf-button").forEach((btn) => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        openPerformanceChat(btn.dataset.performance, findLibraryPost(btn.dataset.post));
       };
     });
   }
@@ -2974,7 +3487,7 @@
     const sum = (field) => list.reduce((s, item) => s + (item[field] || 0), 0);
     const avgPerf = list.reduce((sum, item) => sum + (item.engagement || 0), 0) / list.length;
     const filterLabel = getLibraryFilterDefs().find(f => f.key === state.libraryFilter)?.label || "Alle";
-    const platformName = state.libraryFilter === 'all' ? 'Globaal gemiddelde' : `${filterLabel} gemiddelde`;
+    const platformName = state.libraryFilter === 'all' ? 'alle posts' : filterLabel;
 
     // Paid-totalen → afgeleide ratio's (account-niveau, correcter dan gemiddelde-van-ratio's).
     let paidCells = "", ctrCell = "<td></td>";
@@ -2993,7 +3506,7 @@
     }
 
     return `<tr class="benchmark-row">
-      <td>CLIENT BENCHMARK — ${escapeHtml(platformName)}</td><td></td><td></td><td></td>
+      <td>GEMIDDELDE — ${escapeHtml(platformName)}</td><td></td><td></td><td></td>
       <td class="right">${fmt.int(avg('views'))}</td>
       <td class="right">${fmt.int(avg('reach'))}</td>
       <td class="right">${fmt.int(avg('likes'))}</td>
@@ -3043,16 +3556,12 @@
         <th class="right">Watch / Retention</th>
         <th class="right sortable" data-sort="engagement">Engage${sortArrow("engagement")}</th>
         <th class="right sortable" data-sort="ctr">CTR${sortArrow("ctr")}</th>${paidHead}
-        <th class="right">Performantie</th>
+        <th class="right sortable" data-sort="benchIndex" title="Afwijking t.o.v. het gemiddelde van dezelfde groep in deze periode">t.o.v. gemiddelde${sortArrow("benchIndex")}</th>
       </tr></thead>
       <tbody>
         ${renderBenchmarkRow(list, showPaid)}
         ${list.map((p, i) => {
           const t = libThumb(p, i, { imgClass: "row-thumb-img" });
-          const performance = computePerformance(p);
-          const perfHtml = performance
-            ? `<button class="perf-button ${performance.toLowerCase()}" data-performance="${performance}" data-post="${escapeHtml(p.id)}" title="${escapeHtml(perfTooltip(p))}">${performance}</button>`
-            : `<span class="muted" title="${escapeHtml(perfTooltip(p))}">n/a</span>`;
           return `
           <tr data-post="${escapeHtml(p.id)}">
             <td><span class="row-thumb thumb-pattern" style="background:${t.bg}">${t.imgHtml}</span><span class="row-caption">${escapeHtml(p.caption)}${p.subtitle ? ` <span class="muted">· ${escapeHtml(p.subtitle)}</span>` : ""}</span></td>
@@ -3068,7 +3577,7 @@
             <td class="right">${renderWatchRetentionCell(p)}</td>
             <td class="right">${(p.engagement || 0).toFixed(1)}%</td>
             <td class="right">${(p.ctr || 0).toFixed(1)}%</td>${paidCells(p)}
-            <td class="right">${perfHtml}</td>
+            <td class="right">${benchCell(p)}</td>
           </tr>`;
         }).join("")}
       </tbody>
@@ -3170,143 +3679,7 @@
 
   /* ---------- Connectors-paneel (Blok D, dynamisch o.b.v. session) ---------- */
 
-  /* ---------- Methodology-tab (Blok E) ---------- */
-
-  // Beschrijft per actieve databron welke platforms/velden beschikbaar zijn en wat ontbreekt.
-  function dataCoverage() {
-    const s = state.session || {};
-    if (s.hasWindsor) {
-      return {
-        sources: ["Windsor.ai"],
-        platforms: ["Instagram (organic)", "Meta Ads (per advertentie)"],
-        present: ["Caption, type, datum", "Reach, views, likes, comments, shares, saves", "Engagement", "Gem. kijktijd (reels)", "Meta Ads per advertentie: reach, clicks, spend, CTR, retentiecurve"],
-        missing: [
-          ["Facebook organic", "Connector-slug nog niet bevestigd in Windsor — tijdelijk niet opgehaald."],
-          ["Retentiecurve organic", "Instagram's API exposeert dit niet voor organic content; alleen gem. kijktijd is beschikbaar."],
-          ["KPI-delta's", "Tegen de vergelijking uit de topbar: even lange periode direct ervoor, of dezelfde dagen vorig jaar. Organisch bereik, interacties, publicaties en kliks; niet op advertentieniveau. Uit de datasheet als die ver genoeg terugloopt, anders live."],
-        ],
-      };
-    }
-    if (s.hasMetricool) {
-      return {
-        sources: ["Metricool"],
-        platforms: ["Instagram (organic)", "Facebook (organic)", "Meta Ads (campagne-niveau)"],
-        present: ["Caption, type, datum", "Reach, likes, comments, shares, saves", "Engagement, CTR", "Meta Ads: reach, clicks (campagne-niveau)"],
-        missing: [
-          ["Gem. kijktijd / retentie", "Niet beschikbaar via de Metricool dashboard-endpoints."],
-          ["Ad-level analyse", "Alleen campagne-niveau; ad-level inzicht komt via de chat-agent (Meta Ads MCP)."],
-        ],
-      };
-    }
-    return {
-      sources: ["Handmatige upload"],
-      platforms: ["Afhankelijk van de geüploade CSV's"],
-      present: ["Velden zoals aangeleverd in de CSV-export"],
-      missing: [["Live data", "Handmatige flow gebruikt geüploade bestanden in plaats van een live koppeling."]],
-    };
-  }
-
-  function renderMethodology() {
-    const root = $("#methodology-content");
-    if (!root) return;
-    const cfg = PERFORMANCE_CONFIG;
-    const brand = state.session?.brandName || "de klant";
-    const pct = (n) => Math.round(n * 100) + "%";
-
-    // Formule-tabel — getallen komen rechtstreeks uit de config; reden is redactioneel.
-    const typeMeta = {
-      photo:    { label: "Foto",             reason: "Foto's draaien om directe interactie en bewaren." },
-      carousel: { label: "Carrousel",        reason: "Carrousels worden vooral bewaard om later terug te kijken." },
-      reel:     { label: "Reel / IG-video",  reason: "Bij video weegt kijktijd het zwaarst — blijven mensen kijken?" },
-      fbVideo:  { label: "Facebook video",   reason: "Idem als Reels, met iets meer gewicht op directe interactie." },
-      story:    { label: "Story",            reason: "Stories worden zelden bewaard; bereik-aandeel telt mee." },
-    };
-    const formulaRows = Object.keys(cfg.formulas).map(k => {
-      const f = cfg.formulas[k];
-      const m = typeMeta[k] || { label: k, reason: "" };
-      const parts = [];
-      if (f.engagement) parts.push(`${pct(f.engagement)} engagement`);
-      if (f.save) parts.push(`${pct(f.save)} saves`);
-      if (f.watchTime) parts.push(`${pct(f.watchTime)} kijktijd`);
-      if (f.reachShare) parts.push(`${pct(f.reachShare)} bereik-aandeel`);
-      return `<tr>
-        <td><strong>${m.label}</strong></td>
-        <td>${parts.join(" · ")}</td>
-        <td class="muted">${m.reason}</td>
-      </tr>`;
-    }).join("");
-
-    const cov = dataCoverage();
-    const coverageHtml = `
-      <section class="panel" style="margin-top: var(--grid-gap);">
-        <h2 class="panel-title">Welke data wordt opgehaald</h2>
-        <p class="panel-sub" style="margin-bottom:14px;">Verbonden bron(nen): <strong>${cov.sources.map(escapeHtml).join(", ")}</strong></p>
-        <div class="method-grid">
-          <div>
-            <div class="method-subhead">Platforms</div>
-            <ul class="method-list">${cov.platforms.map(p => `<li>${escapeHtml(p)}</li>`).join("")}</ul>
-            <div class="method-subhead" style="margin-top:16px;">Beschikbare velden</div>
-            <ul class="method-list">${cov.present.map(p => `<li>${escapeHtml(p)}</li>`).join("")}</ul>
-          </div>
-          <div>
-            <div class="method-subhead">Wat (nog) ontbreekt</div>
-            <ul class="method-list muted-list">${cov.missing.map(([t, d]) => `<li><strong>${escapeHtml(t)}</strong> — ${escapeHtml(d)}</li>`).join("")}</ul>
-          </div>
-        </div>
-      </section>`;
-
-    root.innerHTML = `
-      <section class="panel">
-        <h2 class="panel-title">Hoe we posts beoordelen</h2>
-        <p class="narrative-body" style="margin-top:8px;">
-          Performance-labels worden berekend op basis van een multi-score per post-type,
-          vergeleken met het gemiddelde van hetzelfde post-type van ${escapeHtml(brand)} in de
-          geselecteerde periode. Zo vergelijken we appels met appels — een Reel alleen met andere Reels.
-        </p>
-      </section>
-
-      <section class="panel" style="margin-top: var(--grid-gap);">
-        <h2 class="panel-title">Good / Average / Bad</h2>
-        <div class="method-thresholds">
-          <div class="thr good"><div class="thr-val">≥ ${cfg.thresholds.good}×</div><div class="thr-lbl">Good</div><div class="muted">minstens ${Math.round((cfg.thresholds.good - 1) * 100)}% boven het format-gemiddelde</div></div>
-          <div class="thr avg"><div class="thr-val">${cfg.thresholds.bad}–${cfg.thresholds.good}×</div><div class="thr-lbl">Average</div><div class="muted">binnen de normale variatie</div></div>
-          <div class="thr bad"><div class="thr-val">&lt; ${cfg.thresholds.bad}×</div><div class="thr-lbl">Bad</div><div class="muted">duidelijk onder gemiddeld</div></div>
-        </div>
-      </section>
-
-      <section class="panel" style="margin-top: var(--grid-gap);">
-        <h2 class="panel-title">Score-formule per content-type</h2>
-        <div class="lib-table" style="margin-top:12px;"><table>
-          <thead><tr><th>Type</th><th>Weging</th><th>Waarom</th></tr></thead>
-          <tbody>${formulaRows}</tbody>
-        </table></div>
-      </section>
-
-      <section class="panel" style="margin-top: var(--grid-gap);">
-        <h2 class="panel-title">De variabelen</h2>
-        <ul class="method-list" style="margin-top:10px;">
-          <li><strong>Engagement</strong> — likes, comments en shares ten opzichte van het bereik. Saves tellen hier niet mee (die zitten apart).</li>
-          <li><strong>Saves</strong> — hoe vaak een post bewaard is ten opzichte van het bereik. Een sterk signaal dat content waardevol genoeg is om terug te vinden.</li>
-          <li><strong>Kijktijd</strong> — de gemiddelde kijktijd van een video vergeleken met andere video's van dezelfde soort in deze periode.</li>
-        </ul>
-      </section>
-
-      <section class="panel" style="margin-top: var(--grid-gap);">
-        <h2 class="panel-title">Eerlijke vergelijking & grenzen</h2>
-        <ul class="method-list" style="margin-top:10px;">
-          <li>We vergelijken ${escapeHtml(brand)}s IG-Reels alleen met andere IG-Reels van ${escapeHtml(brand)} — niet met je foto's en niet met andere klanten.</li>
-          <li>Minder dan ${cfg.minBucketSize} posts van een type in de periode? Dan tonen we <strong>n/a</strong> — te weinig vergelijkingsmateriaal voor een eerlijk oordeel.</li>
-          <li>Reels zonder kijktijd-data (oudere posts) vallen terug op een engagement- en saves-score.</li>
-          <li>Meta Ads krijgen een <strong>eigen</strong> Good/Average/Bad — niet de organic-formule. We schakelen automatisch: draaien je ads op conversies, dan scoren we op <strong>ROAS</strong> (return on ad spend); zonder conversie-tracking op <strong>efficiëntie (CTR/CPM)</strong>. Advertenties worden onderling vergeleken (ads vs ads), met dezelfde ${cfg.thresholds.good}× / ${cfg.thresholds.bad}×-grenzen.</li>
-          <li>Pure bereik-groei is op zichzelf geen kwaliteitsindicator; verschillen in algoritme-distributie kunnen scores beïnvloeden.</li>
-        </ul>
-      </section>
-
-      ${coverageHtml}
-    `;
-  }
-
-  /* ---------- Analysis (stap 5) ---------- */
+  /* ---------- Periode- en samenvattingshelpers ---------- */
 
   function analysisPeriodKey() {
     return `${state.period.start}|${state.period.end}`;
@@ -3315,11 +3688,6 @@
   function periodDays() {
     const s = new Date(state.period.start), e = new Date(state.period.end);
     return Math.max(1, Math.round((e - s) / 86400000) + 1);
-  }
-
-  function periodLabelShort() {
-    const s = new Date(state.period.start), e = new Date(state.period.end);
-    return `${fmt.dateNL(s)} – ${fmt.dateNL(e)}`;
   }
 
   // Compacte samenvatting van de SEO-tab. Zoekvolume is marktvraag, positie is
@@ -3378,25 +3746,6 @@
     };
   }
 
-  // Haalt de eigen klant-benchmarks op uit Drive (06_PERFORMANTIE/6.2_Benchmarks).
-  // Volledig best-effort: zonder Drive-koppeling of bij elke fout → "" (standaardanalyse).
-  async function fetchCustomBenchmarks() {
-    if (!state.session?.hasDrive) return "";
-    try {
-      const qs = new URLSearchParams({
-        action: "analysis-benchmarks",
-        clientId: state.session.clientId,
-        token: state.session.token,
-      });
-      const res = await fetch(`/api/drive?${qs.toString()}`);
-      if (!res.ok) return "";
-      const data = await res.json();
-      return data?.found && data.content ? data.content : "";
-    } catch {
-      return "";
-    }
-  }
-
   // Haalt de merk-/strategie-contextbestanden uit Drive op voor de chat-agent.
   // Gecachet per klant (clientId) zodat we het niet elke chat-turn opnieuw ophalen én
   // zodat context van klant A nooit naar klant B lekt bij een sessiewissel.
@@ -3420,261 +3769,8 @@
     }
   }
 
-  async function generateAnalysis() {
-    if (!state.overview) return;
-    const key = analysisPeriodKey();
-    const myId = ++state.analysisGenId;
-    state.analysisLoading = true;
-    state.analysisError = null;
-    renderAnalysis();
-
-    const summary = buildAnalysisSummary();
-    if (!summary) {
-      state.analysisLoading = false;
-      state.analysisError = "Geen data om te analyseren.";
-      renderAnalysis();
-      return;
-    }
-
-    // Klantspecifieke benchmarks uit Drive (06_PERFORMANTIE/6.2_Benchmarks). Non-fataal:
-    // niet gevonden / geen Drive / fout → lege string → standaardanalyse.
-    const customBenchmarks = await fetchCustomBenchmarks();
-
-    try {
-      const result = await apiPost("/api/analysis", {
-        clientId: state.session.clientId,
-        token: state.session.token,
-        brandName: state.session.brandName,
-        period: {
-          startDate: state.period.start,
-          endDate: state.period.end,
-          days: periodDays(),
-        },
-        summary,
-        clientContext: state.session.clientContext || "",
-        customBenchmarks,
-      });
-      if (myId !== state.analysisGenId) return; // outdated — gebruiker wisselde periode
-      state.analysisCache[key] = result.analysis;
-      state.analysisLoading = false;
-      state.analysisError = null;
-      renderAnalysis();
-    } catch (err) {
-      if (myId !== state.analysisGenId) return;
-      state.analysisLoading = false;
-      state.analysisError = err.message || "Onbekende fout bij genereren analyse.";
-      if (err.status === 401) {
-        clearSession();
-        setTimeout(() => showScreen("login-screen"), 600);
-      }
-      renderAnalysis();
-    }
-  }
-  window.__generateAnalysis = generateAnalysis;
-
   function renderAnalysisEmpty(html) {
     return `<div class="panel" style="text-align:center; padding:48px 24px;">${html}</div>`;
-  }
-
-  // Deterministische ads-ranking (uit classifyAdsPerformance) — los van de LLM-analyse.
-  // Best 5 + slechtst 5 advertenties, met klikbare titel die naar de Library-ad springt.
-  function renderAnalysisAdsRanking() {
-    const ads = arrayOrEmpty(state.overview?.adsCampaigns).filter(a => a && a.platform === "ads" && a.perfScore != null);
-    if (ads.length < 3) return ""; // te weinig advertenties om zinvol te ranken
-    const sorted = [...ads].sort((x, y) => (y.perfScore || 0) - (x.perfScore || 0));
-    const basis = sorted[0].perfBasis || "Efficiëntie (CTR/CPM)";
-    const best = sorted.slice(0, 5);
-    const worst = ads.length > 5 ? sorted.slice(-5).reverse() : [];
-
-    const metricLine = (a) => a.roas != null
-      ? `ROAS ${a.roas.toFixed(2)}× · spend €${fmt.int(a.spend)}`
-      : `CTR ${(a.ctr || 0).toFixed(1)}% · CPM €${(a.cpm || 0).toFixed(2)}`;
-
-    const adItem = (a) => {
-      const perf = a.performance
-        ? `<span class="perf-button ${a.performance.toLowerCase()}" style="cursor:default;">${a.performance}</span>`
-        : `<span class="muted">n/a</span>`;
-      const t = libThumb(a, 0, { imgClass: "row-thumb-img" });
-      return `
-        <div style="display:flex; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border, #f0e6ee);">
-          <span class="row-thumb thumb-pattern" style="background:${t.bg}; flex:0 0 auto;">${t.imgHtml}</span>
-          <div style="flex:1; min-width:0;">
-            <button onclick="window.__goToAd('${escapeHtml(a.id)}')" title="Ga naar deze advertentie in de Library"
-              style="background:none; border:none; padding:0; margin:0; color:var(--accent-data); font-weight:600; cursor:pointer; text-align:left; text-decoration:underline;">
-              ${escapeHtml((a.caption || "").slice(0, 70) || "Advertentie")}
-            </button>
-            <div class="muted" style="font-size:12px; margin-top:2px;">${metricLine(a)}</div>
-          </div>
-          <div style="flex:0 0 auto;">${perf}</div>
-        </div>`;
-    };
-
-    const worstCol = worst.length ? `
-        <div class="insight-card lose">
-          <div class="head"><span class="pill">Slechtst presterend</span><h3>Bottom ${worst.length} ads</h3></div>
-          <div class="insight-list">${worst.map(adItem).join("")}</div>
-        </div>` : "";
-
-    return `
-      <section style="margin-top: var(--grid-gap);">
-        <div class="panel-sub" style="margin-bottom:8px;">Advertentie-ranking · basis: ${escapeHtml(basis)} · klik een titel om naar de advertentie te springen</div>
-        <div class="insight-grid">
-          <div class="insight-card win">
-            <div class="head"><span class="pill">Best presterend</span><h3>Top ${best.length} ads</h3></div>
-            <div class="insight-list">${best.map(adItem).join("")}</div>
-          </div>
-          ${worstCol}
-        </div>
-      </section>`;
-  }
-
-  function renderAnalysisInsights(a) {
-    const summaryBlock = a.summary ? `
-      <section class="panel analysis-narrative" style="margin-bottom: var(--grid-gap);">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">Analyse · ${escapeHtml(periodLabelShort())}</h2>
-            <div class="panel-sub">Door de Agent gegenereerd · ${periodDays()} dagen</div>
-          </div>
-          <button class="btn tiny" onclick="window.__generateAnalysis()">↻ Regenereren</button>
-        </div>
-        <div class="narrative-body">${escapeHtml(a.summary)}</div>
-      </section>` : "";
-
-    const insightItem = (it, deltaDir) => {
-      const cleanDelta = (it.delta || "").trim();
-      return `
-        <div class="insight-item">
-          ${deltaDir && cleanDelta ? `<div class="delta ${deltaDir}">${escapeHtml(cleanDelta)}</div>` : ""}
-          <div class="heading">${escapeHtml(it.heading || "")}</div>
-          <div class="body">${escapeHtml(it.body || "")}</div>
-          ${it.tag ? `<div class="tag">${escapeHtml(it.tag)}</div>` : ""}
-        </div>`;
-    };
-
-    const winners = arrayOrEmpty(a.winners);
-    const losers = arrayOrEmpty(a.losers);
-    const recs = arrayOrEmpty(a.recs);
-
-    return `
-      ${summaryBlock}
-      <div class="insight-grid">
-        <div class="insight-card win">
-          <div class="head"><span class="pill">Wat werkt</span><h3>Winners</h3></div>
-          <div class="insight-list">
-            ${winners.map(w => insightItem(w, "up")).join("")}
-          </div>
-        </div>
-        <div class="insight-card lose">
-          <div class="head"><span class="pill">Onder presteert</span><h3>Losers</h3></div>
-          <div class="insight-list">
-            ${losers.map(w => insightItem(w, "down")).join("")}
-          </div>
-        </div>
-        <div class="insight-card rec">
-          <div class="head"><span class="pill">Aanbevelingen</span><h3>Next steps</h3></div>
-          <div class="insight-list">
-            ${recs.map(w => insightItem(w, null)).join("")}
-          </div>
-        </div>
-      </div>`;
-  }
-
-  function renderAnalysisLoadingSkeleton() {
-    const card = `
-      <div class="insight-card">
-        <div class="head"><div class="skel-line" style="width:80px; height:14px;"></div><div class="skel-line" style="width:120px; height:18px;"></div></div>
-        <div class="insight-list">
-          ${Array(2).fill(`
-            <div class="insight-item">
-              <div class="skel-line" style="width:60%; height:12px;"></div>
-              <div class="skel-line" style="width:90%; height:11px; margin-top:8px;"></div>
-              <div class="skel-line" style="width:75%; height:11px; margin-top:4px;"></div>
-            </div>`).join("")}
-        </div>
-      </div>`;
-    return `
-      <section class="panel" style="margin-bottom: var(--grid-gap);">
-        <div class="skel-line" style="width:40%; height:18px;"></div>
-        <div class="skel-line" style="width:90%; height:12px; margin-top:14px;"></div>
-        <div class="skel-line" style="width:70%; height:12px; margin-top:6px;"></div>
-      </section>
-      <div class="insight-grid">${card}${card}${card}</div>`;
-  }
-
-  function renderAnalysis() {
-    const root = $("#analysis-content");
-    if (!root) return;
-
-    // Manual-flow klanten: geen dashboard-databron (Windsor noch Metricool), dus geen analyse.
-    // Drive levert enkel merkcontext, geen posts — analyse draait op dashboard-data.
-    if (state.session && !state.session.hasMetricool && !state.session.hasWindsor) {
-      root.innerHTML = renderAnalysisEmpty(`
-        <p class="muted" style="margin:0 0 12px;">Analyse op basis van dashboard-data is beschikbaar voor klanten met een Windsor.ai- of Metricool-koppeling.</p>
-        <p class="muted" style="margin:0; font-size:13px;">Voor handmatig geüploade CSV's: gebruik de chat-agent voor een ad-hoc analyse.</p>
-        <button class="btn primary" style="margin-top:18px;" onclick="window.toggleChat()">Open de Agent →</button>
-      `);
-      return;
-    }
-
-    // Overview-fout — kunnen geen analyse maken zonder data.
-    if (state.overviewError && !state.overview) {
-      root.innerHTML = renderAnalysisEmpty(`
-        <p class="muted" style="margin:0;">Analyse is niet beschikbaar zolang het dashboard niet laadt.</p>
-        <p class="muted" style="margin:8px 0 0; font-size:13px;">${escapeHtml(state.overviewError)}</p>
-      `);
-      return;
-    }
-
-    // Wachten op dashboard-data.
-    if (state.overviewLoading || !state.overview) {
-      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">Wachten op dashboard-data…</p>`);
-      return;
-    }
-
-    // Deterministische ads-ranking — onafhankelijk van de LLM-analyse, dus altijd tonen
-    // zodra er ads zijn (ook bij fout/laden/vóór generatie).
-    const adsRank = renderAnalysisAdsRanking();
-
-    const postsCount = arrayOrEmpty(state.overview.allPosts).length;
-    if (postsCount === 0 && !adsRank) {
-      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen posts in deze periode om te analyseren.</p>`);
-      return;
-    }
-
-    // LLM-generatie bezig.
-    if (state.analysisLoading) {
-      root.innerHTML = renderAnalysisLoadingSkeleton() + adsRank;
-      return;
-    }
-
-    // Cache-hit voor huidige periode → toon resultaat.
-    const cached = state.analysisCache[analysisPeriodKey()];
-    if (cached) {
-      root.innerHTML = renderAnalysisInsights(cached) + adsRank;
-      return;
-    }
-
-    // Fout bij laatste generatie.
-    if (state.analysisError) {
-      root.innerHTML = renderAnalysisEmpty(`
-        <p style="color:var(--negative); margin:0;">${escapeHtml(state.analysisError)}</p>
-        <button class="btn primary" style="margin-top:14px;" onclick="window.__generateAnalysis()">Opnieuw proberen</button>
-      `) + adsRank;
-      return;
-    }
-
-    // Empty state — gebruiker moet expliciet de analyse triggeren.
-    root.innerHTML = `
-      <div class="panel" style="text-align:center; padding:56px 24px;">
-        <div style="font-size:22px; color:var(--fg); margin-bottom:8px;">Analyse genereren?</div>
-        <p class="muted" style="margin:0 auto 22px; max-width:520px;">
-          De Agent leest ${postsCount} posts en eventuele campagnes uit deze periode (${escapeHtml(periodLabelShort())}) en levert winners, losers en concrete aanbevelingen. Duurt zo'n 5 seconden.
-        </p>
-        <button class="btn primary" onclick="window.__generateAnalysis()">
-          Genereer analyse voor ${escapeHtml(periodLabelShort())} →
-        </button>
-      </div>` + adsRank;
   }
 
   /* ---------- E-mail (live: ConvertKit / Klaviyo via Windsor) ---------- */
@@ -4321,7 +4417,7 @@
       kaarten.push(callout("watch", "!", "Zonder oordeel",
         `${ongemeten.map(c => `<b>${escapeHtml(c.label)}</b>`).join(", ")} `
         + `${ongemeten.length === 1 ? "levert" : "leveren"} kosten maar geen gemeten omzet. `
-        + `Een ROAS van 0 zou 'uitzetten' opleveren terwijl er niets gemeten is, dus daar staat een streepje.`));
+        + `Een ROAS van 0 zou 'onder break-even' opleveren terwijl er niets gemeten is, dus daar staat een streepje.`));
     }
 
     // Hoe de drempel ontstaat.
@@ -4647,7 +4743,7 @@
     </section>`;
   }
 
-  /* ---------- Advies per campagne ---------- */
+  /* ---------- Oordeel per campagne (boven/onder break-even) ---------- */
 
   function renderRoasAdvice() {
     const rows = roasCampaignRows();
@@ -4655,22 +4751,22 @@
     if (!rows.length) {
       return `<section class="panel" style="margin-bottom:16px;">
         <div class="panel-header"><div>
-          <h2 class="panel-title">Advies per campagne</h2>
+          <h2 class="panel-title">Campagnes t.o.v. break-even</h2>
           <div class="panel-sub">Geen campagnedata in deze periode</div>
         </div></div>
       </section>`;
     }
 
-    const order = { off: 0, fix: 1, hold: 2, scale: 3, nodata: 4, norevenue: 5, unknown: 6 };
+    const order = { below: 0, above: 1, nodata: 2, norevenue: 3, unknown: 4 };
     const sorted = [...rows].sort((a, b) => (order[a.verdict.key] - order[b.verdict.key]) || (b.spend - a.spend));
 
     const counts = sorted.reduce((acc, x) => { acc[x.verdict.key] = (acc[x.verdict.key] || 0) + 1; return acc; }, {});
-    const wasted = sorted.filter(x => x.verdict.key === "off").reduce((s, x) => s + x.spend, 0);
+    const spendOf = (k) => sorted.filter(x => x.verdict.key === k).reduce((s, x) => s + x.spend, 0);
 
     const summary = min.value
       ? `<div class="roas-advice-summary">
-          <div><strong>${counts.off || 0}</strong> uitzetten · <strong>${counts.fix || 0}</strong> bijsturen · <strong>${counts.scale || 0}</strong> schalen</div>
-          ${wasted > 0 ? `<div class="muted">${roasFmt.eur(wasted)} spend zit in campagnes onder 0,8× de drempel.</div>` : ""}
+          <div><strong>${counts.above || 0}</strong> boven · <strong>${counts.below || 0}</strong> onder break-even</div>
+          <div class="muted">${roasFmt.eur(spendOf("above"))} spend boven de drempel · ${roasFmt.eur(spendOf("below"))} eronder</div>
         </div>`
       : `<div class="roas-advice-summary"><div class="muted">Vul een brutomarge in om campagnes tegen een break-even te beoordelen.</div></div>`;
 
@@ -4681,12 +4777,12 @@
       <td class="right">${roasFmt.ratio(x.platRoas)}</td>
       <td class="right"><strong>${roasFmt.ratio(x.corrected)}</strong></td>
       <td class="right">${roasBadge(x.verdict)}</td>
-      <td class="muted" style="font-size:11px;">${escapeHtml(x.verdict.advice)}</td>
+      <td class="muted" style="font-size:11px;">${escapeHtml(x.verdict.note)}</td>
     </tr>`).join("");
 
     return `<section class="panel" style="margin-bottom:16px;">
       <div class="panel-header"><div>
-        <h2 class="panel-title">Advies per campagne</h2>
+        <h2 class="panel-title">Campagnes t.o.v. break-even</h2>
         <div class="panel-sub">Beoordeeld tegen ${escapeHtml(min.source || "geen drempel")}${min.value ? ` (${roasFmt.ratio(min.value)})` : ""}</div>
       </div></div>
       ${summary}
@@ -4698,7 +4794,7 @@
           <th class="right">Platform-ROAS</th>
           <th class="right">Gecorrigeerd</th>
           <th class="right">Oordeel</th>
-          <th>Waarom</th>
+          <th>Afstand</th>
         </tr></thead>
         <tbody>${body}</tbody>
       </table></div>
@@ -6512,7 +6608,6 @@
     { key: "prompts", label: "Prompts" },
     { key: "sources", label: "Sources · live" },
     { key: "website", label: "Website" },
-    { key: "acties", label: "Acties" },
     { key: "meting", label: "Meting" },
   ];
 
@@ -6801,7 +6896,6 @@
       case "prompts": return renderGeoPrompts();
       case "sources": return renderGeoSources();
       case "website": return renderGeoWebsite();
-      case "acties": return renderGeoActions();
       case "meting": return renderGeoMeasurement();
       default: return renderGeoOverview();
     }
@@ -7200,29 +7294,6 @@
     return out.join("");
   }
 
-  /* ---------- 5. Acties ---------- */
-
-  function renderGeoActions() {
-    const g = state.geo;
-    if (!g.actions.length) {
-      return renderAnalysisEmpty(`<p class="muted" style="margin:0;">Geen acties in dit auditbestand. Voeg een <em>actions</em>-blok toe (zie het schema).</p>`);
-    }
-    return `<div class="geo-actions">${g.actions.map(a => {
-      // Prioriteit draagt een kleur (hoog rood, middel oranje, laag groen), maar
-      // altijd met de tekst erbij: kleur is nooit het enige signaal.
-      const prio = a.ongoing ? `<span class="geo-prio ongoing">doorlopend</span>`
-        : a.priority ? `<span class="geo-prio ${["hoog", "middel", "laag"].includes(a.priority) ? a.priority : ""}">prioriteit: ${escapeHtml(a.priority)}</span>` : "";
-      const meta = [a.ongoing ? null : a.effort && `inspanning: ${a.effort}`, a.how];
-      return `<div class="geo-action">
-        <div class="meta">${prio}${meta.filter(Boolean).map(x => `<span>${escapeHtml(x)}</span>`).join("")}</div>
-        ${a.moves.length ? `<div class="moves">Beweegt: ${a.moves.map(x => `<span>${escapeHtml(x)}</span>`).join("")}</div>` : ""}
-        <h3>${escapeHtml(a.title)}</h3>
-        ${a.text ? `<p>${escapeHtml(a.text)}</p>` : ""}
-        ${a.done ? `<div class="done">✓ Klaar als: ${escapeHtml(a.done)}</div>` : ""}
-      </div>`;
-    }).join("")}</div>`;
-  }
-
   /* ---------- Chat panel (mock, stap 6) ---------- */
 
   function renderChat() {
@@ -7424,6 +7495,7 @@
     if (!dashboardInited) return;
     if (state.overview) renderOverview();
     if (state.website && typeof renderWebsite === "function") renderWebsite();
+    if (state.page === "ads" && state.adsTab === "google") renderGoogleAds();
   }
   function setDensity(v) { document.documentElement.setAttribute("data-density", v); $$("[data-tweak-density]").forEach(b => b.classList.toggle("on", b.dataset.tweakDensity === v)); }
   function setTheme(v) {
@@ -7469,19 +7541,17 @@
     // stond en er niets te wachten valt.
     ensure: {
       overview: () => refreshOverview(),
-      analysis: () => generateAnalysis(),
       website:  () => websiteFetch(),
       email:    () => refreshEmail(),
       seo:      () => seoFetch(),
       geo:      () => geoFetch(),
+      googleAds: () => googleAdsFetch(),
     },
     // De renderers die een HTML-string teruggeven. De Overview-renderers staan
     // er bewust niet bij: die schrijven rechtstreeks in DOM-knopen met een vast
     // id (#kpi-grid, #trend-chart) en geven niets terug, dus report.js bouwt die
     // vier blokken opnieuw op uit state.overview.
     render: {
-      analysisInsights:  (a) => renderAnalysisInsights(a),
-      analysisAds:       () => renderAnalysisAdsRanking(),
       websiteKpis:       () => renderWebsiteKpis(),
       websiteChart:      () => renderWebsiteChart(),
       websiteChannels:   () => renderWebsiteChannels(),
@@ -7505,7 +7575,15 @@
       geoOverview:       () => renderGeoOverview(),
       geoPrompts:        () => renderGeoPrompts(),
       geoWebsite:        () => renderGeoWebsite(),
-      geoActions:        () => renderGeoActions(),
+      // Ads: dezelfde bouwstenen als de tab, zonder kop en met gewone namen.
+      adsOverview:       () => adsOverviewHtml({ withHead: false, static: true }),
+      googleAdsKpis:     () => gadsKpis(state.googleAds),
+      googleAdsActions:  () => gadsConvActions(state.googleAds),
+      googleAdsDaily:    () => gadsDaily(state.googleAds),
+      googleAdsCampaigns: () => gadsCampaigns(state.googleAds),
+      googleAdsShare:    () => gadsImpressionShare(state.googleAds),
+      googleAdsTerms:    () => gadsSearchTerms(state.googleAds),
+      googleAdsDevices:  () => gadsDevices(state.googleAds),
       email:             (e) => (e.connector === "klaviyo" ? renderEmailKlaviyo(e)
                                 : e.connector === "mailerlite" ? renderEmailMailerLite(e)
                                 : renderEmailConvertKit(e)),

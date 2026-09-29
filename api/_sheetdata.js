@@ -712,6 +712,14 @@ const DIMENSION_LEVELS = {
   geo:      ['region', 'country'],
   asset:    ['titleassettext', 'bodyassettext', 'calltoactionassetname', 'imageasseturl', 'videoassetvideoname',
              'textofthetitleasset', 'textofbodyasset', 'nameofcalltoactionasset', 'urloftheimageasset', 'nameofthevideoasset'],
+  // Google Ads: zeven tabs met dezelfde tellers (kosten, kliks, conversies) op
+  // een andere korrel. Zonder deze niveaus scoorde de zoektermentab even hoog als
+  // de campagnetab en telde een campagnevraag elke zoekterm mee.
+  adgroup:  ['adgroupname', 'adgroupid'],
+  keyword:  ['keywordtext'],
+  searchterm: ['searchterm'],
+  device:   ['device'],
+  convaction: ['conversionactionname'],
 };
 
 // Kolommen waarop we op periode filteren, in volgorde van voorkeur.
@@ -823,11 +831,12 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
   };
 
   let best = null, bestIncompleet = null;
+  const onleesbaar = [];
   for (const title of titles) {
     if (/^_windsor_staging/i.test(title) || !pattern.test(title)) continue;
     let headerRow;
     try { headerRow = await headerRowOf(title); }
-    catch { continue; }
+    catch { onleesbaar.push(title); continue; }
     if (!headerRow.length) continue;
 
     const headers = headerRow.map(normHeader);
@@ -837,7 +846,9 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
     // advertentietab af voor elke ad-vraag zonder campagnekolom (conversies,
     // tekst, video) en ging alles alsnog live.
     const vraagtOp = (lvl) => DIMENSION_LEVELS[lvl].some(h => wantedHeaders.has(h));
-    const impliedBy = { campaign: ['ad'] };
+    // Zo ook een advertentiegroep, zoekwoord of zoekterm: die horen bij één
+    // campagne (en één advertentiegroep).
+    const impliedBy = { campaign: ['ad', 'adgroup', 'keyword', 'searchterm'], adgroup: ['ad', 'keyword', 'searchterm'] };
     const tooFine = Object.entries(DIMENSION_LEVELS).some(([lvl, level]) =>
       level.some(h => headers.includes(h)) && !vraagtOp(lvl)
       && !(impliedBy[lvl] || []).some(vraagtOp));
@@ -860,6 +871,11 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
     if (!best || score > best.score) best = cand;
   }
 
+  // Een tab waarvan de kopregel niet te lezen was, had de winnaar kunnen zijn.
+  // Dan níet kiezen: anders wint een slechtere tab stil. Bij Spotto won zo de
+  // impression-share-tab (vertoningen, geen kosten) een campagnevraag, en stond
+  // Google Ads op € 0. Een fout valt bij een API-sleutel terug op live.
+  if (onleesbaar.length) return { __error: `kopregel niet leesbaar voor ${onleesbaar.join(', ')}` };
   if (!best && bestIncompleet) return { __missing: bestIncompleet.mist, __sheet: { tab: bestIncompleet.title } };
   if (!best) return null;
   try { best.rows = await readTab(clientId, sheetId, best.title, token); }
@@ -892,6 +908,17 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
     for (const [field, i] of Object.entries(best.colOf)) row[field] = cellValue(r[i], field, nl);
     data.push(row);
   }
+
+  // Een kolom bestaan is niet genoeg: een veld dat later aan een export is
+  // toegevoegd, is alleen gevuld voor de rijen sinds die wijziging. Bij Spotto
+  // had de Instagram-tab 'Media product type', maar leeg voor oudere posts: die
+  // werden 'Carrousel' in plaats van 'Post'. Is een verplicht veld in de periode
+  // ergens leeg, dan kan de sheet deze vraag niet betrouwbaar beantwoorden.
+  // Alleen de identiteitsvelden, niet de dimensies: een lege regio of leeftijd
+  // is een geldige waarde ('onbekend'), een lege publicatiedatum of type niet.
+  const leeg = verplicht.filter(f => requireFields.includes(f))
+    .filter(f => data.some(r => r[f] == null || r[f] === ''));
+  if (leeg.length) return { __missing: leeg.map(f => `${f} (leeg in een deel van de rijen)`), __sheet: { tab: best.title } };
 
   // Herkomst meesturen: de UI mag weten dat dit uit de sheet komt en tot wanneer
   // die loopt. Onbekende sleutels in het antwoord raken de frontend niet.

@@ -39,7 +39,7 @@ Each `fixtures/*.json` is one realistic period:
 ```
 
 `summary` is exactly the object `buildAnalysisSummary()` produces in `app.js`
-(kpis, byPlatform, cadence, performanceBreakdown, overperformers, ads, …). To
+(kpis, byPlatform, cadence, aboveAverage, belowAverage, ads, …). To
 capture a **real** one: log into the app, load a dashboard, and in the browser
 console run `copy(buildAnalysisSummary())`, then paste it as the `summary` of a new
 fixture file. Real fixtures are the most valuable — the included one is a

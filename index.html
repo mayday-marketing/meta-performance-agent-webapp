@@ -250,10 +250,6 @@
             <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 2.5h12.4"/><path d="M2.8 2.5v7.6h10.4V2.5"/><path d="M8 10.1v2.3M5.6 14l2.4-1.6 2.4 1.6"/><path d="M5.6 8V6.6M8 8V4.8M10.4 8V5.9"/></svg></span>
             <span>Rapport</span>
           </button>
-          <button class="nav-link" data-page="methodology">
-            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.6v10.8"/><path d="M4 5.4h8"/><path d="M4 5.4 2.3 9.3h3.4z"/><path d="M12 5.4l-1.7 3.9h3.4z"/></svg></span>
-            <span>Methodology</span>
-          </button>
           <button class="nav-link" data-page="bronnen">
             <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="8" cy="3.8" rx="5" ry="2"/><path d="M3 3.8v8.4c0 1.1 2.2 2 5 2s5-.9 5-2V3.8"/><path d="M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/></svg></span>
             <span>Bronnen</span>
@@ -338,12 +334,9 @@
           <div id="page-overview" class="dash-page">
             <div class="subtabs" id="home-subtabs">
               <button type="button" class="on" data-hometab="overzicht" aria-selected="true">Overzicht</button>
-              <button type="button" data-hometab="analyse" aria-selected="false">AI-analyse</button>
               <button type="button" data-hometab="merk" aria-selected="false">Merk</button>
             </div>
             <div class="subpane on" data-homepane="overzicht"><div id="overview-content"></div></div>
-            <!-- AI-analyse: renderAnalysis() in app.js. Stond eerder op een eigen pagina. -->
-            <div class="subpane" data-homepane="analyse"><div id="analysis-content"></div></div>
             <!-- Merk: Merkcontext + Doelen uit de klantsheet, renderBrand() in app.js. -->
             <div class="subpane" data-homepane="merk"><div id="brand-content"></div></div>
           </div>
@@ -358,12 +351,12 @@
 
             <div class="subtabs" id="social-subtabs">
               <button type="button" class="on" data-soctab="samenvatting" aria-selected="true">Samenvatting</button>
-              <button type="button" data-soctab="ig-posts" aria-selected="false">Instagram posts</button>
-              <button type="button" data-soctab="ig-reels" aria-selected="false">Instagram reels</button>
-              <button type="button" data-soctab="fb-posts" aria-selected="false">Facebook posts</button>
-              <button type="button" data-soctab="fb-reels" aria-selected="false">Facebook reels</button>
-              <button type="button" data-soctab="tiktok" aria-selected="false">TikTok</button>
-              <button type="button" data-soctab="linkedin" aria-selected="false">LinkedIn</button>
+              <button type="button" data-soctab="ig-posts" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/instagram.svg')"></span>Instagram posts</button>
+              <button type="button" data-soctab="ig-reels" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/instagram.svg')"></span>Instagram reels</button>
+              <button type="button" data-soctab="fb-posts" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/facebook.svg')"></span>Facebook posts</button>
+              <button type="button" data-soctab="fb-reels" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/facebook.svg')"></span>Facebook reels</button>
+              <button type="button" data-soctab="tiktok" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/tiktok.svg')"></span>TikTok</button>
+              <button type="button" data-soctab="linkedin" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/linkedin.svg')"></span>LinkedIn</button>
               <span style="flex-grow:1;"></span>
               <span style="padding-bottom:9px;"><span class="datastamp" id="ov-stamp" hidden></span></span>
             </div>
@@ -383,7 +376,6 @@
                   <button>7 dagen</button>
                 </div>
                 <span style="flex-grow:1;"></span>
-                <button class="btn" onclick="window.__openAnalysis()">AI-analyse</button>
                 <button class="btn" onclick="window.__refreshOverview()">Ververs data</button>
               </div>
 
@@ -477,27 +469,47 @@
           </div>
 
           <!-- ========== ADS PAGE ==========
-               Meta Ads: campagnes met funnel, creatie en doelgroep, en de
-               advertenties zelf in de bibliotheek (filter 'ads'). -->
+               Eén tab per advertentieplatform, zoals Social één tab per kanaal
+               heeft. Overzicht zet de platforms naast elkaar; Meta heeft
+               campagnes (met funnel, creatie en doelgroep) en de advertenties
+               zelf in de bibliotheek (filter 'ads'). Spend en ROAS horen in de
+               ROAS-tab — hier staat wat een platform oplevert, geen oordeel. -->
           <div id="page-ads" class="dash-page" style="display:none;">
             <div class="subtabs" id="ads-subtabs">
-              <button type="button" class="on" data-adstab="campagnes" aria-selected="true">Campagnes</button>
-              <button type="button" data-adstab="advertenties" aria-selected="false">Advertenties</button>
+              <button type="button" class="on" data-adstab="overzicht" aria-selected="true">Overzicht</button>
+              <button type="button" data-adstab="meta" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/facebook.svg')"></span>Meta</button>
+              <button type="button" data-adstab="google" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/googleads.svg')"></span>Google Ads</button>
+              <button type="button" data-adstab="tiktok" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/tiktok.svg')"></span>TikTok</button>
+              <button type="button" data-adstab="linkedin" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/linkedin.svg')"></span>LinkedIn</button>
+              <button type="button" data-adstab="chatgpt" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/openai.svg')"></span>ChatGPT</button>
             </div>
-            <div class="subpane on" data-adspane="campagnes">
-              <div class="report-head">
-                <p class="eyebrow">Meta Ads</p>
-                <h2 class="report-title" id="ads-conclusion">Advertenties worden opgehaald…</h2>
-                <p class="report-lede">Campagnes van deze periode, met kosten, bereik en wat ze opleverden.</p>
+
+            <div class="subpane on" data-adspane="overzicht"><div id="ads-overview"></div></div>
+
+            <!-- Meta: twee weergaven binnen één tab. -->
+            <div class="subpane" data-adspane="meta">
+              <div class="toggle-group ads-meta-toggle" id="ads-meta-toggle">
+                <button type="button" class="on" data-adsmeta="campagnes" aria-pressed="true">Campagnes</button>
+                <button type="button" data-adsmeta="advertenties" aria-pressed="false">Advertenties</button>
               </div>
-              <div id="ads-table"></div>
-              <!-- Funnel, creatie en doelgroep: drie blokken onder de campagnetabel.
-                   Elk blok tekent zichzelf leeg met een reden als de data ontbreekt. -->
-              <section class="ads-block" id="ads-funnel"></section>
-              <section class="ads-block" id="ads-creative"></section>
-              <section class="ads-block" id="ads-demo"></section>
+              <div class="ads-metapane on" data-adsmetapane="campagnes">
+                <div class="report-head">
+                  <p class="eyebrow">Meta Ads</p>
+                  <h2 class="report-title" id="ads-conclusion">Advertenties worden opgehaald…</h2>
+                  <p class="report-lede">Campagnes van deze periode, met kosten, bereik en wat ze opleverden.</p>
+                </div>
+                <div id="ads-table"></div>
+                <!-- Funnel, creatie en doelgroep: drie blokken onder de campagnetabel.
+                     Elk blok tekent zichzelf leeg met een reden als de data ontbreekt. -->
+                <section class="ads-block" id="ads-funnel"></section>
+                <section class="ads-block" id="ads-creative"></section>
+                <section class="ads-block" id="ads-demo"></section>
+              </div>
+              <div class="ads-metapane" data-adsmetapane="advertenties"></div>
             </div>
-            <div class="subpane" data-adspane="advertenties"></div>
+
+            <div class="subpane" data-adspane="google"><div id="ads-google"></div></div>
+            <div class="subpane" data-adspane="unlinked"><div id="ads-unlinked"></div></div>
           </div>
 
 
@@ -556,11 +568,6 @@
                Opbouw: report.js. -->
           <div id="page-report" class="dash-page" style="display:none;">
             <div id="report-content"></div>
-          </div>
-
-          <!-- ========== METHODOLOGY PAGE ========== -->
-          <div id="page-methodology" class="dash-page" style="display:none;">
-            <div id="methodology-content"></div>
           </div>
 
         </section>

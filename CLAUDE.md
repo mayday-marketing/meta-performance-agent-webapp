@@ -8,7 +8,13 @@ architecture and the non-obvious rules that aren't visible from any single file.
 A **multi-tenant social-media performance dashboard** for **mayday marketing**, a
 Dutch marketing agency. One shared deployment serves many client brands. Each
 client logs in with a code + password and sees only their own Instagram/Facebook
-(organic + Meta Ads) performance, plus an AI analysis and an AI chat agent.
+(organic + Meta Ads) performance, plus an AI chat agent.
+
+**Dashboard, geen adviseur (beslissing eigenaar, 29-09-2026).** Het scherm toont
+cijfers, benchmarks en neutrale duiding ("bereik steeg 12% t.o.v. vorige
+periode"). Analyses en voorstellen horen in het gesprek via de MCP-koppeling, niet
+in de UI. Daarom zijn de AI-analyse, de Methodology-pagina en GEO-Acties
+verwijderd. Zet er geen aanbevelingen, oordelen of 'wat nu'-blokken terug.
 
 UI language and product copy are **Dutch**. Commit messages and code comments in
 this repo are Dutch too — match that.
@@ -106,7 +112,7 @@ los van de dashboardperiode in de topbar.
   connectors staan kandidaat-omzetvelden in de registry; wijst Windsor er één af,
   dan valt `fetchChannel` terug op alleen spend (`platformRevenueAvailable:false`)
   en blijft de GA4-ROAS staan. Campagnes van zo'n kanaal krijgen **geen** oordeel —
-  een ROAS van 0 zou anders 'uitzetten' opleveren terwijl er niets gemeten is.
+  een ROAS van 0 zou anders 'onder break-even' opleveren terwijl er niets gemeten is.
 - **Gedeeltelijke config is een geldige toestand.** Ontbrekende data is *onbekend*,
   nooit nul: zonder GA4-property zijn `totals.revenue` en `ga4Revenue` `null`
   (vlaggen `revenueAvailable` / `ga4Available`), toont de UI streepjes en valt de
@@ -245,9 +251,21 @@ door extra calls in `getDashboard` (`adsExtra` in de respons). Getest op
   niets zelf — de social-kaarten zijn een kopie van `#kpi-grid`, de websitekaarten
   komen uit `renderWebsiteKpis()` — zodat hij nooit iets anders zegt dan de pagina
   erachter. De websitedata haalt hij lui op (`homeFetch()`).
-- **Overview heeft drie tabs** (`state.homeTab`): Overzicht, AI-analyse
-  (`#analysis-content`, vroeger een eigen pagina — `switchPage("analysis")` en
-  `window.__openAnalysis()` sturen daarheen) en Merk.
+- **Overview heeft twee tabs** (`state.homeTab`): Overzicht en Merk. De
+  AI-analyse-tab is weg; `switchPage("analysis"/"methodology")` landt op Overview.
+- **Benchmarkkolom 't.o.v. gemiddelde'** in de bibliotheek (`benchmarkPosts()` in
+  summary.js). Geen Good/Bad-label meer, geen gewogen formule: engagement per post
+  ÷ het gemiddelde van dezelfde groep (IG posts, IG reels, FB posts, FB reels) in
+  de gekozen periode; advertenties op ROAS (met aankopen) of CTR. Het gemiddelde
+  is per post (elke post telt één keer), zodat het gelijk is aan de rij
+  'Gemiddelde' bovenaan de tabel. Onder 3 posts: streepje. Binnen ±10% neutraal
+  gekleurd. De MCP-samenvatting geeft `benchIndex` en `aboveAverage`/`belowAverage`.
+  De Meta Ads-campagnetabel gebruikt dezelfde kolom (de oude classifier
+  `classifyAdsPerformance` met sterk/zwak en 'vraag de agent waarom' is weg).
+- **ROAS-oordeel is tweeledig** (`roasVerdict`): boven of onder break-even, met de
+  afstand tot de drempel als `note`. Geen schalen/houden/bijsturen/uitzetten meer.
+- **Rapportduiding is neutraal** (`agents/Report_Agent.md` regel 6): observaties,
+  geen acties — ook niet als het klantsjabloon om 'volgende stappen' vraagt.
 - **Merk-tab** (`renderBrand()`, `sheets.js` action `brand`): vaste velden uit de
   tab Merkcontext (op aliassen, want de veldnamen verschillen per klant) en de
   tab **Doelen** (`Soort` KPI/O/KR · `Periode` 2026 / 2026-Q4 / 2026-09 · `Doel` ·
@@ -262,8 +280,11 @@ door extra calls in `getDashboard` (`adsExtra` in de respons). Getest op
     momentopname zijn, dus daar geen tempo-oordeel.
 - **Social** (`#page-social`) = de vroegere Overview-samenvatting + publicaties,
   plus kanaaltabs (IG posts/reels, FB posts/reels, TikTok, LinkedIn). **Ads**
-  (`#page-ads`) = het vroegere blad Advertenties plus de advertenties als
-  bibliotheek. De Library-pagina bestaat niet meer.
+  (`#page-ads`) heeft één tab per advertentieplatform, zie 'Ads-pagina' hieronder.
+  De Library-pagina bestaat niet meer.
+- **Platformlogo's in de tabs** (`.tab-logo`, uit `assets/icons/`): een masker in
+  de tekstkleur, zelfde recept als `geoLogo()`, zodat ze meekleuren met actief en
+  dark mode. Meta gebruikt `facebook.svg`: er staat geen Meta-logo in de map.
 - **De bibliotheek bestaat één keer** (`#lib-host`) en verhuist met
   `mountLibrary()` naar het actieve paneel; het filter is `state.libraryFilter`
   (sleutels uit `librarySourceOf()`). Twee kopieën gaven dubbele ids.
@@ -279,6 +300,61 @@ door extra calls in `getDashboard` (`adsExtra` in de respons). Getest op
   met een dashboardperiode; datums en vergelijking gaan pas in bij *Bijwerken*.
   `getDashboard` neemt `compareStartDate/EndDate` over (datums, geen resource-id).
   De Rapport-sleutel `overview` is bewust blijven staan (localStorage-keuzes).
+
+## Ads-pagina: één tab per platform
+
+Overzicht · Meta · Google Ads · TikTok · LinkedIn · ChatGPT (`ADS_TABS` in
+`app.js`, `state.adsTab`). Beslissing eigenaar 29-09-2026: zelfde opzet als de
+kanaaltabs van Social.
+
+- **Geen omzet en geen ROAS op deze pagina.** Die staan met break-even-oordeel in
+  de ROAS-tab; één cijfer, één plek. Hier staat wat een platform oplevert in zijn
+  eigen termen (kosten, kliks, conversies/leads, kosten per resultaat).
+- **Overzicht** (`renderAdsOverview()`): één rij per platform. Kosten, vertoningen
+  en kliks tellen op; **resultaten niet** — elk platform telt zijn eigen
+  conversies met een eigen attributievenster. De vier kaarten bovenaan
+  (`adsOverviewCards()`) staan ook op de Overview-pagina (`renderHomeAds()`).
+- **Meta in het overzicht:** kosten/vertoningen/kliks uit de campagnerijen
+  (`adsPeriodTotals` in summary.js, hele periode). Resultaten bestaan alleen op
+  advertentieniveau, dus hooguit het ad-venster (35 d); de kosten per resultaat
+  worden binnen dát venster gerekend en krijgen een `*` met uitleg. Zonder die
+  splitsing stond Meta over 90 dagen op de kosten van 35 dagen en klopte het
+  aandeel tussen de platforms niet.
+- **Meta-tab** = de vroegere tabs Campagnes en Advertenties, als schakelaar
+  (`state.adsMetaView`). `goToAd()` en de oude sleutels `campagnes`/`advertenties`
+  landen daar.
+- **TikTok, LinkedIn, ChatGPT** hebben nog geen fetch (`renderAdsUnlinked()`):
+  geen account in Windsor, dus geen veldnamen om te verifiëren. De tab zegt wat
+  er in de Config-tab moet (`TikTok ad account`, `LinkedIn ad account`); ChatGPT
+  Ads heeft geen Windsor-connector.
+
+### Google Ads-tab (`windsor.js` action `getGoogleAds`, `api/_googleads.js`)
+
+Leadweergave: kosten per conversie, vertoningsaandeel, zoektermen, apparaten en
+conversieacties. Volgt de dashboardperiode en de topbar-vergelijking.
+
+- **Account uit de Config-tab** (`Google Ads account`, met streepjes); zonder
+  account `{ linked: false }`. Velden geverifieerd op Spotto (25-09 en
+  29-09-2026). Nooit `all_conversions`: telt ook pageviews (680k vs 1.230).
+- **Conversieacties apart tonen.** 'Een conversie' is per account iets anders
+  (bij Spotto twee formulieren); zonder die lijst leest niemand het totaal juist.
+  Google weigert `impressions`/`clicks` naast `conversion_action_name`, dus daar
+  geen kosten per actie.
+- **Vertoningsaandeel wordt gewogen**, nooit gemiddeld: noemer = vertoningen ÷
+  share (waar de campagne recht op had). Share + gemist-budget + gemist-rang =
+  1 per rij (gecontroleerd). Google meldt '< 10%' als 0,0999; de UI zegt op welk
+  deel van de dagen dat gebeurde. Top- en absolute-top-share staan er bewust niet
+  in: die hebben een andere noemer en laten zich zo niet correct optellen.
+- **Zoektermen: 30 dagen** (`DETAIL_MAX_DAYS`), top 200 naar kosten, client-side
+  doorzoekbaar (eigen `tbody`, zelfde recept als de landingspagina's). Live duurt
+  die call bij Spotto 45–70 s (timeout 75 s); uit de sheet 7–13 s. 'Kosten zonder
+  conversie' telt over álle termen, niet alleen de top 200.
+- **`sheetThrough`** per blok: de laatste dag in de sheet als die vóór het einde
+  van de periode ligt. De zoektermentab liep op 29-09 tot 24-09.
+- **Google Ads-korrels in `DIMENSION_LEVELS`** (`adgroup`, `keyword`,
+  `searchterm`, `device`, `convaction`): zeven tabs met dezelfde tellers op een
+  andere korrel. Zonder die niveaus kon een campagnevraag op de zoektermentab
+  uitkomen en elke zoekterm meetellen.
 
 ## Datasheet-eerst (api/_sheetdata.js)
 
@@ -297,6 +373,19 @@ Gemeten: een sheet-tab lezen duurt 0,3–2,3 s, een koude Windsor-fetch over 90 
   één fetch delen. Vroeger las elke vraag elke passende tab volledig, één voor één:
   op 29-09-2026 liepen `getDashboard` en `getWebsite` bij Spotto daardoor allebei
   tegen de 150 s. `[tijd]`-regels in de log geven per call de duur en herkomst.
+- **Een export die nog vult ziet er compleet uit.** Alle kolommen, alleen te weinig
+  rijen: bij Spotto 3 Facebook-posts tegenover 35 live. De code kan dat niet zien
+  zonder live te vergelijken. Daarom het Config-veld `Datasheet overslaan`
+  (komma-gescheiden connector-slugs, bv. `facebook_organic`): die connector gaat
+  live tot het veld leeg is. Geldt voor de connector-passthrough
+  (`windsorScoped`), niet voor de Website-tab (`getWebsiteSheetData`). Een
+  verplicht veld dat in een deel van de rijen leeg is (een kolom die later aan de
+  export is toegevoegd), valt ook terug op live.
+- **Een onleesbare kopregel blokkeert de tabkeuze.** Google Sheets antwoordt
+  wisselend (dezelfde tab 1 s, dan 20 s+). Viel een kandidaat-tab daardoor weg,
+  dan won stil een slechtere: bij Spotto de impression-share-tab een
+  campagnevraag, en stond Google Ads op € 0 kosten. Nu geeft `getConnectorRows`
+  dan een fout, en valt `windsorScoped` terug op live.
 - **Tabs worden op patroon herkend**, niet op naam: de exportnamen verschillen per
   klant (`Google Analytics 4 - dag - MERKNAAM - windsor.ai`). `_windsor_staging_*` is
   een restant van een lopende export en wordt overgeslagen.
@@ -412,7 +501,9 @@ multi-tenant en server-side op de **REST**-API met Basic auth.
 
 Hoe de vijf AI-engines over het merk praten (`#page-geo`, nav `data-page="geo"`,
 `api/geo.js` + `api/_geodata.js`). Geport van `TEMPLATE_geo-dashboard.html` in
-Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Acties.
+Drive. Vijf sub-tabs: Overzicht, Prompts, Sources · live, Website, Meting.
+De acties uit het auditbestand staan niet meer in de UI (geen dashboarding); ze
+blijven in het bestand voor gesprekken via de MCP-koppeling.
 Draait op het **2+3+1-model**: 2 blokkerende fundamenten (Leesbaarheid,
 Herkenning), 3 parallelle pijlers (Categorie, Expertise, Vertrouwen), 1 uitkomst
 (Voorkeur). Geen fases, geen poorten — het woord 'fase' hoort niet in de UI.
@@ -534,7 +625,17 @@ in de browser (printen = PDF) of als `.pptx` (`#page-report`, nav
 - **Eén extractor voedt twee afnemers.** `extract()` leest KPI's, tabellen,
   grafieken en losse tekst uit de gerenderde HTML; daar gaan zowel de pptx als
   de duiding op. Een met de hand geschreven datamodel per blok zou bij elke
-  dashboardwijziging stilletjes verouderen.
+  dashboardwijziging stilletjes verouderen. Gevolg: een grafiek die geen SVG is
+  (de vertoningsaandeelbalk van Google Ads) valt uit een pptx; zet de cijfers
+  dan in een `<p>`, dan reizen ze als tekst mee.
+- **Rapportpagina Ads** (`ads.*`-blokken): het platformoverzicht en zeven
+  Google Ads-blokken, gebouwd door dezelfde functies als de Ads-tab
+  (`adsOverviewHtml({ withHead: false, static: true })`, `gadsKpis(g)` …). De
+  loader wacht op `state.overview` (Meta) én `state.googleAds`. `static: true`
+  omdat het rapport knoppen weghaalt: anders verdween de platformnaam. Zonder
+  Google Ads-account geven de Google-blokken niets terug en blijft alleen het
+  overzicht over. De Meta-campagnetabel zit er nog niet in (`renderAdsTable`
+  schrijft rechtstreeks in `#ads-table`).
 - **De dashboardbreekpunten hangen aan de vénsterbreedte, een slide niet.** Een
   slide is altijd 1280×720, dus zonder de `.rp-body`-overschrijvingen in
   `styles.css` zou de indeling van de PDF afhangen van hoe breed het venster
@@ -685,7 +786,9 @@ afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
 
 ## The two AI agents (know which prompt serves which consumer)
 
-- **Analysis** (`api/analysis.js` + `agents/Analysis_Agent.md`): single-shot,
+- **Analysis** (`api/analysis.js` + `agents/Analysis_Agent.md`): **geen afnemer
+  meer in de UI** sinds de AI-analyse-tab weg is (29-09-2026); de prompt verwacht
+  nog de oude velden (`performanceBreakdown`, Good/Bad). Single-shot,
   returns strict JSON (`summary`/`winners`/`losers`/`recs`). The frontend builds a
   pre-aggregated, pre-classified `summary` in `buildAnalysisSummary()` (summary.js) and
   the prompt consumes exactly those field names — keep them in sync. Uses
@@ -736,6 +839,11 @@ geen dependencies. Koppelen: `docs/MCP.md`.
   variabele of is er geen geldige sleutel, dan 503 — een lege bearer kan nooit
   matchen. De naam staat in het auditlog, zodat één persoon apart ingetrokken
   kan worden. `MCP_DISABLED=1` is de noodrem.
+- **`get_google_ads`** geeft de respons van `windsor.js getGoogleAds` ingekort en
+  afgerond door (rekenwerk in `_googleads.js`, dus gelijk aan de tab): totalen en
+  vergelijking, conversieacties, vertoningsaandeel, 40 campagnes, dagreeks,
+  apparaten en 50 zoektermen. ~15 kB en ~30 s koud bij Spotto. Geen omzet of ROAS
+  — die blijven in `get_roas`.
 - **Geen betaalde calls.** SEO-rank-check, GEO-bronnen en ongeplande
   vermeldingen kosten per call op het gedeelde DataForSEO-saldo; een gesprek kan
   tientallen tools aanroepen. Ze staan er bewust niet in.

@@ -179,7 +179,11 @@ module.exports = async (req, res) => {
     // regel bestaat omdat één Windsor-sleutel meerdere klanten kan bevatten. Een
     // datasheet hoort per definitie bij één klant, dus daar valt niets te lekken
     // en hoeft er niets geblokkeerd te worden.
-    if (client?.dataSheetId && !opts.skipSheet) {
+    // 'Datasheet overslaan' in de Config-tab: deze connector gaat live, bv. zolang
+    // een nieuwe export nog vult. Zonder API-sleutel (sheetOnly) heeft dat geen
+    // zin — dan is er geen tweede bron — en blijft de sheet gewoon gelden.
+    const skipByConfig = !sheetOnly && (clientConfig?.sheetSkip || []).includes(connector);
+    if (client?.dataSheetId && !opts.skipSheet && !skipByConfig) {
       let rows = await getConnectorRows(clientId, connector, fieldsCsv, {
         from: params?.date_from, to: params?.date_to,
         // Met een API-sleutel als terugval: een tab zonder publicatiedatum of id
@@ -1784,8 +1788,94 @@ module.exports = async (req, res) => {
         } finally { clearTimeout(timer); }
       }
 
+      // Google Ads voor de Ads-pagina: kosten per conversie, impression share,
+      // zoektermen, apparaten en conversieacties. Geen omzet en geen ROAS — die
+      // staan in de ROAS-tab; één cijfer, één plek.
+      // Het account komt uit de Config-tab (`Google Ads account`), nooit uit het
+      // request; zonder account geeft windsorScoped fail-closed niets terug.
+      case 'getGoogleAds': {
+        const isoOk = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+        if (!isoOk(startDate) || !isoOk(endDate)) return res.status(400).json({ error: 'startDate en endDate vereist.' });
+        const account = scopedAccounts.google_ads || null;
+        if (!account) return res.status(200).json({ linked: false });
+
+        const GA = require('./_googleads');
+        const cmpFrom = req.body?.compareStartDate, cmpTo = req.body?.compareEndDate;
+        const params = { date_from: startDate, date_to: endDate };
+
+        // Zoektermen: bij Spotto ~3.500 rijen per dag, en de REST-endpoint negeert
+        // `accounts` — dus hetzelfde venster als de pagina-tabellen van de Website-tab.
+        const DETAIL_MAX_DAYS = 30;
+        const days = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+        let detailFrom = startDate;
+        if (days > DETAIL_MAX_DAYS) {
+          const d = new Date(endDate);
+          d.setDate(d.getDate() - (DETAIL_MAX_DAYS - 1));
+          detailFrom = d.toISOString().slice(0, 10);
+        }
+        const detailParams = { date_from: detailFrom, date_to: endDate };
+
+        const errors = [];
+        const origin = {};
+        // Laatste dag in de sheet per blok: een export die achterloopt geeft een
+        // periode die korter is dan gevraagd, en dat moet de UI kunnen zeggen.
+        const sheetThrough = {};
+        const rowsOf = (out, key) => {
+          if (!out) return [];
+          if (out.__error) { errors.push(`${key}: ${out.__error}`); return []; }
+          origin[key] = out.__sheet ? 'sheet' : 'api';
+          if (out.__sheet && out.__sheet.max && out.__sheet.max < endDate) sheetThrough[key] = out.__sheet.max;
+          return Array.isArray(out.data) ? out.data : [];
+        };
+        // De impression-share-call met terugval op alleen de share: één geweigerd
+        // veld laat anders het hele blok vallen.
+        async function isCall() {
+          const full = await windsorScoped('google_ads', GA.IS_FIELDS, params, 35000, 'gads-is');
+          if (!full || !full.__error) return full;
+          return windsorScoped('google_ads', 'date,campaign,impressions,search_impression_share', params, 30000, 'gads-is-min');
+        }
+
+        const [cur, prev, is, terms, devices, actions] = await Promise.all([
+          windsorScoped('google_ads', GA.CAMPAIGN_FIELDS, params, 45000, 'gads-campaigns'),
+          isoOk(cmpFrom) && isoOk(cmpTo)
+            ? windsorScoped('google_ads', GA.CAMPAIGN_PREV_FIELDS, { date_from: cmpFrom, date_to: cmpTo }, 35000, 'gads-prev')
+            : Promise.resolve(null),
+          isCall(),
+          // Live duurt dit bij Spotto 45–70 s (duizenden rijen per dag); de sheet
+          // is de snelle route, dit is de terugval. Ruim onder maxDuration 150.
+          windsorScoped('google_ads', GA.SEARCH_TERM_FIELDS, detailParams, 75000, 'gads-terms'),
+          windsorScoped('google_ads', GA.DEVICE_FIELDS, params, 35000, 'gads-device'),
+          windsorScoped('google_ads', GA.CONV_ACTION_FIELDS, params, 35000, 'gads-convactions'),
+        ]);
+
+        if (cur && cur.__error) return res.status(502).json({ error: `Google Ads: ${cur.__error}` });
+        const current = GA.summarizeCampaigns(rowsOf(cur, 'campaigns'));
+        const previous = prev ? GA.summarizeCampaigns(rowsOf(prev, 'previous')) : null;
+        const share = GA.summarizeImpressionShare(rowsOf(is, 'impressionShare'));
+        current.campaigns.forEach(c => { c.impressionShare = share.byCampaign[c.name] || null; });
+        const termRows = rowsOf(terms, 'searchTerms');
+
+        return res.status(200).json({
+          linked: true,
+          account,
+          period: { startDate, endDate },
+          compare: previous ? { startDate: cmpFrom, endDate: cmpTo } : null,
+          current,
+          previous: previous ? { totals: previous.totals } : null,
+          impressionShare: share.total,
+          searchTerms: terms && !terms.__error ? GA.summarizeSearchTerms(termRows) : null,
+          // null = gelijk aan de periode; anders het echte venster voor de UI.
+          detailWindow: detailFrom !== startDate ? { startDate: detailFrom, endDate, maxDays: DETAIL_MAX_DAYS } : null,
+          devices: GA.summarizeDevices(rowsOf(devices, 'devices')).rows,
+          conversionActions: GA.summarizeConversionActions(rowsOf(actions, 'conversionActions')),
+          origin,
+          sheetThrough,
+          errors,
+        });
+      }
+
       default:
-        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData', 'getDashboard', 'getRoas', 'getWebsite', 'getEmail', 'getFields' beschikbaar).` });
+        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData', 'getDashboard', 'getRoas', 'getWebsite', 'getGoogleAds', 'getEmail', 'getFields' beschikbaar).` });
     }
   } catch (err) {
     return res.status(502).json({ error: err.message });
