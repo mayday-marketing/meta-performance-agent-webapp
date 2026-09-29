@@ -34,6 +34,31 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
 
 ## Features
 
+### Agents-bibliotheek via de MCP-koppeling
+- **Wat:** een overzicht van de mayday-agents (analyse, rapport, chat, GEO-audit,
+  SEO, …) dat je via `/api/mcp` kunt opvragen en starten vanuit Claude Code,
+  Claude Chat (claude.ai) en Claude Cowork. Eén bron, zodat elke omgeving dezelfde
+  instructies en dezelfde cijfers gebruikt.
+- **Waarom:** de agent-instructies staan nu verspreid (`agents/*.md` in de repo,
+  `7.3 AI-agents-skills` in Drive) en worden per omgeving los gekopieerd. Een
+  bijgewerkte prompt bereikt zo niet elke plek.
+- **Hoe (voorstel):** MCP kent naast tools ook *prompts* en *resources*. Elke agent
+  wordt een prompt (naam, beschrijving, argumenten zoals `clientId` en periode) die
+  de bestaande tools (`get_dashboard`, `get_roas`, `get_website`, …) gebruikt, plus
+  een tool `list_agents` voor het overzicht. De rekenlaag blijft `summary.js`, dus
+  een agent zegt niets anders dan het dashboard.
+- **Let op:**
+  - `agents/Meta-Performance_Agent.md` is geschreven voor een agent mét tools; de
+    webapp-prompts (`Chat_Agent.md`, `Analysis_Agent.md`) zijn afgestemd op
+    single-shot met ingespoten context. Per agent kiezen welke versie de MCP-variant
+    wordt, niet blind hergebruiken.
+  - claude.ai en Cowork vragen OAuth per gebruiker: dat is MCP V2 (zie CLAUDE.md,
+    'MCP V2'). Claude Code werkt al met de agency-sleutel.
+  - Geen betaalde calls in een agent die zelfstandig loopt (DataForSEO-rank-check,
+    GEO-bronnen): dezelfde regel als voor de huidige tools.
+- **Eerste stap:** inventaris van alle agents (repo + Drive): doel, doelomgeving,
+  welke data ze nodig hebben, welke al een MCP-tool heeft.
+
 ### Google Ads-leadweergave (Ads-pagina)
 - **Waarom:** Spotto is een leadklant; `conversion_value` = 1 per lead, dus de
   platform-ROAS in de ROAS-tab zegt niets. Nodig: kosten per lead per campagne,

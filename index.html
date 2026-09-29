@@ -236,10 +236,6 @@
             <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8l1.7 4.1 4.1 1.6-4.1 1.6L8 13.2 6.3 9.1 2.2 7.5l4.1-1.6z"/></svg></span>
             <span>GEO</span>
           </button>
-          <button class="nav-link" data-page="roas">
-            <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12.5l4-4 3 3 5.2-6"/><path d="M10.4 5.5h3.8v3.8"/></svg></span>
-            <span>ROAS</span>
-          </button>
           <button class="nav-link" data-page="email">
             <span class="icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.2 4h11.6v8H2.2z"/><path d="m2.2 4.6 5.8 3.9 5.8-3.9"/></svg></span>
             <span>E-mail</span>
@@ -473,7 +469,7 @@
                heeft. Overzicht zet de platforms naast elkaar; Meta heeft
                campagnes (met funnel, creatie en doelgroep) en de advertenties
                zelf in de bibliotheek (filter 'ads'). Spend en ROAS horen in de
-               ROAS-tab — hier staat wat een platform oplevert, geen oordeel. -->
+               ROAS-sub-tabs — de platformtabs tonen wat een platform oplevert. -->
           <div id="page-ads" class="dash-page" style="display:none;">
             <div class="subtabs" id="ads-subtabs">
               <button type="button" class="on" data-adstab="overzicht" aria-selected="true">Overzicht</button>
@@ -482,6 +478,9 @@
               <button type="button" data-adstab="tiktok" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/tiktok.svg')"></span>TikTok</button>
               <button type="button" data-adstab="linkedin" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/linkedin.svg')"></span>LinkedIn</button>
               <button type="button" data-adstab="chatgpt" aria-selected="false"><span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/openai.svg')"></span>ChatGPT</button>
+              <button type="button" data-adstab="roas-blended" aria-selected="false">ROAS blended</button>
+              <button type="button" data-adstab="roas-kanalen" aria-selected="false">ROAS kanalen</button>
+              <button type="button" data-adstab="roas-breakeven" aria-selected="false">ROAS break-even</button>
             </div>
 
             <div class="subpane on" data-adspane="overzicht"><div id="ads-overview"></div></div>
@@ -493,15 +492,16 @@
                 <button type="button" data-adsmeta="advertenties" aria-pressed="false">Advertenties</button>
               </div>
               <div class="ads-metapane on" data-adsmetapane="campagnes">
+                <!-- Funnel eerst: het overzicht van vertoning tot conversie, daarna
+                     de campagnes, creatie en doelgroep. Elk blok tekent zichzelf
+                     leeg met een reden als de data ontbreekt. -->
+                <section class="ads-block" id="ads-funnel"></section>
                 <div class="report-head">
                   <p class="eyebrow">Meta Ads</p>
                   <h2 class="report-title" id="ads-conclusion">Advertenties worden opgehaald…</h2>
                   <p class="report-lede">Campagnes van deze periode, met kosten, bereik en wat ze opleverden.</p>
                 </div>
                 <div id="ads-table"></div>
-                <!-- Funnel, creatie en doelgroep: drie blokken onder de campagnetabel.
-                     Elk blok tekent zichzelf leeg met een reden als de data ontbreekt. -->
-                <section class="ads-block" id="ads-funnel"></section>
                 <section class="ads-block" id="ads-creative"></section>
                 <section class="ads-block" id="ads-demo"></section>
               </div>
@@ -510,6 +510,10 @@
 
             <div class="subpane" data-adspane="google"><div id="ads-google"></div></div>
             <div class="subpane" data-adspane="unlinked"><div id="ads-unlinked"></div></div>
+            <!-- ROAS: vroeger een eigen pagina. Drie sub-tabs (blended, kanalen,
+                 break-even) delen één render-doel; renderRoas() kiest de inhoud
+                 op state.roasTab. Eigen periode (month-to-date), los van de topbar. -->
+            <div class="subpane" data-adspane="roas"><div id="roas-content"></div></div>
           </div>
 
 
@@ -549,13 +553,6 @@
             <div id="geo-content"></div>
           </div>
 
-          <!-- ========== ROAS PAGE ========== -->
-          <!-- Eigen periodekiezer (month-to-date) in renderRoas(); de topbar-periode
-               geldt voor Overview/Library/Analysis, niet voor deze tab. -->
-          <div id="page-roas" class="dash-page" style="display:none;">
-            <div id="roas-content"></div>
-          </div>
-
           <!-- ========== EMAIL PAGE ========== -->
           <div id="page-email" class="dash-page" style="display:none;">
             <div id="email-content"></div>
@@ -592,12 +589,6 @@
 
     </div>
   </div>
-
-  <!-- Floating chat toggle -->
-  <button class="chat-toggle-btn" id="chat-toggle-btn">
-    <span class="blip"></span>
-    Vraag de Agent
-  </button>
 
   <!-- Tweaks panel -->
   <div class="tweaks-panel" id="tweaks-panel">

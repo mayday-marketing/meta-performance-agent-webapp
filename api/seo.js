@@ -128,7 +128,7 @@ function keywordKey(keywords) {
 
 function resolveAuth(client) {
   // Eén gedeeld DataForSEO-account bedient alle klanten (zie de handover). Een
-  // eigen sleutel per klant mag, net als bij Anthropic in chat.js/analysis.js.
+  // eigen sleutel per klant mag, net als bij Anthropic in chat.js en report.js.
   const login = client?.dataforseo_login || process.env.DATAFORSEO_LOGIN;
   const password = client?.dataforseo_password || process.env.DATAFORSEO_PASSWORD;
   if (!login || !password) return null;

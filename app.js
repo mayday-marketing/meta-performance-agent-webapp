@@ -106,7 +106,7 @@
     compare: "prev",                  // topbar: 'prev' (vorige periode) | 'yoy' (vorig jaar)
     websiteTab: "overzicht",          // actief sub-blad van de Website-tab
     webDemoGender: "all",             // filter in de Doelgroep-sub-tab: all / female / male
-    roasTab: "blended",               // actief sub-blad van de ROAS-tab
+    roasTab: "blended",               // blended | kanalen | breakeven (ROAS-sub-tabs onder Ads)
     bronnenTab: "bronnen",            // actief sub-blad van de Bronnen-tab
     websiteLandingQuery: "",          // zoekterm in de landingspagina-tabel (alleen deze sessie)
     // SEO-tab — eigen keywordlijst, géén periode (zoekvolume is een maandcijfer).
@@ -668,11 +668,13 @@
 
   // Pagina's met een eigen rapportkop dragen hun titel zelf; dan verdwijnt de
   // topbar-titel, anders staan er twee koppen van 40px boven elkaar.
-  const REPORT_PAGES = new Set(["overview", "social", "ads", "website", "roas", "bronnen"]);
+  const REPORT_PAGES = new Set(["overview", "social", "ads", "website", "bronnen"]);
 
   function switchPage(page) {
     // AI-analyse en Methodology bestaan niet meer; oude links landen op Overview.
     if (page === "analysis" || page === "methodology") page = "overview";
+    // ROAS is een reeks sub-tabs onder Ads geworden.
+    if (page === "roas") { state.adsTab = "roas-" + (state.roasTab || "blended"); page = "ads"; }
     state.page = page;
     document.documentElement.setAttribute("data-report", REPORT_PAGES.has(page) ? "on" : "off");
     $$(".nav-link").forEach((l) => l.classList.toggle("on", l.dataset.page === page));
@@ -685,7 +687,6 @@
       website:     { title: "Website",     crumbs: ["Dashboard", "Website"] },
       seo:         { title: "SEO",         crumbs: ["Dashboard", "SEO"] },
       geo:         { title: "GEO",         crumbs: ["Dashboard", "GEO"] },
-      roas:        { title: "ROAS",        crumbs: ["Dashboard", "ROAS"] },
       report:      { title: "Rapport",     crumbs: ["Dashboard", "Rapport"] },
       bronnen:     { title: "Bronnen",     crumbs: ["Dashboard", "Bronnen"] },
     };
@@ -698,9 +699,6 @@
     if (page === "ads") setAdsTab(state.adsTab);
     // E-mail wordt lui geladen bij het eerste bezoek (en opnieuw na periode-wissel).
     if (page === "email" && typeof refreshEmail === "function") refreshEmail();
-    // ROAS heeft een eigen periode (month-to-date) en wordt daarom niet door de
-    // dashboard-periodewissel ververst, alleen bij het eerste bezoek.
-    if (page === "roas" && typeof roasFetch === "function") roasFetch();
     // Website volgt de dashboardperiode en wordt lui geladen (en opnieuw na een
     // periodewissel, zie bindPeriodToggle/bindDateFilter).
     if (page === "website" && typeof websiteFetch === "function") websiteFetch();
@@ -1672,7 +1670,7 @@
       }
     }
     if (!rijen.length) {
-      return `<p class="source-line" style="margin-top:22px;">Open eerst het Overzicht of de ROAS-tab; deze pagina leest
+      return `<p class="source-line" style="margin-top:22px;">Open eerst het Overzicht of ROAS onder Ads; deze pagina leest
         wat die tabs hebben opgehaald en verzint niets bij.</p>`;
     }
     return `<div class="report-table">
@@ -2067,7 +2065,8 @@
   }
 
   /* ---------- Meta Ads: funnel, creatie en doelgroep ----------
-     Drie blokken onder de campagnetabel. Twee regels lopen er doorheen:
+     De funnel staat boven de campagnetabel, creatie en doelgroep eronder.
+     Twee regels lopen er doorheen:
        1. Eén aankoopdefinitie. Funnel en creatie gebruiken omni (web + app +
           offline). Demografie, regio en assetvarianten kunnen dat niet — Meta
           weigert die breakdowns met omni-velden — en tonen daarom alléén
@@ -2489,7 +2488,7 @@
      Zelfde opzet als Social: een overzicht en daarna één tab per platform, elk
      met zijn logo. Een platform zonder datakoppeling krijgt toch een tab, die
      zegt wat er moet gebeuren — nooit nullen.
-     Spend en ROAS met oordeel horen in de ROAS-tab. Hier staat wat een platform
+     Spend en ROAS met oordeel horen in de ROAS-sub-tabs. Hier staat wat een platform
      oplevert in zijn eigen termen (leads, conversies), zonder omzet: anders
      staan er twee ROAS'en op twee plekken. */
   const ADS_TABS = [
@@ -2499,6 +2498,11 @@
     { key: "tiktok",   label: "TikTok Ads",   icon: "tiktok",   connector: "tiktok",   config: "TikTok ad account" },
     { key: "linkedin", label: "LinkedIn Ads", icon: "linkedin", connector: "linkedin", config: "LinkedIn ad account" },
     { key: "chatgpt",  label: "ChatGPT Ads",  icon: "openai",   connector: null },
+    // ROAS over alle platforms heen (vroeger een eigen pagina). `roas` = het blad
+    // in renderRoas(). Geen platform, dus niet in de platformtabel van Overzicht.
+    { key: "roas-blended",   label: "ROAS blended",    roas: "blended" },
+    { key: "roas-kanalen",   label: "ROAS kanalen",    roas: "kanalen" },
+    { key: "roas-breakeven", label: "ROAS break-even", roas: "breakeven" },
   ];
   const tabLogo = (icon) => icon ? `<span class="tab-logo" aria-hidden="true" style="--logo:url('assets/icons/${icon}.svg')"></span>` : "";
 
@@ -2508,13 +2512,16 @@
     const tab = ADS_TABS.find(t => t.key === key) || ADS_TABS[0];
     state.adsTab = tab.key;
     markTabs("#ads-subtabs", "data-adstab", tab.key);
-    const pane = ["overzicht", "meta", "google"].includes(tab.key) ? tab.key : "unlinked";
+    const pane = tab.roas ? "roas" : ["overzicht", "meta", "google"].includes(tab.key) ? tab.key : "unlinked";
     $$("[data-adspane]").forEach(p => p.classList.toggle("on", p.dataset.adspane === pane));
     if (tab.key === "meta") setAdsMetaView(state.adsMetaView);
     if (tab.key === "overzicht" || tab.key === "google") googleAdsFetch();
     if (tab.key === "overzicht") renderAdsOverview();
     if (tab.key === "google") renderGoogleAds();
     if (pane === "unlinked") renderAdsUnlinked(tab);
+    // ROAS heeft een eigen periode (month-to-date) en wordt daarom niet door de
+    // dashboard-periodewissel ververst, alleen bij het eerste bezoek.
+    if (tab.roas) { state.roasTab = tab.roas; roasFetch(); }
   }
 
   function setAdsMetaView(view) {
@@ -2546,7 +2553,7 @@
         + `Zodra die er is, komt de data in deze tab.`;
     } else if (acc) {
       titel = `${escapeHtml(tab.label)} staat in de Config-tab, de data volgt nog`;
-      lede = `Het account is ingesteld. De kosten verschijnen al in de ROAS-tab; de campagnes in deze tab worden gebouwd `
+      lede = `Het account is ingesteld. De kosten verschijnen al bij ROAS kanalen; de campagnes in deze tab worden gebouwd `
         + `zodra het account in Windsor.ai gekoppeld is, zodat de veldnamen eerst gecontroleerd kunnen worden.`;
     } else {
       titel = `${escapeHtml(tab.label)} is nog niet gekoppeld`;
@@ -2931,7 +2938,7 @@
     const fouten = (g.errors || []).length
       ? ` <span style="color:var(--negative);">Niet geladen: ${g.errors.map(e => escapeHtml(e)).join("; ")}.</span>` : "";
     return `<p class="source-line">Bron: Windsor.ai, connector <b>google_ads</b>, account ${escapeHtml(g.account || "")}${herkomst ? ` · ${escapeHtml(herkomst)}` : ""}.
-      Geen omzet of ROAS in deze tab: die staan met break-even-oordeel in de ROAS-tab.${fouten}</p>`;
+      Geen omzet of ROAS in deze tab: die staan met break-even-oordeel bij ROAS kanalen.${fouten}</p>`;
   }
 
   /* ---------- Ads: overzicht over de platforms ---------- */
@@ -3034,13 +3041,13 @@
             <th>Platform</th><th>Status</th><th class="right">Kosten</th><th class="right">Aandeel</th><th class="right">Vertoningen</th>
             <th class="right">Kliks</th><th class="right">Per klik</th><th class="right">Resultaten</th><th class="right">Per resultaat</th>
           </tr></thead>
-          <tbody>${ADS_TABS.filter(t => t.key !== "overzicht").map(rij).join("")}</tbody>
+          <tbody>${ADS_TABS.filter(t => t.key !== "overzicht" && !t.roas).map(rij).join("")}</tbody>
         </table></div>
         <p class="source-line">Kosten, vertoningen en kliks zijn optelbaar over de platforms. Resultaten niet: elk platform telt zijn eigen conversies,
           met een eigen attributievenster, en claimt soms dezelfde klant. Daarom geen totaal in die kolom.
           Meta telt aankopen als die er zijn, anders leads; Google Ads telt de primaire conversieacties.
           ${meta && meta.resultWindow ? `* Meta levert resultaten alleen per advertentie, en dat detail dekt de laatste ${meta.resultWindow.maxDays} dagen (${escapeHtml(meta.resultWindow.startDate)} → ${escapeHtml(meta.resultWindow.endDate)}); de kosten per resultaat zijn over diezelfde dagen gerekend. Kosten, vertoningen en kliks dekken de hele periode.` : ""}
-          Omzet en ROAS met een oordeel per campagne staan in de ROAS-tab.</p>
+          Omzet en ROAS met een oordeel per campagne staan bij ROAS blended.</p>
       </section>`;
   }
   window.__adsTab = (key) => setAdsTab(key);
@@ -4277,7 +4284,7 @@
     if (!root) return;
 
     if (!state.session?.hasWindsor) {
-      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">De ROAS-tab draait op Windsor-data. Voor deze klant is geen Windsor-koppeling geconfigureerd.</p>`);
+      root.innerHTML = renderAnalysisEmpty(`<p class="muted" style="margin:0;">ROAS draait op Windsor-data. Voor deze klant is geen Windsor-koppeling geconfigureerd.</p>`);
       return;
     }
     const periodBar = renderRoasPeriodBar();
@@ -4304,26 +4311,17 @@
     const dagen = r.current?.daily || [];
     const laatste = dagen.length ? dagen[dagen.length - 1].date : null;
 
-    root.innerHTML = subtabBar(ROAS_TABS, tab, "__roasTab", datastampHtml(laatste, "Data"))
-      + renderRoasHead()
-      + periodBar
-      + subpane("blended", tab,
-          renderRoasHero()
-          + splitBlok(renderRoasDailyChart() + renderRoasAdvice(), renderRoasCallouts()))
-      + subpane("kanalen", tab,
-          renderRoasGroup("social", "Paid social") + renderRoasGroup("search", "Paid search"))
-      + subpane("breakeven", tab, renderRoasBreakEven())
-      + subpane("verantwoording", tab, renderRoasFootnote());
+    // De sub-tabs staan in de Ads-balk (ADS_TABS); hier alleen de inhoud van het
+    // actieve blad. De verantwoording (bronnen, fouten, meetregels) staat onder
+    // elk blad: hij geldt voor alle drie.
+    const stamp = laatste ? `<div class="roas-stamp">${datastampHtml(laatste, "Data")}</div>` : "";
+    const blad = tab === "kanalen"
+      ? renderRoasGroup("social", "Paid social") + renderRoasGroup("search", "Paid search")
+      : tab === "breakeven"
+        ? renderRoasBreakEven()
+        : renderRoasHero() + splitBlok(renderRoasDailyChart() + renderRoasAdvice(), renderRoasCallouts());
+    root.innerHTML = stamp + renderRoasHead() + periodBar + blad + renderRoasFootnote();
   }
-
-  const ROAS_TABS = [
-    { key: "blended", label: "Blended" },
-    { key: "kanalen", label: "Kanalen" },
-    { key: "breakeven", label: "Break-even" },
-    { key: "verantwoording", label: "Verantwoording" },
-  ];
-
-  window.__roasTab = (k) => { state.roasTab = k; renderRoas(); };
 
   // De kanaalregistratie (label, groep) en de meting staan los van elkaar: de
   // definitie komt uit _channels.js, de cijfers uit de respons. Eén helper die ze
@@ -5126,7 +5124,7 @@
       <h2 class="report-title">${kop}</h2>
       <p class="report-lede">Vergeleken met ${escapeHtml(cmp.start)} → ${escapeHtml(cmp.end)}. `
       + `${escapeHtml(soort)}, ${escapeHtml(soortBron)}. Betaald verkeer staat hier als kanaal, zonder kosten of ROAS — `
-      + `die vraag beantwoordt de ROAS-tab.</p>
+      + `die vraag beantwoordt ROAS onder Ads.</p>
     </div>`;
   }
 
@@ -5355,6 +5353,7 @@
         <h2 class="panel-title">Kanalen</h2>
         <div class="panel-sub">GA4-kanaalgroepen · conversie gemeten als ${escapeHtml(goal.label.toLowerCase())}${prevMap.size ? ` · verschil in sessies ${escapeHtml(webCompareLabel())}` : ""}</div>
       </div></div>
+      ${renderWebsiteDonut(cur, goal)}
       <div class="lib-table"><table>
         <thead><tr>
           <th>Kanaal</th>
@@ -5367,9 +5366,8 @@
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      ${renderWebsiteDonut(cur, goal)}
       <p class="muted" style="font-size:11px; margin:12px 0 0;">
-        Advertentiekosten en ROAS staan bewust niet in deze tabel: die vraag beantwoordt de ROAS-tab,
+        Advertentiekosten en ROAS staan bewust niet in deze tabel: die vraag beantwoordt ROAS onder Ads,
         op dezelfde GA4-omzet. Eén cijfer, één plek.
       </p>
     </section>`;
@@ -6007,7 +6005,7 @@
           ? `het hoofddoel uit de Config-tab (GA4-event <em>${escapeHtml(w.website.goalEvent)}</em>). Alle key events samen zouden een veel hoger, minder bruikbaar cijfer geven.`
           : `alle key events van de property samen. Zet <strong>Conversiedoel</strong> in de Config-tab om op één doel te sturen — dat scheelt vaak een factor tien.`}</li>
         <li><strong>Organisch zoeken</strong> komt uit Search Console, niet uit GA4. CTR en positie zijn opnieuw berekend uit kliks en vertoningen; een gemiddelde van gemiddelden zou hier niet kloppen. Google geeft alleen zoekopdrachten vrij boven een privacydrempel, dus de querytabellen tellen niet op tot het totaal.</li>
-        <li><strong>Betaald verkeer</strong> staat hier als kanaal, maar zonder kosten of ROAS. Die staan in de ROAS-tab, op dezelfde GA4-omzet.</li>
+        <li><strong>Betaald verkeer</strong> staat hier als kanaal, maar zonder kosten of ROAS. Die staan bij ROAS onder Ads, op dezelfde GA4-omzet.</li>
         <li>GA4-property en Search Console-site komen uit de <strong>Config-tab</strong> van de klantsheet. Ontbreekt er één, dan blijft de rest gewoon werken.</li>
         ${originLine}
         ${covLine}
@@ -7458,15 +7456,12 @@
   }
 
   function bindChatPanel() {
-    $("#chat-toggle-btn").addEventListener("click", () => toggleChatPanel(true));
     $("#chat-close-btn").addEventListener("click", () => toggleChatPanel(false));
   }
   function toggleChatPanel(open) {
     const panel = $("#chat-panel");
-    const toggleBtn = $("#chat-toggle-btn");
     if (open === undefined) open = panel.classList.contains("collapsed");
     panel.classList.toggle("collapsed", !open);
-    toggleBtn.classList.toggle("hidden", open);
   }
   window.toggleChat = () => toggleChatPanel();
 

@@ -34,10 +34,10 @@ function verifyToken(token, clientId) {
 }
 
 // Get Google OAuth2 access token using service account JWT
-// Zelfde tokenimplementatie als de rest van de app (zie _config.js). Schrijven
-// in Analysehistoriek vergt de volledige spreadsheets-scope, niet de readonly.
-const SHEETS_RW_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
-const getAccessToken = () => googleAccessToken(SHEETS_RW_SCOPE);
+// Zelfde tokenimplementatie als de rest van de app (zie _config.js). Alleen
+// lezen: het schrijfpad naar Analysehistoriek is weg met de analyse-agent.
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+const getAccessToken = () => googleAccessToken(SHEETS_SCOPE);
 
 // Read Merkcontext tab from Google Sheet
 async function readMerkcontext(sheetId, accessToken) {
@@ -188,54 +188,10 @@ function parseGoals(rows) {
   return goals;
 }
 
-// Append row to Analysehistoriek tab
-async function appendAnalysisRow(sheetId, accessToken, summary) {
-  const now = new Date().toISOString().split('T')[0];
-  const periode = extractPeriode(summary);
-  const topPerformers = extractField(summary, 'top performer', 60);
-  const patronen = extractField(summary, 'pattern', 60);
-  const spend = extractField(summary, 'spend', 20) || '—';
-  const actiepunten = extractField(summary, 'action', 80) || extractField(summary, 'aanbev', 80);
-
-  const row = [periode, topPerformers, patronen, spend, actiepunten, now];
-
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Analysehistoriek!A:F:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ values: [row] }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Sheets schrijffout: ${err.error?.message || res.status}`);
-  }
-
-  return true;
-}
-
-function extractPeriode(text) {
-  const m = text.match(/\b(jan|feb|mar|apr|mei|jun|jul|aug|sep|okt|nov|dec)[a-z]*[\s.]+202\d/i)
-    || text.match(/202\d[-/](0[1-9]|1[0-2])/);
-  return m ? m[0] : new Date().toISOString().slice(0, 7);
-}
-
-function extractField(text, keyword, maxLen) {
-  const lower = text.toLowerCase();
-  const idx = lower.indexOf(keyword.toLowerCase());
-  if (idx === -1) return '';
-  const snippet = text.slice(idx, idx + maxLen + keyword.length).replace(/\n/g, ' ').trim();
-  return snippet.length > maxLen ? snippet.slice(0, maxLen) + '…' : snippet;
-}
-
 // ── HANDLER ───────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -295,30 +251,6 @@ module.exports = async (req, res) => {
     } catch (e) {
       // Return empty context rather than failing — analysis can still proceed
       return res.status(200).json({ context: '', warning: e.message });
-    }
-  }
-
-  // POST — save analysis result
-  if (method === 'POST') {
-    const { clientId, token, summary } = req.body || {};
-
-    if (!verifyToken(token, clientId)) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    const sheetId = resolveSheetId(clientId);
-    if (!sheetId) {
-      return res.status(400).json({ error: 'Geen sheet geconfigureerd voor deze klant.' });
-    }
-    if (!summary) {
-      return res.status(400).json({ error: 'summary is verplicht.' });
-    }
-
-    try {
-      const accessToken = await getAccessToken();
-      await appendAnalysisRow(sheetId, accessToken, summary);
-      return res.status(200).json({ success: true });
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
     }
   }
 

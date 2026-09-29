@@ -26,9 +26,8 @@ meta-performance-agent-webapp/
 ├── api/                       ← Vercel serverless functions (CommonJS)
 │   ├── auth.js                ← login → HMAC-token
 │   ├── windsor.js             ← Windsor.ai: dashboard, ROAS, website, e-mail
-│   ├── sheets.js              ← Merkcontext lezen, analysehistoriek bijschrijven
+│   ├── sheets.js              ← Merkcontext, Config en Doelen lezen
 │   ├── drive.js               ← merkcontext + ruwe data uit Google Drive
-│   ├── analysis.js            ← analyse-agent (strikte JSON)
 │   ├── chat.js                ← chat-agent (single-shot, zonder tools)
 │   ├── seo.js                 ← DataForSEO: zoekvolumes + posities
 │   ├── geo.js                 ← AI-zichtbaarheid: baseline + live sources
@@ -57,10 +56,10 @@ Allemaal in Vercel (Settings → Environment Variables), in élke omgeving.
 | `AUTH_SECRET` | ja | HMAC-sleutel voor de sessietokens. **Geen fallback** — ontbreekt hij, dan falen alle logins (bewust) |
 | `CLIENTS` | ja | JSON met per klant het wachtwoord, de sheet-, map- en connector-verwijzingen. Markeer als **Sensitive** |
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | ja | service-account-JSON voor Sheets + Drive. Markeer als **Sensitive** |
-| `ANTHROPIC_API_KEY` | ja | analyse + chat; per klant te overschrijven met `anthropic_api_key` in `CLIENTS` |
+| `ANTHROPIC_API_KEY` | ja | chat + rapportduiding; per klant te overschrijven met `anthropic_api_key` in `CLIENTS` |
 | `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` | nee | SEO-tab en de Sources-sub-tab van GEO. Zonder deze twee blijven die leeg met uitleg; de rest merkt er niets van |
 | `LOGO_HOSTS` | nee | extra toegestane hosts voor klantlogo's |
-| `AGENT_SYSTEM_PROMPT` / `ANALYSIS_SYSTEM_PROMPT` | nee | prompt-overrides |
+| `AGENT_SYSTEM_PROMPT` / `REPORT_SYSTEM_PROMPT` | nee | prompt-overrides |
 
 De volledige veldenlijst van `CLIENTS` staat in
 [docs/NIEUWE-KLANT.md](docs/NIEUWE-KLANT.md#10--voeg-de-klant-toe-aan-clients-in-vercel).
@@ -131,8 +130,7 @@ een bestaande tab):
 node scripts/add-config-tab.js --apply --only <klantcode>
 ```
 
-Promptevals na een wijziging aan `agents/Analysis_Agent.md` of
-`agents/Chat_Agent.md` — zie [evals/README.md](evals/README.md):
+Promptevals na een wijziging aan `agents/Chat_Agent.md` — zie [evals/README.md](evals/README.md):
 
 ```bash
 node evals/run.mjs

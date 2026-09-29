@@ -774,7 +774,7 @@
     if (used.has("website"))
       items.push(["Website", "GA4 en Search Console via Windsor.ai. Unieke gebruikers zijn niet optelbaar over dagen; Search Console loopt 2 tot 3 dagen achter. Landingspagina's en zoekopdrachten beslaan hoogstens 30 dagen."]);
     if (used.has("roas"))
-      items.push(["ROAS", "GA4-omzet (last click) en platform-omzet staan naast elkaar en worden nooit opgeteld. Deze slides volgen de rapportperiode; de ROAS-tab in het dashboard toont standaard de lopende maand."]);
+      items.push(["ROAS", "GA4-omzet (last click) en platform-omzet staan naast elkaar en worden nooit opgeteld. Deze slides volgen de rapportperiode; ROAS onder Ads in het dashboard toont standaard de lopende maand."]);
     if (used.has("email"))
       items.push(["E-mail", "Klaviyo of ConvertKit via Windsor.ai. Klaviyo is gemaximeerd op de laatste 30 dagen."]);
     if (used.has("seo"))

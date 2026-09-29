@@ -450,9 +450,6 @@ a { color: inherit; text-decoration: none; }
 /* De beacon: Candy, net als in de lockup. Decoratie, nooit data. */
 .login-beacon { width: 7px; height: 7px; border-radius: 50%; background: #ed8afa; }
 
-/* De chat heeft een token nodig; vóór het dashboard is de knop een dode knop. */
-body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
-
 /* Ladder: 900 stapelt, 520 laat het beeld vallen. */
 @media (max-width: 900px) {
   .login-shell { padding: 20px 24px; }
@@ -848,6 +845,10 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
 /* Meta Ads-blokken onder de campagnetabel (funnel, creatie, doelgroep). */
 .ads-block { margin-top: 48px; }
 .ads-block:empty { display: none; }
+/* De funnel staat bovenaan de Meta-tab: geen marge erboven, wel tussen hem en
+   de campagnekop eronder. Is hij leeg (verborgen), dan blijft de kop bovenaan. */
+.ads-metapane > .ads-block:first-child { margin-top: 0; }
+.ads-metapane > .ads-block:not(:empty) + .report-head { margin-top: 48px; }
 /* min(): onder 320px valt een kaart terug op de volle breedte in plaats van
    horizontaal te scrollen — geen eigen breekpunt nodig. */
 .creative-grid {
@@ -1563,33 +1564,6 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
   40% { transform: scale(1); opacity: 1; }
 }
 
-.chat-toggle-btn {
-  position: fixed;
-  bottom: 24px; right: 24px;
-  height: 48px;
-  padding: 0 20px;
-  border-radius: 999px;
-  background: var(--btn-primary);
-  border: none; color: #fff;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-size: 11px;
-  display: inline-flex; align-items: center; gap: 8px;
-  cursor: pointer;
-  box-shadow: 0 12px 30px rgba(var(--heat), 0.32);
-  transition: all 0.25s;
-  z-index: 20;
-}
-.chat-toggle-btn:hover { transform: translateY(-2px); }
-.chat-toggle-btn.hidden { transform: translateY(120%); opacity: 0; pointer-events: none; }
-.chat-toggle-btn .blip {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: #fff;
-  animation: pulse 1.6s infinite;
-}
-
 /* ==========================================================
    Tweaks panel
    ========================================================== */
@@ -2063,11 +2037,13 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
 .roas-notes strong { color: var(--fg); }
 
 /* Actief scenario-rij in de break-even-tabel. */
-#page-roas .lib-table tbody tr.on { background: var(--accent-10); }
-#page-roas .lib-table tbody tr { cursor: default; }
-#page-roas .lib-table table { min-width: 980px; }
+/* Datalampje rechtsboven: stond in de eigen sub-tabbalk toen ROAS een pagina was. */
+.roas-stamp { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+#roas-content .lib-table tbody tr.on { background: var(--accent-10); }
+#roas-content .lib-table tbody tr { cursor: default; }
+#roas-content .lib-table table { min-width: 980px; }
 /* Bedragen en ratio's nooit over twee regels breken — dat leest als twee waarden. */
-#page-roas .lib-table td.right, #page-roas .lib-table th.right { white-space: nowrap; }
+#roas-content .lib-table td.right, #roas-content .lib-table th.right { white-space: nowrap; }
 
 /* ==========================================================
    Website-tab (GA4 + Search Console)
@@ -2127,7 +2103,7 @@ body:has(#app-screen:not(.on)) .chat-toggle-btn { display: none; }
    segmenten is de ring de verhouding en de legenda de waarde. */
 .web-donut {
   display: flex; gap: 28px; align-items: center; flex-wrap: wrap;
-  margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border);
+  margin: 14px 0 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border);
 }
 .web-donut .chart { flex: 0 0 auto; color: var(--fg); }
 .web-donut .legend {
@@ -2552,7 +2528,7 @@ th.c, td.c { text-align: center; }
    en haalt hem daarna weer weg. */
 
 @media print {
-  .sidebar, .topbar, .chat-panel, .chat-toggle-btn, .tweaks-panel,
+  .sidebar, .topbar, .chat-panel, .tweaks-panel,
   .nav-backdrop, .rp-deckbar { display: none !important; }
   html, body { background: #fff; }
   .page-shell, .app-main, .page-content { display: block; padding: 0; margin: 0; max-width: none; }

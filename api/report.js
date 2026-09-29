@@ -40,7 +40,7 @@ function loadPrompt() {
   return null;
 }
 
-// Zelfde aanpak als analysis.js: het model hoort kale JSON te geven, maar een
+// Het model hoort kale JSON te geven, maar een
 // codehek of een afgekapte staart mag geen hele presentatie kosten.
 function repairTruncatedJson(s) {
   let inStr = false, esc = false;
@@ -114,7 +114,7 @@ module.exports = async (req, res) => {
   }
 
   // Per-klant Claude-key (optioneel, server-side) met terugval op de gedeelde
-  // mayday-key. Zelfde patroon als chat.js en analysis.js.
+  // mayday-key. Zelfde patroon als chat.js.
   let apiKey = ANTHROPIC_API_KEY;
   try {
     const clients = JSON.parse(process.env.CLIENTS || '{}');

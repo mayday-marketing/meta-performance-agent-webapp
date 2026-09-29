@@ -1,9 +1,9 @@
 # Prompt evals
 
-A tiny, dependency-free harness to sanity-check the **Analysis** and **Chat** agents
-after you change a prompt (`agents/Analysis_Agent.md`, `agents/Chat_Agent.md`) or a
-model. It catches regressions in the things that are cheap to check automatically —
-JSON shape, field counts, plain-text formatting, obvious fabrication — so you can
+A tiny, dependency-free harness to sanity-check the **Chat** agent after you change
+its prompt (`agents/Chat_Agent.md`) or the model. It catches regressions in the
+things that are cheap to check automatically — plain-text formatting, a non-empty
+answer that cites numbers — so you can
 tune prompts on a weaker model without eyeballing every run.
 
 It is **not** an LLM-judge. It runs deterministic assertions and flags anything
@@ -25,7 +25,7 @@ node evals/run.mjs
 ```
 
 The runner logs in via `/api/auth` to get a real token, then replays every fixture
-in `fixtures/` against `/api/analysis` and `/api/chat` and prints PASS/WARN/FAIL per
+in `fixtures/` against `/api/chat` and prints PASS/WARN/FAIL per
 check. Exit code is non-zero if anything FAILs.
 
 Filter to one fixture: `node evals/run.mjs realestate-2026-06`.
@@ -38,7 +38,8 @@ Each `fixtures/*.json` is one realistic period:
 { "brandName": "...", "period": { "startDate", "endDate", "days" }, "summary": { … } }
 ```
 
-`summary` is exactly the object `buildAnalysisSummary()` produces in `app.js`
+`summary` is exactly the object `buildAnalysisSummary()` produces (summary.js; the
+chat and the MCP koppeling use it)
 (kpis, byPlatform, cadence, aboveAverage, belowAverage, ads, …). To
 capture a **real** one: log into the app, load a dashboard, and in the browser
 console run `copy(buildAnalysisSummary())`, then paste it as the `summary` of a new

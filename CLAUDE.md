@@ -71,9 +71,9 @@ isolation bugs (an email cache that wasn't client-keyed; a `sheetId` IDOR in
 - **Google Drive** (`api/drive.js`) — per-client brand context + raw-data CSVs/PDFs,
   read via a service-account JWT. Folder tree is a fixed convention
   (`06_PERFORMANTIE/6.4_Ruwe-Data`, `00_AI-CONTEXT`, etc.). Actions: `scan`,
-  `load-period`, `load-all`, `analysis-benchmarks`, `context`.
-- **Google Sheets** (`api/sheets.js`) — reads `Merkcontext`, appends analysis
-  history. Sheet is resolved from `CLIENTS[clientId].sheetId` (never the request).
+  `load-period`, `load-all`, `context`, `report-template`.
+- **Google Sheets** (`api/sheets.js`) — reads `Merkcontext`, Config en Doelen
+  (alleen lezen, `spreadsheets.readonly`). Sheet is resolved from `CLIENTS[clientId].sheetId` (never the request).
 - **GA4** (`googleanalytics4` via Windsor) — omzetbron voor de ROAS-tab en
   hoofdbron voor de Website-tab: `purchase_revenue` per dag, totaal én per
   `session_source_medium`. Property-id uit de Config-tab (`GA4 property`).
@@ -81,11 +81,14 @@ isolation bugs (an email cache that wasn't client-keyed; a `sheetId` IDOR in
   Website-tab: kliks, vertoningen, positie, queries en pagina's. Property uit de
   Config-tab (`Search Console site`).
 
-## ROAS-tab (blended MER + kanaalsplitsing)
+## ROAS onder Ads (blended MER + kanaalsplitsing)
 
-Gemodelleerd op de handmatige "Daily ROAS"-sheet van een klant. Eigen pagina
-(`#page-roas`, nav `data-page="roas"`) met een **eigen periode** (month-to-date),
-los van de dashboardperiode in de topbar.
+Gemodelleerd op de handmatige "Daily ROAS"-sheet van een klant. Sinds 29-09-2026
+geen eigen pagina meer maar drie sub-tabs van Ads — **ROAS blended**, **ROAS
+kanalen**, **ROAS break-even** (`ADS_TABS` met een `roas`-sleutel → `state.roasTab`,
+één render-doel `#roas-content` in `data-adspane="roas"`). De verantwoording staat
+onder elk van de drie. `switchPage("roas")` landt op Ads. Met een **eigen periode**
+(month-to-date), los van de dashboardperiode in de topbar.
 
 - **`api/_channels.js`** — registry van betaalde kanalen: groep (`social`/`search`),
   Windsor-connector-slug, spend-/omzetveld en een regex om het kanaal in GA4's
@@ -159,7 +162,8 @@ topbar — anders dan de ROAS-tab, die een eigen maandperiode heeft.
 
 ### Donut, verschilkolommen en zoeken in de Website-tab
 
-- **Donut onder Kanalen** (`Charts.donut` in `charts.js`) vat GA4's dozijn channel
+- **Donut boven de kanaaltabel** (`Charts.donut` in `charts.js`; eerst het beeld,
+  dan de cijfers — keuze eigenaar 29-09-2026) vat GA4's dozijn channel
   groups samen tot zeven vaste groepen: organisch, betaald, direct, verwijzing,
   e-mail, AI, overig. De volgorde ligt vast en daarmee de kleur — **kleur volgt het
   kanaal, nooit zijn rangorde**, dus 'organisch' blijft dezelfde tint ook als het
@@ -210,9 +214,10 @@ geslachtsfilter (`state.webDemoGender`).
   voor 'converteert het best' vanaf 50 sessies én 5 conversies. De matrix kleurt
   op de index tegenover het gemiddelde (≥ 1,2 groen, ≤ 0,8 rood), nooit op volume.
 
-## Meta Ads-verrijking (Overview → Advertenties)
+## Meta Ads-verrijking (Ads → Meta Ads)
 
-Onder de campagnetabel staan drie blokken — funnel, creatie, doelgroep — gevoed
+Drie blokken rond de campagnetabel — de funnel **erboven** (eerst het overzicht,
+keuze eigenaar 29-09-2026), creatie en doelgroep eronder — gevoed
 door extra calls in `getDashboard` (`adsExtra` in de respons). Getest op
 24-09-2026 met BAJA en Spotto.
 
@@ -245,6 +250,10 @@ door extra calls in `getDashboard` (`adsExtra` in de respons). Getest op
   (`skipSheet`), anders valt er niets op te mergen.
 
 ## Navigatie: Overview · Social · Ads
+
+- **Geen zwevende agentknop** meer rechtsonder (weg sinds 29-09-2026). De chat opent
+  alleen via "Vraag de Agent" in de topbar, tot de knop "Bespreek in Claude" er komt
+  (na MCP V2).
 
 - **Overview** (`#page-overview`, `renderHome()`) is overkoepelend: één blok per
   domein (Social, Ads, Website), elk met een link naar zijn pagina. Hij rekent
@@ -784,16 +793,13 @@ afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
   vaste groepen houden hun kleur. Wat een taart verbergt — de verschuiving over
   tijd — hoort in een 100%-gestapelde staaf, niet in een andere donut.
 
-## The two AI agents (know which prompt serves which consumer)
+## De AI-prompts (know which prompt serves which consumer)
 
-- **Analysis** (`api/analysis.js` + `agents/Analysis_Agent.md`): **geen afnemer
-  meer in de UI** sinds de AI-analyse-tab weg is (29-09-2026); de prompt verwacht
-  nog de oude velden (`performanceBreakdown`, Good/Bad). Single-shot,
-  returns strict JSON (`summary`/`winners`/`losers`/`recs`). The frontend builds a
-  pre-aggregated, pre-classified `summary` in `buildAnalysisSummary()` (summary.js) and
-  the prompt consumes exactly those field names — keep them in sync. Uses
-  `claude-opus-4-8`, `max_tokens: 8192`. `extractJson`/`repairTruncatedJson`
-  tolerate truncated/fenced output.
+- **Analysis-agent is verwijderd** (29-09-2026): `api/analysis.js`,
+  `agents/Analysis_Agent.md`, Drive-actie `analysis-benchmarks` en het schrijfpad
+  naar de tab Analysehistoriek. Analyses lopen via de MCP-koppeling.
+  `buildAnalysisSummary()` (summary.js) bestaat nog: het voedt de chat en de MCP.
+- **Rapportduiding** (`api/report.js` + `agents/Report_Agent.md`): zie Rapport-tab.
 - **Chat** (`api/chat.js`): **single-shot, stateless, no tools.** Loads
   `agents/Chat_Agent.md` (lean, harness-matched) with fallback to
   `agents/Meta-Performance_Agent.md`. The frontend injects context into the
@@ -944,10 +950,10 @@ syntax shows literally — the chat prompt tells the model to avoid `**`/`#`/etc
 - **Non-fatal add-on calls:** creative/video/conversion ad fields are fetched in
   separate calls with a tighter timeout so a slow breakdown can't sink the core
   fetch; failures return `{__error}` and are surfaced in `errors`, not thrown.
-- **Per-client Anthropic key:** `chat.js`/`analysis.js` use
+- **Per-client Anthropic key:** `chat.js`/`report.js` use
   `CLIENTS[clientId].anthropic_api_key` if present, else the shared
   `ANTHROPIC_API_KEY`.
-- **Truncated-JSON repair** in `analysis.js` is a band-aid for `max_tokens` cutoff —
+- **Truncated-JSON repair** in `report.js` is a band-aid for `max_tokens` cutoff —
   the proper fix is structured output / tool-use, not a bigger regex.
 
 ## Env vars
@@ -961,7 +967,7 @@ voor alle klanten; per klant te overschrijven met `dataforseo_login` /
 `dataforseo_password` in `CLIENTS`. Zonder deze twee blijven de SEO-tab en de
 Sources-sub-tab van GEO leeg met een uitleg; de rest van het dashboard — inclusief
 de GEO-baseline, die uit Drive komt — merkt er niets van). Optional prompt
-overrides: `AGENT_SYSTEM_PROMPT`, `ANALYSIS_SYSTEM_PROMPT`, `REPORT_SYSTEM_PROMPT`.
+overrides: `AGENT_SYSTEM_PROMPT`, `REPORT_SYSTEM_PROMPT`.
 MCP-koppeling: `MCP_AGENCY_KEYS` (JSON naam → sleutel ≥ 32 tekens, mark Sensitive;
 zonder deze variabele antwoordt `/api/mcp` 503), optioneel `MCP_DISABLED=1`,
 `MCP_ALLOWED_ORIGINS` en `DEMO_CLIENTS`.
