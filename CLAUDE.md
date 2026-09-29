@@ -15,9 +15,10 @@ this repo are Dutch too — match that.
 
 ## Architecture (no build step)
 
-- **Frontend:** a single static `index.html` + `app.js` (~3k lines, one IIFE) +
-  `styles.css` + `data.js`. No framework, no bundler, **no `package.json`**. Edit
-  and deploy as-is.
+- **Frontend:** a single static `index.html` + `app.js` (one IIFE) +
+  `summary.js` (gedeelde rekenlaag, zie 'MCP-koppeling') + `styles.css` +
+  `data.js`. No framework, no bundler, **no `package.json`**. Edit and deploy
+  as-is.
 - **Backend:** Vercel serverless functions in `api/*.js` (Node, CommonJS
   `module.exports = async (req,res) => …`). Timeouts/memory set per-function in
   `vercel.json`.
@@ -680,7 +681,7 @@ afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
 
 - **Analysis** (`api/analysis.js` + `agents/Analysis_Agent.md`): single-shot,
   returns strict JSON (`summary`/`winners`/`losers`/`recs`). The frontend builds a
-  pre-aggregated, pre-classified `summary` in `buildAnalysisSummary()` (app.js) and
+  pre-aggregated, pre-classified `summary` in `buildAnalysisSummary()` (summary.js) and
   the prompt consumes exactly those field names — keep them in sync. Uses
   `claude-opus-4-8`, `max_tokens: 8192`. `extractJson`/`repairTruncatedJson`
   tolerate truncated/fenced output.
@@ -694,6 +695,76 @@ afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
     tool-using agent manual** — it is for an Anthropic Project/Claude-agent-with-MCP
     setup, NOT the webapp. Do not point the webapp at it; do not "polish" it to fit
     the webapp. It's kept only as the fallback.
+
+## MCP-koppeling (api/mcp.js + summary.js)
+
+Laat Claude Code of claude.ai de dashboardcijfers opvragen voor strategische
+gesprekken, als MCP-server (Model Context Protocol) op `/api/mcp`. Stateless
+Streamable HTTP: één JSON-RPC-bericht per POST, antwoord als JSON, geen sessies,
+geen dependencies. Koppelen: `docs/MCP.md`.
+
+- **Eén rekenlaag, twee afnemers.** Alles wat het dashboard uit een API-respons
+  berekent (normalisatie, classifiers, KPI's, drempels, oordelen, doelstatus,
+  GEO-blokken) staat in `summary.js` (UMD: `window.Summary` in de browser,
+  `require` op de server). `app.js` heeft bovenaan alleen aliassen en dunne
+  wrappers die `state` doorgeven. **Nieuwe rekenlogica die een tool ook nodig
+  heeft hoort in summary.js**, zonder DOM, `state` of fetch — anders zegt de
+  MCP-koppeling iets anders dan het scherm. Bij de verhuizing (26-09-2026) is
+  oud tegen nieuw vergeleken op echte data van twee klanten: byte voor byte gelijk.
+- **In-process, niet via HTTP.** Een tool roept `windsor.js`, `sheets.js`,
+  `drive.js` en `geo.js` in hetzelfde proces aan, met een kortlevend
+  dashboardtoken (`_auth.js`) voor precies die klant. Elke handler doet dus
+  zijn eigen `verifyToken` en leidt resources zelf af uit `CLIENTS`. Geen
+  preview-SSO, geen tweede invocation, geen self-URL. Dat token verlaat het
+  proces nooit.
+- **Toolargumenten zijn het nieuwe request-body.** Alleen `clientId`,
+  `startDate`/`endDate`, `compare` en `revenueBasis`. Elk ander argument wordt
+  geweigerd, niet genegeerd. Zet er nooit een sheet-, map-, account- of
+  connector-id bij.
+- **Scope-object vanaf dag één.** V1 kent alleen `{kind:'agency'}`: elke klant
+  uit `CLIENTS`. V2 (OAuth per klant, zie 'MCP V2' hieronder) voegt
+  `{kind:'client', clientId}` toe; `resolveClient()` negeert dan elke andere
+  klantcode. De tools zelf veranderen niet.
+- **Auth.** `MCP_AGENCY_KEYS` = JSON `{"naam":"sleutel"}`, sleutel ≥ 32 tekens,
+  vergeleken als SHA-256 met `timingSafeEqual` over álle sleutels. Ontbreekt de
+  variabele of is er geen geldige sleutel, dan 503 — een lege bearer kan nooit
+  matchen. De naam staat in het auditlog, zodat één persoon apart ingetrokken
+  kan worden. `MCP_DISABLED=1` is de noodrem.
+- **Geen betaalde calls.** SEO-rank-check, GEO-bronnen en ongeplande
+  vermeldingen kosten per call op het gedeelde DataForSEO-saldo; een gesprek kan
+  tientallen tools aanroepen. Ze staan er bewust niet in.
+- **Wat de server verlaat.** Elk resultaat gaat door `redact()` (`api_key=`,
+  tokens, bearer), is ingekort tot 200.000 tekens en zit in een omslag met de
+  melding dat tekstvelden data zijn, geen instructies. Interne fouten gaan
+  generiek naar buiten en volledig (geredigeerd) naar de log.
+- **Cache per klant** (10 min, sleutel met `clientId`, scope en argumenten) en
+  een rem van 60 tool-calls per minuut per sleutel per instantie. De echte
+  rem hoort een Vercel Firewall-regel op `/api/mcp` te zijn.
+- **Deadline 130 s** per tool, onder `maxDuration: 150`. Een koude
+  `getDashboard` duurde bij de test 75 s; de tweede keer komt uit de cache.
+- **Tijdzone.** De server rekent in UTC. Weekindelingen en 'gisteren' kunnen
+  rond middernacht een dag verschillen van de browser; totalen niet.
+- **Metricool-klanten** worden niet ondersteund: er is er geen (stand
+  26-09-2026), en `transformDashboard` staat nog in app.js.
+
+### MCP V2 — per klant via OAuth (nog niet gebouwd)
+
+claude.ai verwacht voor een eigen connector OAuth 2.1 met dynamische
+registratie. Plan, stateless met ondertekende blobs:
+
+- `/.well-known/oauth-authorization-server` + `oauth-protected-resource`,
+  PKCE S256 verplicht, `redirect_uri` exact en alleen https.
+- Registratie = ondertekende blob als `client_id`; autorisatie = het bestaande
+  inlogscherm (klantcode + wachtwoord), met `X-Frame-Options: DENY`, strikte CSP
+  en een regel die zegt welk merk gedeeld wordt; code 60 s geldig.
+- Access token 24 u, roterend refresh token 90 dagen, ondertekend met een
+  **eigen HKDF-sleutel** uit `AUTH_SECRET` en `aud: mcp`, zodat hij nooit op een
+  dashboard-endpoint geldt. Intrekken via `mcp_min_ts` per klant en een globale
+  `MCP_MIN_TS`.
+- **Vóór V2 eerst:** rate limiting op `/api/auth` (en straks
+  `/api/oauth/authorize`) via de Vercel Firewall, plus een timing-veilige
+  wachtwoordvergelijking in `auth.js`. Nu kan inloggen onbeperkt geprobeerd
+  worden.
 
 ## Sessie-einde: state leegmaken is niet genoeg
 
@@ -756,6 +827,9 @@ voor alle klanten; per klant te overschrijven met `dataforseo_login` /
 Sources-sub-tab van GEO leeg met een uitleg; de rest van het dashboard — inclusief
 de GEO-baseline, die uit Drive komt — merkt er niets van). Optional prompt
 overrides: `AGENT_SYSTEM_PROMPT`, `ANALYSIS_SYSTEM_PROMPT`, `REPORT_SYSTEM_PROMPT`.
+MCP-koppeling: `MCP_AGENCY_KEYS` (JSON naam → sleutel ≥ 32 tekens, mark Sensitive;
+zonder deze variabele antwoordt `/api/mcp` 503), optioneel `MCP_DISABLED=1` en
+`MCP_ALLOWED_ORIGINS`.
 
 ## Deploy
 

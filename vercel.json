@@ -32,6 +32,10 @@
     "api/geo.js": {
       "maxDuration": 120,
       "memory": 1024
+    },
+    "api/mcp.js": {
+      "maxDuration": 150,
+      "memory": 1024
     }
   },
   "rewrites": [

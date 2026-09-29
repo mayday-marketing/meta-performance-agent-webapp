@@ -1,13 +1,5 @@
-const crypto = require('crypto');
-
-const SECRET = process.env.AUTH_SECRET;
-
-function signToken(clientId) {
-  const ts = Date.now();
-  const payload = `${clientId}:${ts}`;
-  const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('hex');
-  return Buffer.from(`${payload}:${sig}`).toString('base64');
-}
+// Ondertekenen gebeurt op één plek (_auth.js); mcp.js gebruikt dezelfde functie.
+const { signToken } = require('./_auth');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
