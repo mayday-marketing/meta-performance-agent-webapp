@@ -87,21 +87,41 @@ function redact(text) {
 // hij leeg, dan is er géén geldige sleutel en antwoordt alles 503 — een lege
 // bearer mag nooit kunnen matchen (timingSafeEqual op twee lege buffers is true).
 function agencyKeys() {
+  return readAgencyKeys().keys;
+}
+
+// Zelfde lezing, plus wat er mis is — voor de log bij een 503. Nooit een
+// sleutel of een deel ervan: alleen de vorm (eerste teken, lengtes, namen).
+function readAgencyKeys() {
+  const raw = process.env.MCP_AGENCY_KEYS;
+  if (raw == null || raw === '') return { keys: [], problems: ['MCP_AGENCY_KEYS ontbreekt in deze omgeving'] };
   let map;
-  try { map = JSON.parse(process.env.MCP_AGENCY_KEYS || '{}'); } catch { return []; }
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return [];
-  const out = [];
-  for (const [name, key] of Object.entries(map)) {
-    if (typeof key === 'string' && key.length >= 32 && /^[a-z0-9._-]{1,40}$/i.test(name)) {
-      out.push({ name, hash: sha256(key) });
-    }
+  try { map = JSON.parse(raw); }
+  catch {
+    const first = raw.trim().charAt(0);
+    const curly = /[\u201C\u201D\u2018\u2019]/.test(raw);
+    return { keys: [], problems: [`MCP_AGENCY_KEYS is geen geldige JSON (lengte ${raw.length}, eerste teken '${first === '{' ? '{' : 'geen {'}'${curly ? ', bevat gekrulde aanhalingstekens' : ''})`] };
   }
-  return out;
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return { keys: [], problems: ['MCP_AGENCY_KEYS is geen object { "naam": "sleutel" }'] };
+  const out = [], problems = [];
+  for (const [name, key] of Object.entries(map)) {
+    const nameOk = /^[a-z0-9._-]{1,40}$/i.test(name);
+    const keyOk = typeof key === 'string' && key.length >= 32;
+    if (nameOk && keyOk) { out.push({ name, hash: sha256(key) }); continue; }
+    if (!nameOk) problems.push(`naam ongeldig (lengte ${name.length}; alleen letters, cijfers, . _ -)`);
+    if (!keyOk) problems.push(`sleutel van '${nameOk ? name : '?'}' is ${typeof key === 'string' ? key.length + ' tekens' : 'geen tekst'} (minimaal 32)`);
+  }
+  if (!out.length && !problems.length) problems.push('MCP_AGENCY_KEYS is een leeg object');
+  return { keys: out, problems };
 }
 
 function authenticate(req) {
   const keys = agencyKeys();
-  if (!keys.length || !process.env.AUTH_SECRET) return { status: 503, error: 'MCP-koppeling is niet geconfigureerd.' };
+  if (!keys.length || !process.env.AUTH_SECRET) {
+    const why = readAgencyKeys().problems.concat(process.env.AUTH_SECRET ? [] : ['AUTH_SECRET ontbreekt']);
+    console.warn('[mcp] niet geconfigureerd:', why.join(' · '));
+    return { status: 503, error: 'MCP-koppeling is niet geconfigureerd.' };
+  }
   const m = /^Bearer\s+(\S{1,512})$/i.exec(String(req.headers.authorization || ''));
   if (!m) return { status: 401, error: 'Bearer-token ontbreekt.' };
   // Hashes vergelijken: vaste lengte, dus timingSafeEqual gooit nooit, en de
