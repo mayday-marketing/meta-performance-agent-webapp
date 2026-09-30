@@ -610,11 +610,17 @@ a { color: inherit; text-decoration: none; }
 
 .app-main { flex: 1; display: flex; flex-direction: column; background: var(--bg); min-width: 0; }
 
+/* Sticky: de periode blijft in beeld op lange pagina's, anders weet je halverwege
+   Website of Ads niet meer welke cijfers je bekijkt. Dezelfde aanpak als de
+   zijbalk (sticky op het venster). z-index boven de inhoud (thumbnails 3,
+   tooltips 5), onder de lade en haar backdrop (50/60) en de tweaks (50). In
+   print verdwijnt hij (@media print onderaan). */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; padding: 18px 28px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
+  position: sticky; top: 0; z-index: 20;
 }
 .topbar .title-group { display: flex; flex-direction: column; gap: 4px; }
 .topbar .crumbs {
@@ -645,6 +651,31 @@ a { color: inherit; text-decoration: none; }
 }
 .date-filter #period-apply { margin-left: 4px; }
 .date-filter.dirty #period-apply { box-shadow: 0 0 0 2px var(--accent-10); }
+/* Eén rij houden, want elke rij extra staat permanent in beeld. Gemeten met de
+   volle zijbalk (224px): de kruimels vallen als eerste weg (de pagina heeft zelf
+   een kop), dan de veldlabels en de tekst van de agent-knop, dan die van Export. */
+@media (max-width: 1360px) {
+  .topbar .title-group { display: none; }
+  .topbar .controls { margin-left: auto; }
+}
+@media (max-width: 1180px) {
+  .topbar .date-filter label { display: none; }
+  .topbar .agent-btn .label { display: none; }
+  .topbar .agent-btn { padding-left: 12px; padding-right: 12px; }
+}
+@media (max-width: 1024px) {
+  .topbar .export-btn .label { display: none; }
+}
+/* Telefoon: de periodebalk (±495px) is breder dan het scherm en liet de hele
+   pagina horizontaal schuiven. Hier over de volle breedte, datums op één regel,
+   vergelijking en Bijwerken eronder. */
+@media (max-width: 520px) {
+  .topbar .controls { width: 100%; margin-left: 0; }
+  .topbar .date-filter { flex-wrap: wrap; width: 100%; row-gap: 6px; padding: 6px 10px; }
+  .topbar .date-filter input { flex: 1 1 40%; min-width: 0; width: auto; }
+  .topbar .date-filter .divider { display: none; }
+  .topbar .date-filter #period-apply { margin-left: auto; }
+}
 .btn {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1870,6 +1901,9 @@ a { color: inherit; text-decoration: none; }
   }
   .geo-tabs button, .subtabs button { flex: none; scroll-snap-align: start; }
   .kpi-grid { grid-template-columns: 1fr; }
+  /* De topbar blijft staan tijdens het scrollen; op een smal scherm kost elke
+     pixel ervan leesruimte. */
+  .topbar { padding: 10px 16px; gap: 8px; }
 }
 
 /* ---- ≤ 520: tabellen schuiven, eerste kolom blijft staan --------------- */
