@@ -106,6 +106,7 @@
     compare: "prev",                  // topbar: 'prev' (vorige periode) | 'yoy' (vorig jaar)
     websiteTab: "overzicht",          // actief sub-blad van de Website-tab
     webDemoGender: "all",             // filter in de Doelgroep-sub-tab: all / female / male
+    webDemoSort: {},                  // sortering in de conversietabellen en de evolutie: { tabel: { col, dir } }
     webDemoConv: "goal",              // schakelaar boven de kanaalmatrix: 'goal' of een GA4-eventnaam uit 'Conversies'
     roasTab: "blended",               // blended | kanalen | breakeven (ROAS-sub-tabs onder Ads)
     bronnenTab: "bronnen",            // actief sub-blad van de Bronnen-tab
@@ -5787,9 +5788,38 @@
 
   window.__webDemoGender = (g) => { state.webDemoGender = g; renderWebsite(); };
   window.__webDemoConv = (k) => { state.webDemoConv = k; renderWebsite(); };
+  // Eerste klik aflopend, tweede oplopend; de eerste kolom zet de vaste volgorde terug.
+  window.__webDemoSort = (table, col) => {
+    const cur = state.webDemoSort[table];
+    state.webDemoSort[table] = col === "label" ? null
+      : { col, dir: cur && cur.col === col && cur.dir === "desc" ? "asc" : "desc" };
+    renderWebsite();
+  };
+  // Sorteerbare kop, zelfde knop als de campagnetabel (th-sort).
+  function demoSortTh(table, col, label, extra = "") {
+    const cur = state.webDemoSort[table];
+    const on = cur && cur.col === col;
+    const arrow = on ? (cur.dir === "asc" ? "↑" : "↓") : "↕";
+    return `<th${extra} aria-sort="${on ? (cur.dir === "asc" ? "ascending" : "descending") : "none"}"><button type="button" class="th-sort${on ? " on" : ""}" onclick="window.__webDemoSort('${escapeHtml(table)}','${escapeHtml(col)}')">${label}<span class="sort-arrow" aria-hidden="true">${arrow}</span></button></th>`;
+  }
+  // Sorteert rijen op een getal; ontbrekende waarden altijd onderaan.
+  function demoSortRows(list, table, valueOf) {
+    const cur = state.webDemoSort[table];
+    if (!cur) return list;
+    const m = cur.dir === "asc" ? 1 : -1;
+    return [...list].sort((a, b) => {
+      const va = valueOf(a, cur.col), vb = valueOf(b, cur.col);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return (va - vb) * m;
+    });
+  }
 
   function renderWebsiteDemo() {
-    return renderWebsiteDemoConversions() + renderWebsiteDemoBase();
+    // Eerst de oorspronkelijke grafieken (verdeling en kanaalmatrix), daaronder
+    // de conversies per leeftijd en geslacht met hun evolutie (keuze eigenaar).
+    return renderWebsiteDemoBase() + renderWebsiteDemoConversions();
   }
 
   // Eén tabel per conversie uit 'Conversies' in de Config-tab, naar leeftijd en
@@ -5826,20 +5856,35 @@
       return `<td title="${escapeHtml(`${fmt.int(g.conversions)} conversies uit ${fmt.int(g.sessions)} sessies · index ${nl1(g.index)}`)}"><span class="${tone}">${nl1(g.per1000)}</span></td>`;
     };
     const table = (title, dim, keys, labelOf) => {
+      const id = dim === "byAge" ? "age" : "gender";
       const base = tables[0][dim];
-      const cols = tables.map(t => `<th>${escapeHtml(t.label)}: aandeel</th><th>${escapeHtml(t.label)} per 1.000 sessies</th>`).join("");
-      const body = keys.map(k => {
+      const valueOf = (k, col) => {
+        if (col === "ses") return base.find(g => g.key === k)?.sessionShare;
+        const [what, i] = col.split(":");
+        const g = tables[+i]?.[dim].find(x => x.key === k);
+        return g ? (what === "share" ? g.share : g.per1000) : null;
+      };
+      const cols = tables.map((t, i) => demoSortTh(id, `share:${i}`, `${escapeHtml(t.label)}: aandeel`)
+        + demoSortTh(id, `rate:${i}`, `${escapeHtml(t.label)} per 1.000 sessies`)).join("");
+      const sorted = demoSortRows(keys, id, valueOf);
+      const body = sorted.map(k => {
         const b = base.find(g => g.key === k);
         return `<tr><td>${escapeHtml(labelOf(k))}</td><td>${pctS(b?.sessionShare)}</td>${tables.map(t => {
           const g = t[dim].find(x => x.key === k);
           return `<td>${pctS(g?.share)}</td>${rateCell(g)}`;
         }).join("")}</tr>`;
       }).join("");
-      const avg = `<tr><td><b>Gemiddeld</b></td><td></td>${tables.map(t => `<td></td><td><b>${nl1(t.avgPer1000)}</b></td>`).join("")}</tr>`;
+      const avg = `<tr><td><b>Gemiddeld bekend</b></td><td></td>${tables.map(t => `<td></td><td><b>${nl1(t.avgPer1000)}</b></td>`).join("")}</tr>`;
+      // Onbekend buiten de aandelen: wel de ratio, en welk deel van álle
+      // conversies erin zit, zodat de dekking per conversie zichtbaar blijft.
+      const unk = dim === "byAge" && tables.some(t => t.unknown && t.unknown.sessions)
+        ? `<tr class="demo-gap"><td colspan="${2 + tables.length * 2}"></td></tr>
+           <tr style="color:var(--fg-muted);"><td>Onbekend</td><td>—</td>${tables.map(t => `<td title="aandeel in álle ${escapeHtml(t.label.toLowerCase())}-conversies">${pctS(t.unknown?.shareOfAll)} van alle</td><td>${nl1(t.unknown?.per1000)}</td>`).join("")}</tr>`
+        : "";
       return `<h3 class="label-head" style="margin-top:22px;">${title}</h3>
         <div class="report-table"><table>
-          <thead><tr><th>${dim === "byAge" ? "Leeftijd" : "Geslacht"}</th><th>Aandeel sessies</th>${cols}</tr></thead>
-          <tbody>${body}${dim === "byAge" ? avg : ""}</tbody>
+          <thead><tr>${demoSortTh(id, "label", dim === "byAge" ? "Leeftijd" : "Geslacht")}${demoSortTh(id, "ses", "Aandeel sessies")}${cols}</tr></thead>
+          <tbody>${body}${dim === "byAge" ? avg : ""}${unk}</tbody>
         </table></div>`;
     };
     const ageKeys = AGE_ORDER.filter(a => tables.some(t => t.byAge.some(g => g.key === a)));
@@ -5855,7 +5900,7 @@
       ${table("Naar leeftijd", "byAge", ageKeys, a => a)}
       ${table("Naar geslacht", "byGender", genderKeys, k => GENDER_LABEL[k] || k)}
       ${renderWebsiteDemoEvolution(c.demoConversions, w.period)}
-      <p class="source-line">Alleen de groep met een bekende leeftijd én geslacht (Google Signals): ${coverage} van de conversies. Aandelen zijn binnen die groep; per 1.000 sessies is het aantal conversies per 1.000 sessies van die groep. Groen ligt minstens 20% boven het gemiddelde, rood minstens 20% eronder. * = minder dan ${res.minExpected} conversies te verwachten bij een gemiddelde ratio: te dun om te vergelijken.</p>
+      <p class="source-line">Alleen de groep met een bekende leeftijd én geslacht (Google Signals): ${coverage} van de conversies. Aandelen zijn binnen die groep; per 1.000 sessies is het aantal conversies per 1.000 sessies van die groep. Groen ligt minstens 20% boven het gemiddelde, rood minstens 20% eronder. * = minder dan ${res.minExpected} conversies te verwachten bij een gemiddelde ratio: te dun om te vergelijken. Onbekend = leeftijd of geslacht niet gekend door Google Signals; die groep staat buiten de aandelen omdat ze geen doelgroep is en niet willekeurig verdeeld. Klik op een kolomkop om te sorteren.</p>
     </section>`;
   }
 
@@ -5870,7 +5915,9 @@
     const MAAND = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
     const colLabel = (b) => ev.grain === "week" ? `${short(b.start)}–${short(b.end)}` : `${MAAND[+b.start.slice(5, 7) - 1]} ${b.start.slice(2, 4)}`;
     const nl1 = (n) => n == null ? "—" : n.toFixed(1).replace(".", ",");
-    const head = `<tr><th></th>${ev.buckets.map(b => `<th class="right"${b.partial ? ' style="font-style:italic;"' : ""} title="${b.start} t/m ${b.end}${b.partial ? " · onvolledig" : ""}">${colLabel(b)}</th>`).join("")}</tr>`;
+    const pctS = (n) => fmtShare(n == null ? null : n * 100);
+    const head = (g) => `<tr>${demoSortTh(`evo:${g.event}`, "label", "Groep")}${ev.buckets.map((b, i) => demoSortTh(`evo:${g.event}`, String(i), colLabel(b),
+      ` class="right"${b.partial ? ' style="font-style:italic;"' : ""} title="${b.start} t/m ${b.end}${b.partial ? " · onvolledig" : ""}"`)).join("")}</tr>`;
     const td = (cl, partial) => {
       const tip = `${fmt.int(cl.conversions || 0)} conversies uit ${fmt.int(cl.sessions || 0)} sessies${cl.index != null ? ` · index ${nl1(cl.index)}` : ""}`;
       const it = partial ? ' style="font-style:italic;"' : "";
@@ -5882,10 +5929,21 @@
       return `<td class="dm-cell ${tone ? `dm-${tone}` : ""}"${st ? ` style="${st};"` : ""} title="${escapeHtml(tip)}"><span class="dm-rate">${nl1(cl.per1000)}</span></td>`;
     };
     const grid = (g) => {
-      const tot = `<tr class="dm-foot"><th scope="row">Alle groepen</th>${g.total.map((t, i) => `<td class="dm-cell dm-total"${ev.buckets[i].partial ? ' style="font-style:italic;"' : ""}><span class="dm-rate">${nl1(t.per1000)}</span><span class="dm-n">${fmt.int(t.sessions)}</span></td>`).join("")}</tr>`;
-      const body = g.rows.map(rw => `<tr><th scope="row">${escapeHtml(rw.kind === "gender" ? (GENDER_LABEL[rw.key] || rw.key) : rw.key)}</th>${rw.cells.map((cl, i) => td(cl, ev.buckets[i].partial)).join("")}</tr>`).join("");
+      const it = (i) => ev.buckets[i].partial ? ' style="font-style:italic;"' : "";
+      const tot = `<tr class="dm-foot"><th scope="row">Bekende groepen</th>${g.total.map((t, i) => `<td class="dm-cell dm-total"${it(i)}><span class="dm-rate">${nl1(t.per1000)}</span><span class="dm-n">${fmt.int(t.sessions)}</span></td>`).join("")}</tr>`;
+      const gap = `<tr class="demo-gap"><td colspan="${ev.buckets.length + 1}"></td></tr>`;
+      const row = (rw) => `<tr><th scope="row">${escapeHtml(rw.kind === "gender" ? (GENDER_LABEL[rw.key] || rw.key) : rw.key)}</th>${rw.cells.map((cl, i) => td(cl, ev.buckets[i].partial)).join("")}</tr>`;
+      // Sorteren op een week of maand ordent de leeftijden onderling; geslacht
+      // en onbekend blijven als eigen blokken eronder staan.
+      const ages = demoSortRows(g.rows.filter(rw => rw.kind === "age"), `evo:${g.event}`, (rw, col) => {
+        const cl = rw.cells[+col]; return cl && cl.state !== "none" ? cl.per1000 : null;
+      });
+      const genders = g.rows.filter(rw => rw.kind === "gender");
+      const unk = g.unknown
+        ? gap + `<tr><th scope="row" style="color:var(--fg-muted);font-weight:400;">Onbekend</th>${g.unknown.map((u, i) => `<td class="dm-cell dm-thin"${it(i)} title="${escapeHtml(`${fmt.int(u.conversions)} conversies uit ${fmt.int(u.sessions)} sessies · ${pctS(u.shareOfAll)} van alle conversies in deze ${ev.grain === "week" ? "week" : "maand"}`)}"><span class="dm-rate">${nl1(u.per1000)}</span><span class="dm-n">${pctS(u.shareOfAll)}</span></td>`).join("")}</tr>`
+        : "";
       return `<h3 class="label-head" style="margin-top:22px;">${escapeHtml(g.label)} per ${ev.grain === "week" ? "week" : "maand"}, per 1.000 sessies</h3>
-        <div class="dm-wrap"><table class="dm-table"><thead>${head}</thead><tbody>${tot}${body}</tbody></table></div>`;
+        <div class="dm-wrap"><table class="dm-table"><thead>${head(g)}</thead><tbody>${tot}${ages.map(row).join("")}${genders.length ? gap + genders.map(row).join("") : ""}${unk}</tbody></table></div>`;
     };
     const notes = ev.observations.length
       ? `<ul class="source-line" style="margin:14px 0 0; padding-left:18px; color:var(--fg);">${ev.observations.map(o => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`
@@ -5894,7 +5952,7 @@
     return `<h3 class="label-head" style="margin-top:32px;">Evolutie</h3>
       ${notes}
       ${ev.grids.map(grid).join("")}
-      <p class="source-line">Elke cel tegenover het gemiddelde van dezelfde ${unit} (rij 'Alle groepen'): groen minstens 20% erboven, rood minstens 20% eronder. Grijs = minder dan ${ev.minExpected} conversies te verwachten, · = minder dan 5. <em>Cursief</em> = onvolledige ${unit} aan de rand van de periode. Per ${unit} tot 13 weken, daarna per maand.</p>`;
+      <p class="source-line">Elke cel tegenover het gemiddelde van dezelfde ${unit} (rij 'Bekende groepen'): groen minstens 20% erboven, rood minstens 20% eronder. Grijs = minder dan ${ev.minExpected} conversies te verwachten, · = minder dan 5. <em>Cursief</em> = onvolledige ${unit} aan de rand van de periode. Per ${unit} tot 13 weken, daarna per maand. Onbekend = leeftijd of geslacht niet gekend, zonder kleur; het kleine getal is het aandeel in álle conversies van die ${unit}. Klik op een ${unit} om de leeftijden daarop te sorteren.</p>`;
   }
 
   function renderWebsiteDemoBase() {

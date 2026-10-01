@@ -10,6 +10,8 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
   bij de posts. In dezelfde export als de posts levert het per dag een extra rij
   zonder `media_id`/`timestamp`. Bij Spotto telde dat als 8 extra posts, en nu
   weigert het dashboard daardoor de hele Instagram-tab (lege verplichte velden).
+  Gemeten op 01-10-2026: de terugval naar live kost **45,5 s** en is daarmee het
+  traagste blok van `getDashboard` (51,9 s in totaal) — dus van de Overview.
 - **Eerste stap:** `followers_count` uit de Instagram-postexport (Windsor-taak 44905)
   halen, bestaande rijen wissen, volledige backfill.
 - **Daarna:** aparte export `date, account_name, followers_count` naar een tab
@@ -24,6 +26,19 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
   leegmaken als de sheet dezelfde telling geeft als live.
 
 ## Snelheid
+
+### Historiek van de grootste exports inkorten (Spotto)
+- **Waarom:** het dashboard leest uit deze tabs hooguit 30 dagen detail
+  (`PAGE_LEVEL_MAX_DAYS`, `DETAIL_MAX_DAYS`), maar leest ze wel volledig in.
+  Gemeten op 01-10-2026: Search Console query 475.000 rijen (6,4 s), Google Ads
+  zoektermen 318.000 rijen (8,9 s), GA4 landing 259.000 rijen (7,8 s), Google Ads
+  conversieacties 81.000 rijen (6,1 s). Ze zitten in `getWebsite` (28,9 s) en
+  `getGoogleAds` (26,4 s).
+- **Eerste stap:** in Windsor.ai de exporttaken van die vier tabs op een rollend
+  venster zetten (bv. de laatste 60 dagen, ruimte voor de vergelijkingsperiode),
+  daarna opnieuw meten met de `[tijd]`-regels.
+- **Let op:** de dagtabs (GA4 dag, Search Console dag) níet inkorten: die dragen
+  de totalen over lange periodes en de jaar-op-jaarvergelijking.
 
 ### Nachtelijke voorberekening per klant
 - **Waarom:** een login bij Spotto kost ~20–33 s. De sheets veranderen één keer per

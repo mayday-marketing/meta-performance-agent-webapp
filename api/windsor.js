@@ -1191,6 +1191,19 @@ module.exports = async (req, res) => {
           const useSources  = !!sd.sources;
           const useDemo     = detail && !!sd.demographics;
           const skip = Promise.resolve(EMPTY);
+          // Een conversieveld dat de sheet niet heeft, levert toch rijen op: de
+          // tabkeuze telt alleen de dimensies, de maatstaf blijft dan leeg. Bij
+          // Spotto koos de kanaalvraag zo de doelgroeptab (zonder huur/koop) en
+          // bleef de schakelaar weg. Dan alsnog live.
+          const convCall = async (dims, event, label) => {
+            if (!hasGa4) return EMPTY;
+            const key = `conversions_${event}`;
+            const res = await windsorScoped('googleanalytics4', `${dims},${key}`, params, ADDON_MS, label);
+            if (res && res.__sheet && Array.isArray(res.data) && !res.data.some(r => r[key] != null)) {
+              return windsorScoped('googleanalytics4', `${dims},${key}`, params, ADDON_MS, `${label}-live`, { skipSheet: true });
+            }
+            return res;
+          };
 
           // Bronnen zitten in core en niet bij de add-ons: de tabel toont een
           // verschil met de vorige periode, en daarvoor moet ook de
@@ -1225,9 +1238,9 @@ module.exports = async (req, res) => {
             // boven de kanaalmatrix, op de sessies van GA4_DEMO) en × dag (de
             // evolutie, server-side gebundeld per week of maand).
             ...demoConversions.flatMap((c, i) => [
-              ga4(`age,gender,sessions,conversions_${c.event}`, `web-ga4-demo-conv-${i + 1}`, ADDON_MS),
-              ga4(`age,gender,session_default_channel_group,conversions_${c.event}`, `web-ga4-demo-conv-${i + 1}-kanaal`, ADDON_MS),
-              ga4(`date,age,gender,sessions,conversions_${c.event}`, `web-ga4-demo-conv-${i + 1}-dag`, ADDON_MS),
+              convCall(`age,gender,sessions`, c.event, `web-ga4-demo-conv-${i + 1}`),
+              convCall(`age,gender,session_default_channel_group`, c.event, `web-ga4-demo-conv-${i + 1}-kanaal`),
+              convCall(`date,age,gender,sessions`, c.event, `web-ga4-demo-conv-${i + 1}-dag`),
             ]),
           ] : [];
           // De doelkolom zit al in de sheet-tabs; dan is deze losse call overbodig.
@@ -1540,7 +1553,8 @@ module.exports = async (req, res) => {
               errors[`ga4DemoConv${i + 1}Kanaal`] = errOf(chRaw);
             }
             // Per dag, gebundeld tot week (maandag) of maand. De bundeling zelf
-            // (welke korrel, onvolledige randen) gebeurt in summary.js.
+            // (welke korrel, onvolledige randen) gebeurt in summary.js. Onbekende
+            // leeftijd of geslacht blijft erin: die krijgt een eigen rij.
             let daily = null;
             if (ok && !errOf(dayRaw) && rowsOf(dayRaw).some(r => r[key] != null)) {
               const m = new Map();
@@ -1548,7 +1562,6 @@ module.exports = async (req, res) => {
                 const date = isoDate(r.date);
                 const age = r.age == null || /^(unknown|\(not set\))$/i.test(String(r.age)) ? 'Unknown' : String(r.age);
                 const gender = /^(female|male)$/i.test(String(r.gender || '')) ? String(r.gender).toLowerCase() : 'unknown';
-                if (age === 'Unknown' || gender === 'unknown') continue;
                 const k = `${date}|${age}|${gender}`;
                 const e = m.get(k) || { date, age, gender, sessions: 0, conversions: 0 };
                 e.sessions += num(r.sessions); e.conversions += num(r[key]);

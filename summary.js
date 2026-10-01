@@ -1299,8 +1299,14 @@
             solid: avg != null && g.sessions * (avg / 1000) >= DEMO_EXPECTED_MIN,
           }));
       };
+      // Onbekend (leeftijd of geslacht ontbreekt) staat buiten de aandelen: het
+      // is geen doelgroep en niet willekeurig verdeeld. Wel de ratio, zodat te
+      // zien is of die groep anders converteert dan de bekende.
+      const unk = rows.filter(r => !isKnown(r));
+      const uSes = sum(unk, "sessions"), uConv = sum(unk, "conversions");
       return {
         event: c.event, label: c.label, available: true,
+        unknown: { sessions: uSes, conversions: uConv, per1000: per1000(uConv, uSes), shareOfAll: totalConv ? uConv / totalConv : null },
         totalConversions: totalConv,
         knownConversions: kConv,
         knownShare: totalConv ? kConv / totalConv : null,
@@ -1365,7 +1371,8 @@
     // afronding als de duiding: anders staat er 9,4 in de tabel en 9,5 erboven.
     const r = (g) => ({ ...g, sessionShare: round(g.sessionShare, 4), share: round(g.share, 4), per1000: round(g.per1000, 1), index: round(g.index, 2) });
     return {
-      tables: tables.map(t => t.available ? { ...t, knownShare: round(t.knownShare, 4), avgPer1000: round(t.avgPer1000, 1), byAge: t.byAge.map(r), byGender: t.byGender.map(r) } : t),
+      tables: tables.map(t => t.available ? { ...t, knownShare: round(t.knownShare, 4), avgPer1000: round(t.avgPer1000, 1), byAge: t.byAge.map(r), byGender: t.byGender.map(r),
+        unknown: { ...t.unknown, per1000: round(t.unknown.per1000, 1), shareOfAll: round(t.unknown.shareOfAll, 4) } } : t),
       observations: notes,
       minExpected: DEMO_EXPECTED_MIN,
     };
@@ -1426,6 +1433,8 @@
       };
       for (const r of c.daily) {
         const b = keyOf(r.date);
+        const known = r.age !== "Unknown" && (r.gender === "female" || r.gender === "male");
+        if (!known) { add(`${b}|?`, r); continue; }
         add(`${b}|*`, r); add(`${b}|${r.age}`, r); add(`${b}|${r.gender}`, r);
       }
       const total = buckets.map(b => {
@@ -1449,7 +1458,15 @@
           };
         }),
       }));
-      return { event: c.event, label: c.label, total, rows };
+      // Onbekend: eigen rij, zonder kleur, want het is geen groep om te vergelijken.
+      const unknown = buckets.some(b => cell.has(`${b.key}|?`)) ? buckets.map(b => {
+        const x = cell.get(`${b.key}|?`) || { sessions: 0, conversions: 0 };
+        const all = x.conversions + ((cell.get(`${b.key}|*`) || {}).conversions || 0);
+        return { bucket: b.key, sessions: x.sessions, conversions: x.conversions,
+          per1000: x.sessions ? round(x.conversions / x.sessions * 1000, 1) : null,
+          shareOfAll: all ? round(x.conversions / all, 3) : null };
+      }) : null;
+      return { event: c.event, label: c.label, total, rows, unknown };
     });
 
     // ---- Neutrale duiding: alleen een patroon dat over volle periodes standhoudt.

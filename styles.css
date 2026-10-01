@@ -989,6 +989,12 @@ a { color: inherit; text-decoration: none; }
 .dm-total .dm-rate { font-weight: 700; }
 .dm-best { box-shadow: inset 0 0 0 2px var(--fg); }
 .dm-foot th, .dm-foot td { border-top: 1px solid var(--border); }
+/* Witruimte tussen leeftijd, geslacht en onbekend in de conversietabellen en de evolutie. */
+tr.demo-gap td, tr.demo-gap th { height: 10px; padding: 0 !important; border: 0 !important; background: none !important; }
+.dm-table thead .th-sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; }
+.dm-table thead .th-sort .sort-arrow { opacity: 0.35; font-size: 11px; }
+.dm-table thead .th-sort.on .sort-arrow { opacity: 1; }
+.dm-table thead .th-sort:focus-visible { outline: 2px solid var(--accent-data); outline-offset: 2px; border-radius: 3px; }
 /* Op een smal scherm scrolt de matrix; de leeftijd blijft dan staan. */
 .dm-table tbody th[scope="row"], .dm-table thead th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
 .rp-body .dm-table { min-width: 0; }
