@@ -25,6 +25,27 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
 - **Tot dan:** `Datasheet overslaan` = `facebook_organic` in de Config-tab. Pas
   leegmaken als de sheet dezelfde telling geeft als live.
 
+### Doelgroep weer uit de datasheet, zonder verlies onder de privacydrempel
+- **Tussenoplossing (sinds 01-10-2026):** de Doelgroep-tab haalt leeftijd ×
+  geslacht (× kanaal) altijd live en over de hele periode in één keer op, nooit
+  uit de datasheet (`useDemo = false` in `getWebsite`, `skipSheet` op de
+  doelgroep- en conversiecalls). Dat werkt, maar is een uitzondering op
+  'datasheet eerst': elke bezoek kost 3–4 extra live GA4-calls (plus 3 per
+  conversie uit `Conversies`), en de cijfers kunnen tussen twee keer laden
+  verschuiven.
+- **Waarom niet uit de sheet:** de doelgroepexport is per dag, en GA4 laat per
+  rij kleine groepen weg. Bij Spotto (3–30 sept. 2026) bleef van ruim 1.100
+  AI-sessies met bekende leeftijd en geslacht per dag precies één rij over; AI en
+  Verwijzing verdwenen bij mannen uit de kanaalmatrix.
+- **Eerste stap:** in Windsor testen welke korrel weinig verliest en toch op
+  periode te filteren is: een export per week of per maand (GA4 `yearWeek` /
+  `yearMonth` in plaats van `date`) tegenover de live periodecijfers. Meten met
+  de AI-sessies van mannen als toets (live: 518).
+- **Daarna:** `_sheetdata.js` die korrel laten lezen (periodes die niet op een
+  week- of maandgrens vallen: de randen live aanvullen of de dekking melden), en
+  `useDemo` weer aanzetten. Alternatief: de periodecijfers nachtelijk
+  voorberekenen (zie 'Nachtelijke voorberekening per klant').
+
 ## Snelheid
 
 ### Historiek van de grootste exports inkorten (Spotto)
