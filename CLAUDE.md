@@ -206,10 +206,14 @@ geslachtsfilter (`state.webDemoGender`).
   landingtab zijn (dan zouden die totalen te laag uitkomen door de drempel), en de
   doelgroeptab is elke GA4-tab met die kolommen. `getConnectorRows` sluit hem al
   uit via het `demo`-niveau in `DIMENSION_LEVELS`.
-- **API-terugval** als de sheet de periode niet dekt: `GA4_DEMO` zonder `date` (over
-  de periode geaggregeerd valt minder weg) plus een aparte, niet-fatale call voor
-  `conversions_<doel>`. `aggregateDemo()` in `_sheetdata.js` voedt beide routes, dus
-  sheet en API leveren dezelfde vorm.
+- **Altijd live, nooit uit de datasheet** (sinds 01-10-2026, `useDemo = false` in
+  `getWebsite`). De doelgroepexport is per dag, en GA4 past zijn privacydrempel per
+  rij toe: bij Spotto bleef van ruim 1.100 AI-sessies met bekende leeftijd en
+  geslacht per dag precies één rij over, dus verdween het AI-kanaal bij mannen.
+  `GA4_DEMO` zónder `date` (over de periode geaggregeerd valt bijna niets weg) plus
+  aparte, niet-fatale calls per conversie, allemaal met `skipSheet`. De tabherkenning
+  hierboven blijft nodig, zodat de doelgroeptab nooit voor dag-, kanaal- of
+  landingvragen gekozen wordt.
 - **Conversies per merk (Config-veld `Conversies`).** Bovenaan de sub-tab staat
   per conversie een tabel naar leeftijd en naar geslacht (aandeel sessies,
   aandeel conversies, per 1.000 sessies) met neutrale duiding eronder. Vorm:

@@ -1189,21 +1189,18 @@ module.exports = async (req, res) => {
           const useSearch   = !!sd.search;
           const useQueries  = detail && !!sd.queries;
           const useSources  = !!sd.sources;
-          const useDemo     = detail && !!sd.demographics;
+          // Doelgroep NOOIT uit de datasheet. De export is per dag, en GA4 laat
+          // per rij kleine groepen weg onder zijn privacydrempel: bij Spotto
+          // (sept. 2026) bleef van ruim 1.100 AI-sessies met bekende leeftijd en
+          // geslacht per dag precies één rij over, dus verdween het AI-kanaal
+          // bij mannen. Over de hele periode in één keer gevraagd valt er bijna
+          // niets weg, en deze calls zijn klein (1–4 s).
+          const useDemo     = false;
           const skip = Promise.resolve(EMPTY);
-          // Een conversieveld dat de sheet niet heeft, levert toch rijen op: de
-          // tabkeuze telt alleen de dimensies, de maatstaf blijft dan leeg. Bij
-          // Spotto koos de kanaalvraag zo de doelgroeptab (zonder huur/koop) en
-          // bleef de schakelaar weg. Dan alsnog live.
-          const convCall = async (dims, event, label) => {
-            if (!hasGa4) return EMPTY;
-            const key = `conversions_${event}`;
-            const res = await windsorScoped('googleanalytics4', `${dims},${key}`, params, ADDON_MS, label);
-            if (res && res.__sheet && Array.isArray(res.data) && !res.data.some(r => r[key] != null)) {
-              return windsorScoped('googleanalytics4', `${dims},${key}`, params, ADDON_MS, `${label}-live`, { skipSheet: true });
-            }
-            return res;
-          };
+          const ga4Live = (f, label) => (hasGa4
+            ? windsorScoped('googleanalytics4', f, params, ADDON_MS, label, { skipSheet: true })
+            : Promise.resolve(EMPTY));
+          const convCall = (dims, event, label) => ga4Live(`${dims},conversions_${event}`, label);
 
           // Bronnen zitten in core en niet bij de add-ons: de tabel toont een
           // verschil met de vorige periode, en daarvoor moet ook de
@@ -1225,9 +1222,9 @@ module.exports = async (req, res) => {
             hasGa4 ? fetchFunnel(params, ADDON_MS) : Promise.resolve({ data: EMPTY, degraded: false }),
             useQueries ? skip : gsc(GSC_QUERIES, 'web-gsc-queries', ADDON_MS, pageParams),
             gsc(GSC_PAGES, 'web-gsc-pages', ADDON_MS, pageParams),
-            useDemo ? skip : ga4(GA4_DEMO, 'web-ga4-demo', ADDON_MS),
+            ga4Live(GA4_DEMO, 'web-ga4-demo'),
             // Doel per groep apart en niet-fataal, om dezelfde reden als goalFields.
-            (useDemo || !goalEvent) ? skip : ga4(`age,gender,session_default_channel_group,conversions_${goalEvent}`, 'web-ga4-demo-goal', ADDON_MS),
+            !goalEvent ? skip : ga4Live(`age,gender,session_default_channel_group,conversions_${goalEvent}`, 'web-ga4-demo-goal'),
             // Eén call per conversie, met de eigen sessies erbij: één onbekende
             // eventnaam mag de andere niet meeslepen, en teller en noemer komen
             // zo uit dezelfde call. Zonder kanaal, want deze tabel is leeftijd ×
