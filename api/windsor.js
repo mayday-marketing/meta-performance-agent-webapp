@@ -1064,6 +1064,13 @@ module.exports = async (req, res) => {
         const hasGsc = !!scopedAccounts.searchconsole;
         const webCfg = (clientConfig && clientConfig.website) || {};
         const goalEvent = webCfg.goalEvent || null;
+        // Conversies die de Doelgroep-sub-tab elk apart uitsplitst naar leeftijd en
+        // geslacht ('Conversies' in de Config-tab). Leeg → alleen het hoofddoel.
+        // Per merk verschillend: bij Spotto huur- en koopformulieren, bij een
+        // webshop 'purchase'. Elk een eigen, niet-fatale call (zie convCalls).
+        const demoConversions = (Array.isArray(webCfg.conversions) && webCfg.conversions.length)
+          ? webCfg.conversions
+          : (goalEvent ? [{ event: goalEvent, label: webCfg.goalLabel || null }] : []);
 
         // GA4 levert de datum als YYYYMMDD, Search Console als YYYY-MM-DD.
         const isoDate = (v) => {
@@ -1208,6 +1215,20 @@ module.exports = async (req, res) => {
             useDemo ? skip : ga4(GA4_DEMO, 'web-ga4-demo', ADDON_MS),
             // Doel per groep apart en niet-fataal, om dezelfde reden als goalFields.
             (useDemo || !goalEvent) ? skip : ga4(`age,gender,session_default_channel_group,conversions_${goalEvent}`, 'web-ga4-demo-goal', ADDON_MS),
+            // Eén call per conversie, met de eigen sessies erbij: één onbekende
+            // eventnaam mag de andere niet meeslepen, en teller en noemer komen
+            // zo uit dezelfde call. Zonder kanaal, want deze tabel is leeftijd ×
+            // geslacht; dat houdt ook minder weg onder de privacydrempel.
+            // Per conversie drie calls, elk met zo weinig dimensies als nodig:
+            // elke extra dimensie laat GA4 meer kleine groepen wegvallen onder
+            // zijn privacydrempel. Totaal (tabellen), × kanaal (de schakelaar
+            // boven de kanaalmatrix, op de sessies van GA4_DEMO) en × dag (de
+            // evolutie, server-side gebundeld per week of maand).
+            ...demoConversions.flatMap((c, i) => [
+              ga4(`age,gender,sessions,conversions_${c.event}`, `web-ga4-demo-conv-${i + 1}`, ADDON_MS),
+              ga4(`age,gender,session_default_channel_group,conversions_${c.event}`, `web-ga4-demo-conv-${i + 1}-kanaal`, ADDON_MS),
+              ga4(`date,age,gender,sessions,conversions_${c.event}`, `web-ga4-demo-conv-${i + 1}-dag`, ADDON_MS),
+            ]),
           ] : [];
           // De doelkolom zit al in de sheet-tabs; dan is deze losse call overbodig.
           const goalCall = (!useTotals && hasGa4 && goalFields)
@@ -1216,7 +1237,7 @@ module.exports = async (req, res) => {
 
           const [totalsRaw, channelsRaw, gscTotalsRaw, sourcesRaw, goalRaw, ...rest] =
             await Promise.all([...core, goalCall, ...extras]);
-          const [dailyRaw, landingRaw, devicesRaw, countriesRaw, returningRaw, funnelRes, queriesRaw, gscPagesRaw, demoRaw, demoGoalRaw] = rest;
+          const [dailyRaw, landingRaw, devicesRaw, countriesRaw, returningRaw, funnelRes, queriesRaw, gscPagesRaw, demoRaw, demoGoalRaw, ...convRaws] = rest;
 
           const errors = {};
           if (errOf(totalsRaw)) errors.ga4Totals = errOf(totalsRaw);
@@ -1469,13 +1490,16 @@ module.exports = async (req, res) => {
           // Uit de sheet, of live: hoofdcall + doel per groep, samengevoegd op
           // leeftijd|geslacht|kanaal. Mislukt de doelcall, dan blijft de tab op
           // álle key events staan (goalAvailable:false), net als elders.
+          let demoBaseRows = null;
           if (useDemo) {
             out.demographics = sd.demographics;
+            demoBaseRows = sd.demographics && sd.demographics.rows;
           } else if (errOf(demoRaw)) {
             errors.ga4Demo = errOf(demoRaw);
             out.demographics = null;
           } else {
             const base = aggregateDemo(rowsOf(demoRaw), null, null);
+            demoBaseRows = base.rows;
             const gk = goalEvent ? `conversions_${goalEvent}` : null;
             const goalRows = rowsOf(demoGoalRaw);
             const goalOk = !!(gk && !errOf(demoGoalRaw) && goalRows.some(r => r[gk] != null));
@@ -1487,6 +1511,62 @@ module.exports = async (req, res) => {
             }
             out.demographics = base.rows.length ? { rows: base.rows, goalAvailable: goalOk } : null;
           }
+
+          // Per ingestelde conversie: sessies en aantal per leeftijd × geslacht.
+          // Bestaat het event niet als key event, dan available:false met de fout —
+          // nooit nullen, want dat zou 'niemand converteert' lezen.
+          out.demoConversions = demoConversions.map((c, i) => {
+            const [raw, chRaw, dayRaw] = convRaws.slice(i * 3, i * 3 + 3);
+            const key = `conversions_${c.event}`;
+            const rows = rowsOf(raw);
+            const ok = !errOf(raw) && rows.some(r => r[key] != null);
+            const groups = new Map();
+            if (ok) {
+              for (const r of aggregateDemo(rows, null, key).rows) {
+                const k = `${r.age}|${r.gender}`;
+                const g = groups.get(k) || { age: r.age, gender: r.gender, sessions: 0, conversions: 0 };
+                g.sessions += r.sessions; g.conversions += r.goalConversions || 0;
+                groups.set(k, g);
+              }
+            }
+            // Per kanaal: alleen het aantal, op dezelfde sleutel als de rijen van
+            // de kanaalmatrix. Die rijen dragen de sessies; zo deelt elke keuze
+            // in de schakelaar één noemer.
+            if (ok && demoBaseRows && !errOf(chRaw) && rowsOf(chRaw).some(r => r[key] != null)) {
+              const g = new Map();
+              for (const r of aggregateDemo(rowsOf(chRaw), null, key).rows) g.set(`${r.age}|${r.gender}|${r.channel}`, r.goalConversions || 0);
+              for (const r of demoBaseRows) (r.convs = r.convs || {})[c.event] = g.get(`${r.age}|${r.gender}|${r.channel}`) || 0;
+            } else if (ok && errOf(chRaw)) {
+              errors[`ga4DemoConv${i + 1}Kanaal`] = errOf(chRaw);
+            }
+            // Per dag, gebundeld tot week (maandag) of maand. De bundeling zelf
+            // (welke korrel, onvolledige randen) gebeurt in summary.js.
+            let daily = null;
+            if (ok && !errOf(dayRaw) && rowsOf(dayRaw).some(r => r[key] != null)) {
+              const m = new Map();
+              for (const r of rowsOf(dayRaw)) {
+                const date = isoDate(r.date);
+                const age = r.age == null || /^(unknown|\(not set\))$/i.test(String(r.age)) ? 'Unknown' : String(r.age);
+                const gender = /^(female|male)$/i.test(String(r.gender || '')) ? String(r.gender).toLowerCase() : 'unknown';
+                if (age === 'Unknown' || gender === 'unknown') continue;
+                const k = `${date}|${age}|${gender}`;
+                const e = m.get(k) || { date, age, gender, sessions: 0, conversions: 0 };
+                e.sessions += num(r.sessions); e.conversions += num(r[key]);
+                m.set(k, e);
+              }
+              daily = [...m.values()];
+            } else if (ok && errOf(dayRaw)) {
+              errors[`ga4DemoConv${i + 1}Dag`] = errOf(dayRaw);
+            }
+            return {
+              event: c.event,
+              label: c.label || c.event,
+              available: ok,
+              error: errOf(raw) || (ok ? null : `Geen key event '${c.event}' in deze GA4-property`),
+              rows: [...groups.values()],
+              daily,
+            };
+          });
 
           out.countries = group(rowsOf(countriesRaw), r => String(r.country || '(onbekend)'), addSession)
             .sort(bySessions).slice(0, 8)
@@ -1662,6 +1742,7 @@ module.exports = async (req, res) => {
             goalEvent,
             goalLabel: webCfg.goalLabel || null,
             goalAvailable: current.goalAvailable,
+            conversionsSource: (Array.isArray(webCfg.conversions) && webCfg.conversions.length) ? 'config' : (goalEvent ? 'hoofddoel' : null),
           },
           current,
           previous: previous && previous.__error ? null : previous,

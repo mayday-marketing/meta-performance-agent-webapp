@@ -149,6 +149,27 @@ function okEventName(v) {
   return /^[a-z][a-z0-9_]{0,39}$/.test(s) ? s : null;
 }
 
+// Lijst van conversies voor de Doelgroep-sub-tab: 'event = label', gescheiden
+// door ';' of een nieuwe regel (een komma mag ook als er geen labels zijn).
+// Bv. 'property_form_submit_for_rent_count_one = Huur; property_form_submit_for_sale_count_all = Koop'.
+// Eén ongeldige eventnaam maakt het hele veld ongeldig: liever een waarschuwing
+// dan stilletjes een conversie minder. Hooguit vier, want elk is een eigen call.
+function okConversionList(v) {
+  const s = String(v).trim();
+  const parts = (/[;\n]/.test(s) || /[=:]/.test(s) ? s.split(/[;\n]+/) : s.split(','))
+    .map(x => x.trim()).filter(Boolean);
+  if (!parts.length || parts.length > 4) return null;
+  const out = [];
+  for (const p of parts) {
+    const m = p.match(/^([^=:]+?)\s*(?:[=:]\s*(.+))?$/);
+    const event = m && okEventName(m[1]);
+    if (!event) return null;
+    if (out.some(c => c.event === event)) continue;
+    out.push({ event, label: m[2] ? m[2].trim().slice(0, 40) : null });
+  }
+  return out;
+}
+
 // Websitetype bepaalt welk funnelblok de Website-tab toont. Niet ingevuld →
 // afgeleid uit de data (omzet gemeten = webshop), zie windsor.js getWebsite.
 function okWebsiteType(v) {
@@ -268,6 +289,10 @@ const CONFIG_FIELDS = {
   // 'property_form_submit'. Bepaalt de conversiekolom in de hele tab.
   conversiedoel:         { path: 'website.goalEvent', check: okEventName },
   conversiedoellabel:    { path: 'website.goalLabel', check: v => v.slice(0, 40) },
+  // Conversies die de Doelgroep-sub-tab elk apart naar leeftijd en geslacht
+  // uitsplitst. Leeg → alleen het Conversiedoel. Zie okConversionList.
+  conversies:            { path: 'website.conversions', check: okConversionList },
+  doelgroepconversies:   { path: 'website.conversions', check: okConversionList },
 
   // --- SEO-tab: DataForSEO (zoekvolumes + posities) ------------------------
   // Geen account-id: DataForSEO werkt met één gedeeld account. Wat hier staat

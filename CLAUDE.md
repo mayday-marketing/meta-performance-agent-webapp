@@ -210,6 +210,29 @@ geslachtsfilter (`state.webDemoGender`).
   de periode geaggregeerd valt minder weg) plus een aparte, niet-fatale call voor
   `conversions_<doel>`. `aggregateDemo()` in `_sheetdata.js` voedt beide routes, dus
   sheet en API leveren dezelfde vorm.
+- **Conversies per merk (Config-veld `Conversies`).** Bovenaan de sub-tab staat
+  per conversie een tabel naar leeftijd en naar geslacht (aandeel sessies,
+  aandeel conversies, per 1.000 sessies) met neutrale duiding eronder. Vorm:
+  `event = label; event = label`, hooguit vier. Leeg → alleen het
+  `Conversiedoel`. Elk een eigen, niet-fatale call `age,gender,sessions,
+  conversions_<event>` (teller en noemer uit dezelfde call; één foute eventnaam
+  sleept de rest niet mee). Rekenwerk én duiding in `demoConversionTables()` in
+  summary.js, dus de MCP (`get_website.demographics`) zegt hetzelfde. Een groep
+  telt pas mee voor 'best/laagst' als hij bij een gemiddelde ratio ≥ 20
+  conversies zou halen — op sessies, niet op het resultaat, anders wint een kleine
+  groep die toevallig een paar keer converteerde.
+- **Evolutie-heatmap** onder die tabellen (`demoConversionEvolution()` in
+  summary.js): per conversie een raster week × groep (tot 13 weken, daarna per
+  maand), elke cel tegenover het gemiddelde van zijn eigen week of maand; de rij
+  'Alle groepen' draagt het absolute niveau. Onvolledige randweken cursief. Een
+  derde call per conversie mét `date`; bij Spotto verloor de dagsplitsing vrijwel
+  niets aan de privacydrempel (654 vs 655 bekende huurconversies). Duiding alleen
+  als een groep in ≥ 3 volle, stevige periodes dezelfde kant op wijkt.
+- **Schakelaar boven de kanaalmatrix** (`state.webDemoConv`): hoofddoel of één
+  conversie uit `Conversies`. De conversie per leeftijd × geslacht × kanaal komt
+  uit een tweede call per conversie en wordt als `convs[event]` op de rijen van
+  `GA4_DEMO` gezet, zodat elke keuze dezelfde sessies als noemer heeft. Zonder
+  `Conversies` geen schakelaar.
 - **Drempels in de UI:** een ratio pas vanaf 50 sessies, en een groep telt pas mee
   voor 'converteert het best' vanaf 50 sessies én 5 conversies. De matrix kleurt
   op de index tegenover het gemiddelde (≥ 1,2 groen, ≤ 0,8 rood), nooit op volume.

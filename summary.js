@@ -996,6 +996,10 @@
         })),
       } : null,
       funnel: (w.current.funnel && w.current.funnel.available) ? w.current.funnel : null,
+      // Leeftijd × geslacht per ingestelde conversie, alleen de bekende groep
+      // (Google Signals). Aandelen en per 1.000 sessies, geen tellingen per groep.
+      demographics: demoConversionTables(w.current.demoConversions),
+      demographicsEvolution: demoConversionEvolution(w.current.demoConversions, w.period),
     };
   }
 
@@ -1247,6 +1251,225 @@
   // meetbaar is, anders álle key events samen. Dat verschil is groot (bij een klant
   // 2.112 formulieren tegenover 72.004 key events), dus het label zegt welk van de
   // twee je ziet.
+  // ---- Conversies per leeftijd en geslacht (Doelgroep-sub-tab + MCP) ----------
+  // Eén tabel per conversie uit 'Conversies' in de Config-tab. Alleen de groep
+  // met bekende leeftijd én geslacht telt mee: Google Signals laat de rest op
+  // 'unknown', en die rest is niet willekeurig verdeeld. Daarom aandelen en
+  // 'per 1.000 sessies', nooit een absoluut aantal per groep als telling.
+  const DEMO_AGE_ORDER = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"];
+  // Een groep is 'stevig' als hij bij een gemiddelde ratio minstens zoveel
+  // conversies zou halen. Op sessies, niet op het resultaat: anders wint een
+  // kleine groep die toevallig een paar keer converteerde.
+  const DEMO_EXPECTED_MIN = 20;
+  const DEMO_GENDER_NL = { female: "Vrouwen", male: "Mannen" };
+
+  function demoConversionTables(list) {
+    const convs = arrayOrEmpty(list);
+    if (!convs.length) return null;
+    const isKnown = (r) => r.age !== "Unknown" && (r.gender === "female" || r.gender === "male");
+    const per1000 = (c, ses) => ses > 0 ? (c / ses) * 1000 : null;
+    const round = (n, d) => (n == null || !isFinite(n)) ? null : +n.toFixed(d);
+
+    const tables = convs.map(c => {
+      if (!c.available) return { event: c.event, label: c.label, available: false, error: c.error || null };
+      const rows = arrayOrEmpty(c.rows);
+      const known = rows.filter(isKnown);
+      const sum = (l, k) => l.reduce((a, r) => a + (r[k] || 0), 0);
+      const totalConv = sum(rows, "conversions");
+      const kSes = sum(known, "sessions"), kConv = sum(known, "conversions");
+      const avg = per1000(kConv, kSes);
+      const group = (keyOf, order) => {
+        const m = new Map();
+        for (const r of known) {
+          const k = keyOf(r);
+          const g = m.get(k) || { key: k, sessions: 0, conversions: 0 };
+          g.sessions += r.sessions; g.conversions += r.conversions;
+          m.set(k, g);
+        }
+        return [...m.values()]
+          .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))
+          .map(g => ({
+            key: g.key,
+            sessions: g.sessions,
+            conversions: g.conversions,
+            sessionShare: kSes ? g.sessions / kSes : null,
+            share: kConv ? g.conversions / kConv : null,
+            per1000: per1000(g.conversions, g.sessions),
+            index: avg ? per1000(g.conversions, g.sessions) / avg : null,
+            solid: avg != null && g.sessions * (avg / 1000) >= DEMO_EXPECTED_MIN,
+          }));
+      };
+      return {
+        event: c.event, label: c.label, available: true,
+        totalConversions: totalConv,
+        knownConversions: kConv,
+        knownShare: totalConv ? kConv / totalConv : null,
+        knownSessions: kSes,
+        avgPer1000: avg,
+        byAge: group(r => r.age, DEMO_AGE_ORDER),
+        byGender: group(r => r.gender, ["female", "male"]),
+      };
+    });
+
+    // ---- Neutrale duiding: wat de tabel zegt, geen advies -------------------
+    const nl = (n, d = 1) => n == null ? "—" : n.toFixed(d).replace(".", ",");
+    const pct = (n) => n == null ? "—" : nl(n * 100, n < 0.1 ? 1 : 0) + "%";
+    const ok = tables.filter(t => t.available && t.knownConversions > 0);
+    const notes = [];
+    if (ok.length) {
+      // Grootste groep: per conversie de leeftijd met het grootste aandeel.
+      const tops = ok.map(t => [...t.byAge].sort((a, b) => b.conversions - a.conversions)[0]);
+      const sameTop = tops.every(g => g.key === tops[0].key);
+      const why = (g) => g.sessionShare != null && g.share != null && g.share <= g.sessionShare * 1.1
+        ? `, vooral omdat die groep de meeste sessies heeft (${pct(g.sessionShare)})` : ` (${pct(g.sessionShare)} van de sessies)`;
+      if (sameTop && ok.length > 1) {
+        const mostSessions = [...ok[0].byAge].sort((a, b) => b.sessions - a.sessions)[0];
+        notes.push(`${tops[0].key} levert de meeste conversies van elk type (${ok.map((t, i) => `${t.label} ${pct(tops[i].share)}`).join(", ")})${mostSessions.key === tops[0].key ? `, vooral omdat die groep de meeste sessies heeft (${pct(tops[0].sessionShare)})` : ""}.`);
+      } else {
+        ok.forEach((t, i) => notes.push(`${t.label}: ${tops[i].key} levert het grootste aandeel, ${pct(tops[i].share)}${why(tops[i])}.`));
+      }
+      // Hoogste en laagste ratio, alleen onder de stevige groepen; een dunne
+      // groep die hoger uitkomt wordt genoemd mét zijn aantallen.
+      for (const t of ok) {
+        const solid = t.byAge.filter(g => g.solid && g.per1000 != null).sort((a, b) => b.per1000 - a.per1000);
+        if (!solid.length) continue;
+        const best = solid[0], worst = solid[solid.length - 1];
+        let line = `${t.label}: ${best.key} converteert het best per sessie (${nl(best.per1000)} per 1.000 tegenover ${nl(t.avgPer1000)} gemiddeld)`;
+        const thin = t.byAge.filter(g => !g.solid && g.per1000 != null && g.per1000 > best.per1000)
+          .sort((a, b) => b.per1000 - a.per1000)[0];
+        if (thin) line += `. ${thin.key} ligt hoger (${nl(thin.per1000)}), maar rust op ${thin.conversions.toLocaleString("nl-BE")} conversies uit ${thin.sessions.toLocaleString("nl-BE")} sessies`;
+        if (solid.length > 2 && worst.index != null && worst.index <= 0.8) line += `. Laagst: ${worst.key} (${nl(worst.per1000)})`;
+        notes.push(line + ".");
+      }
+      // Geslacht: alleen een richting als het verschil boven 10% ligt.
+      const dir = ok.map(t => {
+        const f = t.byGender.find(g => g.key === "female"), m = t.byGender.find(g => g.key === "male");
+        if (!f || !m || !f.per1000 || !m.per1000 || !f.solid || !m.solid) return null;
+        const r = f.per1000 / m.per1000;
+        return { t, f, m, side: r >= 1.1 ? "female" : r <= 1 / 1.1 ? "male" : "even" };
+      }).filter(Boolean);
+      if (dir.length) {
+        const sides = new Set(dir.map(d => d.side));
+        const detail = dir.map(d => `${d.t.label} ${nl(d.f.per1000)} tegenover ${nl(d.m.per1000)}`).join(", ");
+        if (sides.size === 1 && !sides.has("even")) {
+          notes.push(`${DEMO_GENDER_NL[dir[0].side]} converteren meer per sessie${dir.length > 1 ? " bij elk type" : ""} (vrouwen tegenover mannen per 1.000: ${detail}).`);
+        } else if (sides.size === 1) {
+          notes.push(`Vrouwen en mannen converteren ongeveer even vaak per sessie (per 1.000: ${detail}).`);
+        } else {
+          notes.push(`Het verschil tussen vrouwen en mannen hangt af van de conversie (vrouwen tegenover mannen per 1.000: ${detail}).`);
+        }
+      }
+    }
+
+    // Afgerond voor de MCP en de UI. Per 1.000 op één decimaal, met dezelfde
+    // afronding als de duiding: anders staat er 9,4 in de tabel en 9,5 erboven.
+    const r = (g) => ({ ...g, sessionShare: round(g.sessionShare, 4), share: round(g.share, 4), per1000: round(g.per1000, 1), index: round(g.index, 2) });
+    return {
+      tables: tables.map(t => t.available ? { ...t, knownShare: round(t.knownShare, 4), avgPer1000: round(t.avgPer1000, 1), byAge: t.byAge.map(r), byGender: t.byGender.map(r) } : t),
+      observations: notes,
+      minExpected: DEMO_EXPECTED_MIN,
+    };
+  }
+
+  // ---- Evolutie per leeftijd en geslacht (heatmap onder de tabellen) --------
+  // Korrel volgt de periode: tot 13 weken per week (maandag als start), daarna
+  // per maand. Een cel wordt vergeleken met het gemiddelde van zijn eigen week
+  // of maand, zodat een sterke of zwakke week niet elke groep meekleurt; de
+  // bovenste rij draagt het absolute niveau. Dezelfde 'stevig'-regel als de
+  // tabellen: ≥ 20 conversies te verwachten, onder de 5 geen getal.
+  const EVO_WEEK_MAX_DAYS = 91;
+  const EVO_NONE_BELOW = 5;
+
+  function demoConversionEvolution(list, period) {
+    const convs = arrayOrEmpty(list).filter(c => c.available && Array.isArray(c.daily) && c.daily.length);
+    if (!convs.length || !period || !period.startDate || !period.endDate) return null;
+    const DAY = 86400000;
+    const toD = (iso) => new Date(iso + "T00:00:00Z");
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const from = toD(period.startDate), to = toD(period.endDate);
+    const days = Math.round((to - from) / DAY) + 1;
+    const grain = days <= EVO_WEEK_MAX_DAYS ? "week" : "month";
+    const bucketStart = (d) => {
+      const x = new Date(d);
+      if (grain === "week") x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
+      else x.setUTCDate(1);
+      return x;
+    };
+    const bucketEnd = (start) => {
+      const x = new Date(start);
+      if (grain === "week") x.setUTCDate(x.getUTCDate() + 6);
+      else { x.setUTCMonth(x.getUTCMonth() + 1); x.setUTCDate(0); }
+      return x;
+    };
+    const buckets = [];
+    for (let b = bucketStart(from); b <= to; b = new Date(bucketEnd(b).getTime() + DAY)) {
+      const e = bucketEnd(b);
+      buckets.push({
+        key: iso(b),
+        start: iso(b < from ? from : b),
+        end: iso(e > to ? to : e),
+        partial: b < from || e > to,
+      });
+    }
+    const keyOf = (date) => iso(bucketStart(toD(date)));
+    const ROWS = [...DEMO_AGE_ORDER.map(a => ({ key: a, kind: "age" })), { key: "female", kind: "gender" }, { key: "male", kind: "gender" }];
+    const round = (n, d) => (n == null || !isFinite(n)) ? null : +n.toFixed(d);
+    const unit = grain === "week" ? "week" : "maand";
+    const units = grain === "week" ? "weken" : "maanden";
+
+    const grids = convs.map(c => {
+      const cell = new Map();
+      const add = (k, r) => {
+        const x = cell.get(k) || { sessions: 0, conversions: 0 };
+        x.sessions += r.sessions || 0; x.conversions += r.conversions || 0;
+        cell.set(k, x);
+      };
+      for (const r of c.daily) {
+        const b = keyOf(r.date);
+        add(`${b}|*`, r); add(`${b}|${r.age}`, r); add(`${b}|${r.gender}`, r);
+      }
+      const total = buckets.map(b => {
+        const x = cell.get(`${b.key}|*`) || { sessions: 0, conversions: 0 };
+        return { bucket: b.key, sessions: x.sessions, conversions: x.conversions, per1000: x.sessions ? round(x.conversions / x.sessions * 1000, 1) : null };
+      });
+      const rows = ROWS.filter(rw => buckets.some(b => cell.has(`${b.key}|${rw.key}`))).map(rw => ({
+        key: rw.key, kind: rw.kind,
+        cells: buckets.map((b, i) => {
+          const x = cell.get(`${b.key}|${rw.key}`);
+          const avg = total[i].sessions ? total[i].conversions / total[i].sessions : null;
+          if (!x || !x.sessions || avg == null) return { bucket: b.key, state: "none", sessions: x ? x.sessions : 0, conversions: x ? x.conversions : 0 };
+          const expected = x.sessions * avg;
+          const rate = x.conversions / x.sessions;
+          return {
+            bucket: b.key,
+            sessions: x.sessions, conversions: x.conversions,
+            per1000: round(rate * 1000, 1),
+            index: avg > 0 ? round(rate / avg, 2) : null,
+            state: expected < EVO_NONE_BELOW ? "none" : expected < DEMO_EXPECTED_MIN ? "thin" : "ok",
+          };
+        }),
+      }));
+      return { event: c.event, label: c.label, total, rows };
+    });
+
+    // ---- Neutrale duiding: alleen een patroon dat over volle periodes standhoudt.
+    const notes = [];
+    for (const g of grids) {
+      let okCells = 0, ageCells = 0;
+      for (const rw of g.rows) {
+        const solid = rw.cells.filter((cl, i) => cl.state === "ok" && !buckets[i].partial);
+        if (rw.kind === "age") { ageCells += rw.cells.length; okCells += rw.cells.filter(cl => cl.state === "ok").length; }
+        if (solid.length < 3) continue;
+        const name = rw.kind === "gender" ? DEMO_GENDER_NL[rw.key] : rw.key;
+        if (solid.every(cl => cl.index >= 1.2)) notes.push(`${g.label}: ${name} ligt in alle ${solid.length} volle ${units} met genoeg data minstens 20% boven het gemiddelde van die ${unit}.`);
+        else if (solid.every(cl => cl.index <= 0.8)) notes.push(`${g.label}: ${name} ligt in alle ${solid.length} volle ${units} met genoeg data minstens 20% onder het gemiddelde van die ${unit}.`);
+      }
+      if (ageCells && okCells / ageCells < 0.3) notes.push(`${g.label}: per ${unit} zijn de meeste leeftijdsgroepen te dun om te vergelijken; over een langere periode wordt dit blok leesbaarder.`);
+    }
+
+    return { grain, buckets, grids, observations: notes, minExpected: DEMO_EXPECTED_MIN };
+  }
+
   function webGoal(w) {
     const on = !!(w && w.website && w.website.goalAvailable);
     // Een doel kan ingesteld zijn terwijl de eventnaam leeg terugkomt; dan is het
@@ -1553,7 +1776,7 @@
     buildAnalysisSummary, buildAdsSummary, buildWebsiteSummary, buildGeoSummary,
     buildRoasSummary, buildGoalsSummary,
     // website en periodes
-    webGoal, prevPeriod, yearAgoPeriod,
+    webGoal, prevPeriod, yearAgoPeriod, demoConversionTables, demoConversionEvolution,
     // doelen
     GOAL_METRICS, MAANDEN, goalRange, goalState, flattenGoals, goalMetricRanges, goalMetricsMap,
     // GEO

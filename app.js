@@ -106,6 +106,7 @@
     compare: "prev",                  // topbar: 'prev' (vorige periode) | 'yoy' (vorig jaar)
     websiteTab: "overzicht",          // actief sub-blad van de Website-tab
     webDemoGender: "all",             // filter in de Doelgroep-sub-tab: all / female / male
+    webDemoConv: "goal",              // schakelaar boven de kanaalmatrix: 'goal' of een GA4-eventnaam uit 'Conversies'
     roasTab: "blended",               // blended | kanalen | breakeven (ROAS-sub-tabs onder Ads)
     bronnenTab: "bronnen",            // actief sub-blad van de Bronnen-tab
     websiteLandingQuery: "",          // zoekterm in de landingspagina-tabel (alleen deze sessie)
@@ -5785,8 +5786,118 @@
   const DEMO_MIN_DOEL = 5;
 
   window.__webDemoGender = (g) => { state.webDemoGender = g; renderWebsite(); };
+  window.__webDemoConv = (k) => { state.webDemoConv = k; renderWebsite(); };
 
   function renderWebsiteDemo() {
+    return renderWebsiteDemoConversions() + renderWebsiteDemoBase();
+  }
+
+  // Eén tabel per conversie uit 'Conversies' in de Config-tab, naar leeftijd en
+  // naar geslacht, met de duiding eronder. Rekenwerk en duiding in summary.js
+  // (demoConversionTables), zodat de MCP-koppeling hetzelfde zegt als dit blok.
+  function renderWebsiteDemoConversions() {
+    const w = state.website;
+    const c = w?.current;
+    if (!c || !Array.isArray(c.demoConversions) || !c.demoConversions.length) return "";
+    const res = S.demoConversionTables(c.demoConversions);
+    if (!res) return "";
+    const tables = res.tables.filter(t => t.available && t.knownConversions > 0);
+    const missing = res.tables.filter(t => !t.available || !t.knownConversions);
+    const missLine = missing.length
+      ? `<p class="source-line" style="color:var(--negative);">${missing.map(t => `${escapeHtml(t.label)} (GA4-event ${escapeHtml(t.event)}): ${t.available ? "geen conversies met bekende leeftijd en geslacht in deze periode" : escapeHtml(t.error || "niet gemeten")}.`).join("<br>")}</p>`
+      : "";
+    const sub = w.website?.conversionsSource === "config"
+      ? "Conversies uit het veld <em>Conversies</em> in de Config-tab"
+      : "Hoofddoel uit de Config-tab; zet meer conversies in het veld <em>Conversies</em>";
+    const head = `<div class="panel-header"><div>
+        <h2 class="panel-title">Conversies naar leeftijd en geslacht</h2>
+        <div class="panel-sub">${sub}</div>
+      </div></div>`;
+    if (!tables.length) return `<section class="panel" style="margin-bottom:16px;">${head}${missLine}</section>`;
+
+    const nl1 = (n) => n == null ? "—" : n.toFixed(1).replace(".", ",");
+    const pctS = (n) => fmtShare(n == null ? null : n * 100);
+    // Dunne groep: minder dan het minimum aan verwachte conversies. Het cijfer
+    // blijft staan, maar gedempt en met een sterretje.
+    const rateCell = (g) => {
+      if (!g || g.per1000 == null) return `<td>—</td>`;
+      if (!g.solid) return `<td title="${escapeHtml(`${fmt.int(g.conversions)} conversies uit ${fmt.int(g.sessions)} sessies`)}" style="color:var(--fg-muted);">${nl1(g.per1000)}*</td>`;
+      const tone = g.index >= 1.2 ? "pos" : g.index <= 0.8 ? "neg" : "";
+      return `<td title="${escapeHtml(`${fmt.int(g.conversions)} conversies uit ${fmt.int(g.sessions)} sessies · index ${nl1(g.index)}`)}"><span class="${tone}">${nl1(g.per1000)}</span></td>`;
+    };
+    const table = (title, dim, keys, labelOf) => {
+      const base = tables[0][dim];
+      const cols = tables.map(t => `<th>${escapeHtml(t.label)}: aandeel</th><th>${escapeHtml(t.label)} per 1.000 sessies</th>`).join("");
+      const body = keys.map(k => {
+        const b = base.find(g => g.key === k);
+        return `<tr><td>${escapeHtml(labelOf(k))}</td><td>${pctS(b?.sessionShare)}</td>${tables.map(t => {
+          const g = t[dim].find(x => x.key === k);
+          return `<td>${pctS(g?.share)}</td>${rateCell(g)}`;
+        }).join("")}</tr>`;
+      }).join("");
+      const avg = `<tr><td><b>Gemiddeld</b></td><td></td>${tables.map(t => `<td></td><td><b>${nl1(t.avgPer1000)}</b></td>`).join("")}</tr>`;
+      return `<h3 class="label-head" style="margin-top:22px;">${title}</h3>
+        <div class="report-table"><table>
+          <thead><tr><th>${dim === "byAge" ? "Leeftijd" : "Geslacht"}</th><th>Aandeel sessies</th>${cols}</tr></thead>
+          <tbody>${body}${dim === "byAge" ? avg : ""}</tbody>
+        </table></div>`;
+    };
+    const ageKeys = AGE_ORDER.filter(a => tables.some(t => t.byAge.some(g => g.key === a)));
+    const genderKeys = ["female", "male"].filter(k => tables.some(t => t.byGender.some(g => g.key === k)));
+    const notes = res.observations.length
+      ? `<ul class="source-line" style="margin:18px 0 0; padding-left:18px; color:var(--fg);">${res.observations.map(o => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`
+      : "";
+    const coverage = tables.map(t => `${escapeHtml(t.label)} ${pctS(t.knownShare)} (${fmt.int(t.knownConversions)} van ${fmt.int(t.totalConversions)})`).join(" · ");
+
+    return `<section class="panel" style="margin-bottom:16px;">${head}
+      ${missLine}
+      ${notes}
+      ${table("Naar leeftijd", "byAge", ageKeys, a => a)}
+      ${table("Naar geslacht", "byGender", genderKeys, k => GENDER_LABEL[k] || k)}
+      ${renderWebsiteDemoEvolution(c.demoConversions, w.period)}
+      <p class="source-line">Alleen de groep met een bekende leeftijd én geslacht (Google Signals): ${coverage} van de conversies. Aandelen zijn binnen die groep; per 1.000 sessies is het aantal conversies per 1.000 sessies van die groep. Groen ligt minstens 20% boven het gemiddelde, rood minstens 20% eronder. * = minder dan ${res.minExpected} conversies te verwachten bij een gemiddelde ratio: te dun om te vergelijken.</p>
+    </section>`;
+  }
+
+  // Heatmap per week of maand, één per conversie. Cellen tegenover het gemiddelde
+  // van hun eigen week of maand; de bovenste rij is het absolute niveau. Zelfde
+  // celrecept als de kanaalmatrix (dm-*), zodat groen en rood overal hetzelfde
+  // betekenen.
+  function renderWebsiteDemoEvolution(list, period) {
+    const ev = S.demoConversionEvolution(list, period);
+    if (!ev || !ev.grids.length) return "";
+    const short = (iso) => { const [, m, d] = iso.split("-"); return `${+d}/${+m}`; };
+    const MAAND = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+    const colLabel = (b) => ev.grain === "week" ? `${short(b.start)}–${short(b.end)}` : `${MAAND[+b.start.slice(5, 7) - 1]} ${b.start.slice(2, 4)}`;
+    const nl1 = (n) => n == null ? "—" : n.toFixed(1).replace(".", ",");
+    const head = `<tr><th></th>${ev.buckets.map(b => `<th class="right"${b.partial ? ' style="font-style:italic;"' : ""} title="${b.start} t/m ${b.end}${b.partial ? " · onvolledig" : ""}">${colLabel(b)}</th>`).join("")}</tr>`;
+    const td = (cl, partial) => {
+      const tip = `${fmt.int(cl.conversions || 0)} conversies uit ${fmt.int(cl.sessions || 0)} sessies${cl.index != null ? ` · index ${nl1(cl.index)}` : ""}`;
+      const it = partial ? ' style="font-style:italic;"' : "";
+      if (cl.state === "none") return `<td class="dm-cell dm-empty" title="${escapeHtml(tip)}">·</td>`;
+      if (cl.state === "thin") return `<td class="dm-cell dm-thin"${it} title="${escapeHtml(tip)}"><span class="dm-rate">${nl1(cl.per1000)}</span></td>`;
+      const tone = cl.index >= 1.2 ? "pos" : cl.index <= 0.8 ? "neg" : "";
+      const strength = Math.min(1, Math.abs(Math.log2(Math.max(cl.index || 1, 0.01))) / 1.5);
+      const st = [tone ? `--dm-a:${Math.round(6 + strength * 18)}%` : "", partial ? "font-style:italic" : ""].filter(Boolean).join(";");
+      return `<td class="dm-cell ${tone ? `dm-${tone}` : ""}"${st ? ` style="${st};"` : ""} title="${escapeHtml(tip)}"><span class="dm-rate">${nl1(cl.per1000)}</span></td>`;
+    };
+    const grid = (g) => {
+      const tot = `<tr class="dm-foot"><th scope="row">Alle groepen</th>${g.total.map((t, i) => `<td class="dm-cell dm-total"${ev.buckets[i].partial ? ' style="font-style:italic;"' : ""}><span class="dm-rate">${nl1(t.per1000)}</span><span class="dm-n">${fmt.int(t.sessions)}</span></td>`).join("")}</tr>`;
+      const body = g.rows.map(rw => `<tr><th scope="row">${escapeHtml(rw.kind === "gender" ? (GENDER_LABEL[rw.key] || rw.key) : rw.key)}</th>${rw.cells.map((cl, i) => td(cl, ev.buckets[i].partial)).join("")}</tr>`).join("");
+      return `<h3 class="label-head" style="margin-top:22px;">${escapeHtml(g.label)} per ${ev.grain === "week" ? "week" : "maand"}, per 1.000 sessies</h3>
+        <div class="dm-wrap"><table class="dm-table"><thead>${head}</thead><tbody>${tot}${body}</tbody></table></div>`;
+    };
+    const notes = ev.observations.length
+      ? `<ul class="source-line" style="margin:14px 0 0; padding-left:18px; color:var(--fg);">${ev.observations.map(o => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`
+      : "";
+    const unit = ev.grain === "week" ? "week" : "maand";
+    return `<h3 class="label-head" style="margin-top:32px;">Evolutie</h3>
+      ${notes}
+      ${ev.grids.map(grid).join("")}
+      <p class="source-line">Elke cel tegenover het gemiddelde van dezelfde ${unit} (rij 'Alle groepen'): groen minstens 20% erboven, rood minstens 20% eronder. Grijs = minder dan ${ev.minExpected} conversies te verwachten, · = minder dan 5. <em>Cursief</em> = onvolledige ${unit} aan de rand van de periode. Per ${unit} tot 13 weken, daarna per maand.</p>`;
+  }
+
+  function renderWebsiteDemoBase() {
     const w = state.website;
     const c = w?.current;
     if (!c) return "";
@@ -5808,9 +5919,18 @@
     // Het doel per groep bestaat alleen als het doelveld óók in deze uitsplitsing
     // zit. Anders álle key events — met een ander label, want dat is een ander cijfer.
     const goalOn = goal.on && d.goalAvailable;
-    const doelNaam = goalOn ? goal.label.toLowerCase() : "key events";
+    // Schakelaar: het hoofddoel of één conversie uit 'Conversies'. Alleen een
+    // conversie waarvan de kanaaluitsplitsing binnenkwam (r.convs) is te kiezen.
+    const convOpts = (c.demoConversions || []).filter(cv => cv.available && d.rows.some(r => r.convs && r.convs[cv.event] != null));
+    const conv = convOpts.find(cv => cv.event === state.webDemoConv) || null;
+    const doelNaam = conv ? conv.label.toLowerCase() : goalOn ? goal.label.toLowerCase() : "key events";
     const gFilter = state.webDemoGender || "all";
-    const rows = d.rows.map(r => ({ ...r, doel: (goalOn ? r.goalConversions : r.conversions) || 0 }));
+    const rows = d.rows.map(r => ({ ...r, doel: (conv ? (r.convs && r.convs[conv.event]) : goalOn ? r.goalConversions : r.conversions) || 0 }));
+    const convSwitch = convOpts.length
+      ? `<div class="chip-row" style="margin:0 0 12px;">${[["goal", goalOn ? goal.label : "Key events"], ...convOpts.map(cv => [cv.event, cv.label])]
+          .map(([k, l]) => { const on = conv ? conv.event === k : k === "goal";
+            return `<button type="button" class="chip ${on ? "on" : ""}" aria-pressed="${on}" onclick="window.__webDemoConv('${escapeHtml(k)}')">${escapeHtml(l)}</button>`; }).join("")}</div>`
+      : "";
     const sum = (list, k) => list.reduce((a, r) => a + (r[k] || 0), 0);
     const tot = { sessions: sum(rows, "sessions"), doel: sum(rows, "doel") };
     const rate = (doel, ses) => ses > 0 ? doel / ses : null;
@@ -5869,13 +5989,14 @@
         <h2 class="panel-title">${titel}</h2>
         <div class="panel-sub">${lede}</div>
       </div></div>
+      ${convSwitch}
       ${signalsWarn}
       <p class="source-line" style="margin-top:0;">${perGender}</p>
       ${bars}
       <p class="source-line">Per leeftijdsgroep het aandeel in de sessies en in de ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de sessiestaaf, dan converteert die groep bovengemiddeld (index boven 1).${gFilter !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%." : ""}</p>
       ${renderWebsiteDemoMatrix(rows.filter(r => gFilter === "all" || r.gender === gFilter), doelNaam, avgRate)}
       <p class="source-line">
-        ${knownShare != null ? `${webFmt.pct0(knownShare)} van de sessies heeft een bekende leeftijd en geslacht; de rest staat als 'onbekend'. ` : ""}${coverage != null ? `Deze uitsplitsing dekt ${webFmt.pct0(coverage)} van alle sessies: GA4 laat kleine groepen weg onder zijn privacydrempel. ` : ""}Leeftijd en geslacht komen uit Google Signals — ingelogde Google-gebruikers met advertentiepersonalisatie — en zijn geschat, geen opgave van de bezoeker. Lees dit als verdeling, niet als telling. ${goalOn ? `Conversie = ${escapeHtml(goal.label.toLowerCase())} (GA4-event ${escapeHtml(w.website.goalEvent || "")}).` : goal.on ? `Het hoofddoel zit niet in deze uitsplitsing, daarom staan hier álle key events samen — een hoger cijfer dan het hoofddoel elders in de tab.` : "Conversie = alle key events samen; zet een Conversiedoel in de Config-tab om op één doel te sturen."}
+        ${knownShare != null ? `${webFmt.pct0(knownShare)} van de sessies heeft een bekende leeftijd en geslacht; de rest staat als 'onbekend'. ` : ""}${coverage != null ? `Deze uitsplitsing dekt ${webFmt.pct0(coverage)} van alle sessies: GA4 laat kleine groepen weg onder zijn privacydrempel. ` : ""}Leeftijd en geslacht komen uit Google Signals — ingelogde Google-gebruikers met advertentiepersonalisatie — en zijn geschat, geen opgave van de bezoeker. Lees dit als verdeling, niet als telling. ${conv ? `Conversie = ${escapeHtml(conv.label.toLowerCase())} (GA4-event ${escapeHtml(conv.event)}).` : goalOn ? `Conversie = ${escapeHtml(goal.label.toLowerCase())} (GA4-event ${escapeHtml(w.website.goalEvent || "")}).` : goal.on ? `Het hoofddoel zit niet in deze uitsplitsing, daarom staan hier álle key events samen — een hoger cijfer dan het hoofddoel elders in de tab.` : "Conversie = alle key events samen; zet een Conversiedoel in de Config-tab om op één doel te sturen."}
         Een ratio staat er pas vanaf ${DEMO_MIN_SESSIONS} sessies.
       </p>
     </section>`;
