@@ -46,6 +46,79 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
   `useDemo` weer aanzetten. Alternatief: de periodecijfers nachtelijk
   voorberekenen (zie 'Nachtelijke voorberekening per klant').
 
+### Conversieratio's in de Doelgroep-tab kloppen niet precies bij een filter
+- **Waarom:** bij het geslachtsfilter (Alle / Vrouwen / Mannen) en de
+  conversieschakelaar sluiten de ratio's en kleuren niet helemaal aan. Nog verder
+  uit te zoeken (gemeld 02-10-2026).
+- **Eerste spoor:** de kanaalmatrix filtert de cellen op geslacht, maar vergelijkt
+  ze met het gemiddelde over álle sessies, inclusief onbekend geslacht
+  (`avgRate` in `renderWebsiteDemoBase`, doorgegeven aan
+  `renderWebsiteDemoMatrix`). Op de screenshot van Spotto (Mannen, formulieren):
+  voetnoot 'gemiddelde van 1,23%', terwijl de rij 'Alle leeftijden' voor mannen
+  1,00% geeft. Groen en rood zijn dan relatief tegenover de verkeerde lat, en de
+  kop 'converteren het best … tegenover x% gemiddeld' gebruikt hetzelfde getal.
+- **Verder nakijken:** de aandelen in de staafgrafiek blijven bewust van het
+  totaal (staat in de voetnoot), maar de index ernaast misschien niet; de
+  onbekend-rij in de matrix; en of de schakelaar (Huur / Koop) overal dezelfde
+  noemer gebruikt. Telkens narekenen tegen GA4 zelf voor één periode.
+
+## Kwaliteit
+
+### Nachtelijke testscenario's: wat kan er mislopen
+- **Waarom:** er zijn geen tests (zie CLAUDE.md). Fouten zoals deze week (een
+  ontbrekende hulpfunctie die de Doelgroep-tab stil liet uitvallen, de datasheet
+  die AI-verkeer liet verdwijnen, een Instagram-export met lege rijen die alles
+  45 s trager maakte) werden pas gezien als iemand toevallig keek.
+- **Wat (voorstel, per klant, elke avond):**
+  - **Isolatie:** een token van klant A tegen elk endpoint met `clientId` B moet
+    401 geven; geen enkel endpoint mag een resource-id uit het request volgen.
+  - **Elke tab laadt:** `getDashboard`, `getWebsite`, `getRoas`, `getGoogleAds`,
+    `brand`, GEO, en de renderers geven HTML zonder JS-fout (bv. met een headless
+    browser of de renderers in Node met opgenomen responses).
+  - **Sheet tegenover live:** per connector de totalen van de laatste volle week
+    uit de datasheet naast live; een verschil boven een drempel = melding
+    (vangt exports die nog vullen of rijen verliezen).
+  - **Exportgezondheid:** lege verplichte velden, tabs die achterlopen, gaten in
+    de dekking, `Queries`-tab met fouten.
+  - **Config-tab:** waarschuwingen 'ongeldige waarde' of 'onbekend veld', een
+    `Conversiedoel` of `Conversies`-event dat in GA4 niet bestaat.
+  - **Bekende valkuilen als regressietest:** omni-aankopen niet dubbel, nul
+    tegenover onbekend (`null / getal`), privacydrempel bij kleine kanalen,
+    summary.js en het scherm geven hetzelfde getal, MCP-tools antwoorden.
+  - **Snelheid:** `[tijd]`-regels per call; boven een budget (bv. 30 s per
+    endpoint) = melding.
+- **Hoe:** een Vercel-cron of een geplande Claude-routine die de checks draait en
+  's ochtends één overzicht stuurt (wat faalde, bij welke klant, sinds wanneer).
+  Geen betaalde calls (DataForSEO) in de nachtelijke run.
+- **Eerste stap:** de lijst hierboven aanvullen met wat er de afgelopen maanden
+  echt misliep (CLAUDE.md 'Known pitfalls' en de git-log), en per scenario
+  bepalen hoe je het automatisch vaststelt.
+
+### Werken op `main` en een testomgeving: opties nagaan
+- **Waarom:** nu gaat alles rechtstreeks naar productie. Er wordt gewerkt op
+  `main`, gepusht via GitHub Desktop en uitgerold met `vercel --prod` vanuit de
+  lokale map (die kan dus afwijken van GitHub). Een fout zoals de ontbrekende
+  hulpfunctie in de Doelgroep-tab (01-10-2026) staat dan meteen bij klanten.
+- **Opties om na te gaan:**
+  - **Werkbranch + Vercel-preview:** wijzigingen op een eigen branch, elke push
+    geeft een preview-URL; pas na controle mergen naar `main`. Let op: previews
+    staan achter Vercel SSO, en hebben eigen env vars nodig (`AUTH_SECRET`,
+    `CLIENTS`, `GOOGLE_SERVICE_ACCOUNT_KEY`, `MCP_AGENCY_KEYS`) in de omgeving
+    Preview.
+  - **Vaste testomgeving:** een `staging`-branch met een eigen domein (bv.
+    `staging.dashboard.mayday.marketing`), altijd de volgende versie.
+  - **Productie alleen via GitHub:** `main` beschermen en Vercel laten uitrollen
+    bij een merge, in plaats van `vercel --prod` vanaf een laptop. Dan is GitHub
+    altijd wat er live staat.
+  - **Testdata:** SENJA (demoklant, `DEMO_CLIENTS`) als vaste testklant, zodat een
+    testomgeving geen echte klantcijfers nodig heeft; voor echte randgevallen
+    (Spotto: privacydrempel, grote exports) toch één echte klant met leesrechten.
+- **Raakt aan:** de nachtelijke testscenario's hierboven (die kunnen tegen de
+  testomgeving draaien vóór een merge) en de MCP-koppeling (een staging-adres
+  mag geen productiesleutels delen).
+- **Eerste stap:** beslissen tussen 'preview per branch' en 'vaste staging', en
+  nagaan welke env vars en Google-rechten een tweede omgeving nodig heeft.
+
 ## Snelheid
 
 ### Historiek van de grootste exports inkorten (Spotto)
@@ -69,6 +142,58 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
   traag zijn; pas dan beslissen of het een Vercel-cron + Runtime Cache/Blob wordt.
 
 ## Features
+
+### Vraagbalk: weergaven bouwen in gewone taal (zoals PostHog AI)
+- **Eerst de eigenaar vragen.** Dit punt is een eerste schets (02-10-2026). Zodra
+  het ter sprake komt of opgepakt wordt: eerst om meer duiding vragen (wat moet de
+  vraagbalk kunnen, voor wie, waar in de app, wat nadrukkelijk niet) vóór er een
+  catalogus of prototype gebouwd wordt.
+- **Wat:** een vraagbalk waarin je beschrijft wat je wilt zien ("huur- en
+  koopformulieren per leeftijd, per maand, alleen AI-verkeer"). Claude redeneert
+  mee op basis van wat er voor díe klant beschikbaar is (gekoppelde connectoren,
+  ingestelde conversies, welke uitsplitsingen een bron toelaat) en stelt een
+  weergave voor: maatstaf, uitsplitsing, grafiektype, periode. Kan iets niet, dan
+  zegt hij waarom en wat het dichtstbijzijnde alternatief is ("TikTok is niet
+  gekoppeld", "gebruikers zijn niet optelbaar over dagen; nieuwe gebruikers wel",
+  "per dag valt AI-verkeer weg onder de privacydrempel, per maand niet"). De
+  gebruiker bevestigt of stuurt bij, en kan de weergave bewaren als tegel.
+- **Waarom:** elke klant kijkt naar iets anders, en nu vraagt elke nieuwe weergave
+  een codewijziging. Een vrije bouwer met dropdowns laat iemand ook combinaties
+  kiezen die niet kloppen; Claude kan de meetregels uitleggen terwijl je bouwt.
+- **Hoe (voorstel):**
+  - **Catalogus als enige wereld.** Claude krijgt een catalogus van maatstaven en
+    uitsplitsingen (bron, connector, optelbaar ja/nee, geldige combinaties,
+    minimale korrel) plus wat er voor deze klant gekoppeld en ingesteld is. Meer
+    niet: geen ruwe data, geen id's.
+  - **Uitvoer is een specificatie, geen code.** Claude geeft een gestructureerde
+    spec terug (tool-use of structured output) met alleen catalogussleutels. De
+    server valideert die tegen de catalogus en rekent via `summary.js`, zodat een
+    tegel nooit iets anders zegt dan de vaste tabs en de MCP-koppeling. Geen
+    door het model geschreven HTML of queries.
+  - **Andere chat dan nu.** `api/chat.js` is single-shot zonder tools; dit vraagt
+    een gesprek met tools (catalogus opvragen, voorbeeldcijfers ophalen). Dezelfde
+    tools kunnen in de MCP-koppeling, zodat het ook vanuit claude.ai werkt.
+- **Randvoorwaarden uit de bestaande regels:**
+  - **Isolatie.** Een spec bevat alleen catalogussleutels en een periode, nooit een
+    sheet-, account- of connector-id; resources blijven server-side uit `CLIENTS`
+    en de Config-tab komen. Tekst van de gebruiker is data, geen instructie aan de
+    server.
+  - **Dashboard, geen adviseur.** Claude helpt een weergave bouwen en legt
+    meetregels uit; hij geeft geen aanbevelingen over de marketing zelf. Analyse
+    blijft in het gesprek via de MCP-koppeling.
+  - **Meetregels gaan mee.** Niet-optelbare maatstaven, ontbrekend = streepje,
+    GA4- en platformomzet nooit in één som, privacydrempel per korrel.
+  - **Kosten.** Elke vraag is een modelcall (per klant `anthropic_api_key` of de
+    gedeelde sleutel); voorbeeldcijfers via de bestaande caches, geen betaalde
+    DataForSEO-calls.
+  - **Opslag.** Er is nu geen database; bewaarde tegels per klant vragen opslag
+    die per `clientId` gescheiden is (bv. een Marketplace-database of Blob).
+- **Eerste stap:** de catalogus opstellen van alle maatstaven en uitsplitsingen die
+  de tabs nu tonen (bron, optelbaar, geldige combinaties, minimale korrel);
+  `GOAL_METRICS` in summary.js is een begin. Daarna een prototype: vraag → spec →
+  validatie → één tegel, zonder opslag.
+- **Raakt aan:** de Rapport-tab (een tegel kan een slide worden), de MCP-koppeling
+  (dezelfde catalogus als tool) en de huidige chat ("Vraag de Agent").
 
 ### Agents-bibliotheek via de MCP-koppeling
 - **Wat:** een overzicht van de mayday-agents (analyse, rapport, chat, GEO-audit,
