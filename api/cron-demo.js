@@ -30,7 +30,7 @@
    verschoven achterblijven, en een dubbele run schuift niets twee keer.
    ========================================================== */
 
-const { getAccessToken } = require('./_config');
+const { getAccessToken, captureOidcToken } = require('./_config');
 
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 const STATE_TAB = '_demo_state';
@@ -125,6 +125,11 @@ const kolomletter = (i) => {
 };
 
 module.exports = async (req, res) => {
+  // Het OIDC-token van deze request vastpakken: daarmee wisselt _config.js een
+  // Google-token in via workload identity federation. Zonder deze regel valt hij
+  // terug op een service-account-sleutel, en die staat niet in productie.
+  captureOidcToken(req);
+
   // Vercel Cron stuurt een Authorization-header met CRON_SECRET. Zonder geldig
   // geheim doet deze route niets — hij schrijft, dus hij is geen open endpoint.
   const geheim = process.env.CRON_SECRET;
