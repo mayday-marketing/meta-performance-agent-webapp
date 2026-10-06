@@ -42,6 +42,16 @@ const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
 const DATE_HEADERS = ['date', 'datum', 'timestamp', 'created_at', 'sent_at',
                       'create_time', 'post_created_time', 'month'];
 
+// Niet elke bron is even vers. Search Console rapporteert twee tot drie dagen
+// achter, en een organische post verschijnt pas in de export van de dag erna.
+// Dat stond zo in de dataset; zonder deze tabel trekt de eerste run alles glad
+// naar gisteren en spreekt de demo de meetregels van de app tegen.
+const ACHTERSTAND = [
+  [/search\s*console/i, 3],
+  [/instagram org|facebook org|tiktok org/i, 1],
+];
+const achterstandVoor = (tab) => (ACHTERSTAND.find(([re]) => re.test(tab)) || [null, 0])[1];
+
 const DAY_MS = 86400000;
 const iso = (d) => d.toISOString().slice(0, 10);
 
@@ -195,7 +205,9 @@ module.exports = async (req, res) => {
       // met die stand. Anders: het verschil met de laatste datum in de kolom.
       let vanaf = stand[t.title] ? new Date(stand[t.title] + 'T00:00:00Z') : laatsteDatum(kolom);
       if (!vanaf || isNaN(vanaf)) { verwerkt.push({ tab: t.title, overgeslagen: 'geen leesbare datum' }); continue; }
-      const dagen = Math.round((doel - vanaf) / DAY_MS);
+      // Doel per tab: gisteren, min de achterstand die deze bron hoort te hebben.
+      const tabDoel = new Date(doel - achterstandVoor(t.title) * DAY_MS);
+      const dagen = Math.round((tabDoel - vanaf) / DAY_MS);
       if (dagen === 0) { verwerkt.push({ tab: t.title, dagen: 0 }); continue; }
 
       const nieuw = kolom.map(rij => [schuif(rij[0], dagen)]);
@@ -206,7 +218,7 @@ module.exports = async (req, res) => {
       // Stand meteen wegschrijven, per tab. Valt de functie hierna om, dan weet
       // de volgende run precies waar hij gebleven was.
       const rijNr = Object.keys(stand).indexOf(t.title);
-      stand[t.title] = iso(doel);
+      stand[t.title] = iso(tabDoel);
       const alle = Object.entries(stand);
       await api(`${sheetId}/values/${encodeURIComponent(STATE_TAB)}!A1:B${alle.length + 1}?valueInputOption=RAW`, token, {
         method: 'PUT',
