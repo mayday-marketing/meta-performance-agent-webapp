@@ -46,21 +46,14 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
   `useDemo` weer aanzetten. Alternatief: de periodecijfers nachtelijk
   voorberekenen (zie 'Nachtelijke voorberekening per klant').
 
-### Conversieratio's in de Doelgroep-tab kloppen niet precies bij een filter
-- **Waarom:** bij het geslachtsfilter (Alle / Vrouwen / Mannen) en de
-  conversieschakelaar sluiten de ratio's en kleuren niet helemaal aan. Nog verder
-  uit te zoeken (gemeld 02-10-2026).
-- **Eerste spoor:** de kanaalmatrix filtert de cellen op geslacht, maar vergelijkt
-  ze met het gemiddelde over álle sessies, inclusief onbekend geslacht
-  (`avgRate` in `renderWebsiteDemoBase`, doorgegeven aan
-  `renderWebsiteDemoMatrix`). Op de screenshot van Spotto (Mannen, formulieren):
-  voetnoot 'gemiddelde van 1,23%', terwijl de rij 'Alle leeftijden' voor mannen
-  1,00% geeft. Groen en rood zijn dan relatief tegenover de verkeerde lat, en de
-  kop 'converteren het best … tegenover x% gemiddeld' gebruikt hetzelfde getal.
-- **Verder nakijken:** de aandelen in de staafgrafiek blijven bewust van het
-  totaal (staat in de voetnoot), maar de index ernaast misschien niet; de
-  onbekend-rij in de matrix; en of de schakelaar (Huur / Koop) overal dezelfde
-  noemer gebruikt. Telkens narekenen tegen GA4 zelf voor één periode.
+### Doelgroep-tab: geslachtsfilter narekenen tegen GA4
+- **Opgelost op 05-10-2026:** bij Vrouwen/Mannen meten de matrixkleuren, de kop
+  'converteren het best … tegenover x%' en de index naast de staven tegenover het
+  gemiddelde van dát geslacht (= rij 'Alle leeftijden'), niet meer tegenover alle
+  sessies. De staven zelf blijven aandelen van het totaal. Hetzelfde geldt voor het
+  Meta-doelgroepblok, dat `renderDemoBars` deelt.
+- **Nog te doen:** voor één periode bij Spotto (Mannen, formulieren én Huur/Koop)
+  de ratio's narekenen tegen GA4 zelf.
 
 ## Kwaliteit
 

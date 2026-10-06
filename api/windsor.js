@@ -1224,7 +1224,11 @@ module.exports = async (req, res) => {
             gsc(GSC_PAGES, 'web-gsc-pages', ADDON_MS, pageParams),
             ga4Live(GA4_DEMO, 'web-ga4-demo'),
             // Doel per groep apart en niet-fataal, om dezelfde reden als goalFields.
-            !goalEvent ? skip : ga4Live(`age,gender,session_default_channel_group,conversions_${goalEvent}`, 'web-ga4-demo-goal'),
+            // `sessions` moet erbij: zonder een sessiemaatstaf geeft GA4 (via
+            // Windsor) leeftijd en geslacht allemaal als 'unknown' terug. Bij
+            // Spotto kwamen zo alle 89 AI-formulieren op onbekend|onbekend terecht
+            // en stond elke bekende cel van de kanaalmatrix op 0,00%.
+            !goalEvent ? skip : ga4Live(`age,gender,session_default_channel_group,sessions,conversions_${goalEvent}`, 'web-ga4-demo-goal'),
             // Eén call per conversie, met de eigen sessies erbij: één onbekende
             // eventnaam mag de andere niet meeslepen, en teller en noemer komen
             // zo uit dezelfde call. Zonder kanaal, want deze tabel is leeftijd ×
@@ -1236,7 +1240,7 @@ module.exports = async (req, res) => {
             // evolutie, server-side gebundeld per week of maand).
             ...demoConversions.flatMap((c, i) => [
               convCall(`age,gender,sessions`, c.event, `web-ga4-demo-conv-${i + 1}`),
-              convCall(`age,gender,session_default_channel_group`, c.event, `web-ga4-demo-conv-${i + 1}-kanaal`),
+              convCall(`age,gender,session_default_channel_group,sessions`, c.event, `web-ga4-demo-conv-${i + 1}-kanaal`),
               convCall(`date,age,gender,sessions`, c.event, `web-ga4-demo-conv-${i + 1}-dag`),
             ]),
           ] : [];

@@ -237,6 +237,11 @@ geslachtsfilter (`state.webDemoGender`).
   uit een tweede call per conversie en wordt als `convs[event]` op de rijen van
   `GA4_DEMO` gezet, zodat elke keuze dezelfde sessies als noemer heeft. Zonder
   `Conversies` geen schakelaar.
+- **Elke leeftijd/geslacht-call vraagt `sessions` mee**, ook als alleen de
+  conversies gebruikt worden. Zonder sessiemaatstaf geeft GA4 via Windsor
+  leeftijd en geslacht allemaal als `unknown` terug (gecontroleerd 06-10-2026:
+  89 AI-formulieren, allemaal onbekend|onbekend). De kanaalmatrix stond daardoor
+  overal op 0,00%.
 - **Drempels in de UI:** een ratio pas vanaf 50 sessies, en een groep telt pas mee
   voor 'converteert het best' vanaf 50 sessies én 5 conversies. De matrix kleurt
   op de index tegenover het gemiddelde (≥ 1,2 groen, ≤ 0,8 rood), nooit op volume.

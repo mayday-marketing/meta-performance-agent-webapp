@@ -2292,10 +2292,15 @@
     });
     // Vaste volgorde en kleur per maatstaf (SERIES hierboven), ook als een
     // filter iets leeg maakt. `tot` draagt per reekssleutel de noemer.
+    // De staven blijven aandelen van het totaal; de index meet tegenover het
+    // gefilterde geslacht, anders is hij de ratio van de groep gedeeld door het
+    // gemiddelde over álle geslachten.
+    const fTot = Object.fromEntries(SERIES.map(sr => [sr.key, rows.reduce((s, r) => s + (r[sr.field] || 0), 0)]));
     const data = ages.map(age => {
       const a = perAge.get(age);
       const v = Object.fromEntries(SERIES.map(sr => [sr.key, share(a[sr.key], tot[sr.key])]));
-      return { age, v, index: v[baseKey] > 0 && tot.doel > 0 ? v.doel / v[baseKey] : null };
+      const fb = share(a[baseKey], fTot[baseKey]);
+      return { age, v, index: fb > 0 && fTot.doel > 0 ? share(a.doel, fTot.doel) / fb : null };
     }).filter(d => d.v[baseKey] >= 0.5 || d.v.doel > 0);
     const max = Math.max(1, ...data.flatMap(d => SERIES.map(sr => d.v[sr.key])));
     const scale = [10, 20, 25, 40, 50, 60, 80, 100].find(m => m >= max) || 100;
@@ -2415,7 +2420,7 @@
     root.innerHTML = adsBlockHead("Doelgroep", titel, lede)
       + `<p class="source-line" style="margin-top:0;">${perGender}</p>`
       + renderDemoBars(demo, doelKey, doelNaam, tot)
-      + `<p class="source-line">Per leeftijdsgroep het aandeel in kosten, vertoningen en ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de kostenstaaf, dan levert die groep meer op dan hij kost (index boven 1).${state.adsDemoGender !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%." : ""}</p>`
+      + `<p class="source-line">Per leeftijdsgroep het aandeel in kosten, vertoningen en ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de kostenstaaf, dan levert die groep meer op dan hij kost (index boven 1).${state.adsDemoGender !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%; de index meet wél tegenover het gemiddelde van dat geslacht, dus de staaflengtes en de index kunnen dan verschillen." : ""}</p>`
       + tabel + regioHtml
       + `<p class="source-line">Alles als aandeel van het totaal. Meta staat deze uitsplitsing niet toe met omni-velden, dus de ${doelNaam} hier zijn de gewone (niet-omni) cijfers — daarom geen absolute aantallen naast de totalen hierboven. `
       + `Index = aandeel in de ${doelNaam} gedeeld door aandeel in de kosten: boven 1 levert een groep meer op dan hij kost. Bij een kleine groep volstaat één conversie voor een hoge index. `
@@ -5992,8 +5997,13 @@
     const sum = (list, k) => list.reduce((a, r) => a + (r[k] || 0), 0);
     const tot = { sessions: sum(rows, "sessions"), doel: sum(rows, "doel") };
     const rate = (doel, ses) => ses > 0 ? doel / ses : null;
-    const avgRate = rate(tot.doel, tot.sessions);
     const share = (n, dd) => dd > 0 ? (n / dd) * 100 : null;
+    // De lat volgt het geslachtsfilter: binnen 'Mannen' is het gemiddelde dat van
+    // alle mannensessies (ook onbekende leeftijd), gelijk aan de rij 'Alle
+    // leeftijden' in de matrix. Aandelen blijven wel van het totaal.
+    const fRows = rows.filter(r => gFilter === "all" || r.gender === gFilter);
+    const avgRate = rate(sum(fRows, "doel"), sum(fRows, "sessions"));
+    const avgWie = gFilter === "all" ? "gemiddeld" : `gemiddeld bij ${(GENDER_LABEL[gFilter] || gFilter).toLowerCase()}`;
 
     // Hoeveel van het verkeer is überhaupt ingedeeld, en hoeveel van de site dekt
     // deze tabel? Het tweede is de privacydrempel: wat GA4 weglaat, staat nergens.
@@ -6011,15 +6021,16 @@
       groups.set(k, g);
     }
     const label = (g) => `${GENDER_LABEL[g.gender] || g.gender} ${g.age}`;
-    const ranked = [...groups.values()]
+    const inFilter = [...groups.values()].filter(g => gFilter === "all" || g.gender === gFilter);
+    const ranked = inFilter
       .filter(g => g.sessions >= DEMO_MIN_SESSIONS && g.doel >= DEMO_MIN_DOEL)
       .map(g => ({ ...g, rate: rate(g.doel, g.sessions) }))
       .sort((a, b) => b.rate - a.rate);
     const best = ranked[0];
-    const biggest = [...groups.values()].sort((a, b) => b.doel - a.doel)[0];
+    const biggest = [...inFilter].sort((a, b) => b.doel - a.doel)[0];
 
     const titel = best && avgRate
-      ? `${escapeHtml(label(best))} converteren het best: <b>${webFmt.pct2(best.rate)}</b> tegenover ${webFmt.pct2(avgRate)} gemiddeld`
+      ? `${escapeHtml(label(best))} converteren het best: <b>${webFmt.pct2(best.rate)}</b> tegenover ${webFmt.pct2(avgRate)} ${escapeHtml(avgWie)}`
       : `Doelgroep naar leeftijd, geslacht en kanaal`;
     const lede = biggest && biggest.doel > 0
       ? `Grootste groep in ${escapeHtml(doelNaam)}: ${escapeHtml(label(biggest))}, ${fmtShare(share(biggest.doel, tot.doel))} van de ${escapeHtml(doelNaam)} bij ${fmtShare(share(biggest.sessions, tot.sessions))} van de sessies.`
@@ -6051,8 +6062,8 @@
       ${signalsWarn}
       <p class="source-line" style="margin-top:0;">${perGender}</p>
       ${bars}
-      <p class="source-line">Per leeftijdsgroep het aandeel in de sessies en in de ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de sessiestaaf, dan converteert die groep bovengemiddeld (index boven 1).${gFilter !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%." : ""}</p>
-      ${renderWebsiteDemoMatrix(rows.filter(r => gFilter === "all" || r.gender === gFilter), doelNaam, avgRate)}
+      <p class="source-line">Per leeftijdsgroep het aandeel in de sessies en in de ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de sessiestaaf, dan converteert die groep bovengemiddeld (index boven 1).${gFilter !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%; de index meet wél tegenover het gemiddelde van dat geslacht, dus de staaflengtes en de index kunnen dan verschillen." : ""}</p>
+      ${renderWebsiteDemoMatrix(fRows, doelNaam, avgRate, avgWie)}
       <p class="source-line">
         ${knownShare != null ? `${webFmt.pct0(knownShare)} van de sessies heeft een bekende leeftijd en geslacht; de rest staat als 'onbekend'. ` : ""}${coverage != null ? `Deze uitsplitsing dekt ${webFmt.pct0(coverage)} van alle sessies: GA4 laat kleine groepen weg onder zijn privacydrempel. ` : ""}Leeftijd en geslacht komen uit Google Signals — ingelogde Google-gebruikers met advertentiepersonalisatie — en zijn geschat, geen opgave van de bezoeker. Lees dit als verdeling, niet als telling. ${conv ? `Conversie = ${escapeHtml(conv.label.toLowerCase())} (GA4-event ${escapeHtml(conv.event)}).` : goalOn ? `Conversie = ${escapeHtml(goal.label.toLowerCase())} (GA4-event ${escapeHtml(w.website.goalEvent || "")}).` : goal.on ? `Het hoofddoel zit niet in deze uitsplitsing, daarom staan hier álle key events samen — een hoger cijfer dan het hoofddoel elders in de tab.` : "Conversie = alle key events samen; zet een Conversiedoel in de Config-tab om op één doel te sturen."}
         Een ratio staat er pas vanaf ${DEMO_MIN_SESSIONS} sessies.
@@ -6061,9 +6072,10 @@
   }
 
   // Leeftijd (rijen) × kanaalgroep (kolommen). De cel toont de conversieratio en
-  // kleurt naar de index tegenover het gemiddelde; het aantal sessies staat er
-  // klein onder, zodat een hoge ratio op dertig sessies niet als een vondst leest.
-  function renderWebsiteDemoMatrix(rows, doelNaam, avgRate) {
+  // kleurt naar de index tegenover het gemiddelde; het aantal conversies staat er
+  // klein onder, zodat een hoge ratio op twee conversies niet als een vondst leest.
+  // De sessies staan in de tooltip.
+  function renderWebsiteDemoMatrix(rows, doelNaam, avgRate, avgWie = "gemiddeld") {
     if (!rows.length || !avgRate) return "";
     const cols = WEB_GROUPS.filter(g => rows.some(r => webGroupOf(r.channel) === g.key && r.sessions > 0));
     const ages = [...new Set(rows.map(r => r.age))].sort((a, b) => {
@@ -6093,7 +6105,7 @@
       if (!c || !c.sessions) return `<td class="dm-cell dm-empty">—</td>`;
       const tip = `${fmt.int(c.sessions)} sessies · ${fmt.int(c.doel)} ${doelNaam}${c.channels.size ? ` · ${[...c.channels].join(", ")}` : ""}`;
       if (c.sessions < DEMO_MIN_SESSIONS) {
-        return `<td class="dm-cell dm-thin" title="${escapeHtml(tip)}"><span class="dm-rate">·</span><span class="dm-n">${fmt.int(c.sessions)}</span></td>`;
+        return `<td class="dm-cell dm-thin" title="${escapeHtml(tip)}"><span class="dm-rate">·</span><span class="dm-n">${fmt.int(c.doel)}</span></td>`;
       }
       const rr = c.doel / c.sessions;
       const idx = rr / avgRate;
@@ -6103,7 +6115,7 @@
       const strength = Math.min(1, Math.abs(Math.log2(Math.max(idx, 0.01))) / 1.5);
       const bg = tone ? `style="--dm-a:${Math.round(6 + strength * 18)}%;"` : "";
       return `<td class="dm-cell ${tone ? `dm-${tone}` : ""}${k === bestKey ? " dm-best" : ""}${isTotal ? " dm-total" : ""}" ${bg} title="${escapeHtml(tip)}">
-        <span class="dm-rate">${webFmt.pct2(rr)}</span><span class="dm-n">${fmt.int(c.sessions)}</span></td>`;
+        <span class="dm-rate">${webFmt.pct2(rr)}</span><span class="dm-n">${fmt.int(c.doel)}</span></td>`;
     };
     const head = cols.map(g => `<th class="right">${escapeHtml(g.label)}</th>`).join("");
     const body = ages.map(a => `<tr><th scope="row">${escapeHtml(a === "Unknown" ? "Onbekend" : a)}</th>${cols.map(g => td(`${a}|${g.key}`)).join("")}${td(`${a}|*`, true)}</tr>`).join("");
@@ -6113,7 +6125,7 @@
         <thead><tr><th></th>${head}<th class="right">Alle kanalen</th></tr></thead>
         <tbody>${body}${foot}</tbody>
       </table></div>
-      <p class="source-line">${escapeHtml(doelNaam.charAt(0).toUpperCase() + doelNaam.slice(1))} per sessie, met het aantal sessies eronder. Groen ligt minstens 20% boven het gemiddelde van ${webFmt.pct2(avgRate)}, rood minstens 20% eronder; de omlijnde cel is de beste combinatie. Een punt betekent te weinig sessies voor een ratio. Kanalen zijn samengevat in dezelfde groepen als de donut onder Kanalen.</p>`;
+      <p class="source-line">${escapeHtml(doelNaam.charAt(0).toUpperCase() + doelNaam.slice(1))} per sessie (conversieratio), met het aantal ${escapeHtml(doelNaam)} eronder; de sessies staan in de tooltip. Groen ligt minstens 20% boven het ${escapeHtml(avgWie.replace(/^gemiddeld/, "gemiddelde"))} van ${webFmt.pct2(avgRate)} (rij 'Alle leeftijden'), rood minstens 20% eronder; de omlijnde cel is de beste combinatie. Een punt betekent te weinig sessies voor een ratio. Kanalen zijn samengevat in dezelfde groepen als de donut onder Kanalen.</p>`;
   }
 
   function renderWebsiteNotes() {
