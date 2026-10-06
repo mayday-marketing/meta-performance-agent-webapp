@@ -680,6 +680,21 @@ function listedSchema(tool, scope) {
   };
 }
 
+// Icoon en website voor de connector in claude.ai (MCP 2025-11-25: icons in
+// serverInfo). Zonder icoon toont claude.ai de eerste letter van de naam.
+function serverInfo(req) {
+  const base = publicOrigin(req);
+  if (!base) return SERVER_INFO;
+  return {
+    ...SERVER_INFO,
+    websiteUrl: base,
+    icons: [
+      { src: `${base}/assets/mayday-icon-512.png`, mimeType: 'image/png', sizes: ['512x512'] },
+      { src: `${base}/assets/favicon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
+    ],
+  };
+}
+
 function allowedOrigin(origin) {
   const list = String(process.env.MCP_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
   return list.includes(origin);
@@ -740,7 +755,7 @@ module.exports = async (req, res) => {
       out = rpcResult(id, {
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: SERVER_INFO,
+        serverInfo: serverInfo(req),
         instructions: INSTRUCTIONS,
       });
       break;
