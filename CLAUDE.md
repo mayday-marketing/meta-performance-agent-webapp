@@ -868,14 +868,14 @@ geen dependencies. Koppelen: `docs/MCP.md`.
   `startDate`/`endDate`, `compare` en `revenueBasis`. Elk ander argument wordt
   geweigerd, niet genegeerd. Zet er nooit een sheet-, map-, account- of
   connector-id bij.
-- **Scope-object vanaf dag één.** V1 kent alleen `{kind:'agency'}`: elke klant
-  uit `CLIENTS`. V2 (OAuth per klant, zie 'MCP V2' hieronder) voegt
-  `{kind:'client', clientId}` toe; `resolveClient()` negeert dan elke andere
+- **Scope-object.** `{kind:'agency'}` (V1): elke klant uit `CLIENTS`.
+  `{kind:'client', clientId}` (V2, OAuth, zie 'MCP V2' hieronder, of een
+  agency-sleutel op een klantadres): `resolveClient()` negeert dan elke andere
   klantcode. De tools zelf veranderen niet.
 - **Auth.** `MCP_AGENCY_KEYS` = JSON `{"naam":"sleutel"}`, sleutel ≥ 32 tekens,
   vergeleken als SHA-256 met `timingSafeEqual` over álle sleutels. Ontbreekt de
-  variabele of is er geen geldige sleutel, dan 503 — een lege bearer kan nooit
-  matchen. De naam staat in het auditlog, zodat één persoon apart ingetrokken
+  variabele of is er geen geldige sleutel, dan matcht geen enkele bearer (401;
+  503 alleen zonder `AUTH_SECRET`). De naam staat in het auditlog, zodat één persoon apart ingetrokken
   kan worden. `MCP_DISABLED=1` is de noodrem.
 - **`get_google_ads`** geeft de respons van `windsor.js getGoogleAds` ingekort en
   afgerond door (rekenwerk in `_googleads.js`, dus gelijk aan de tab): totalen en
@@ -906,33 +906,48 @@ geen dependencies. Koppelen: `docs/MCP.md`.
 - **Metricool-klanten** worden niet ondersteund: er is er geen (stand
   26-09-2026), en `transformDashboard` staat nog in app.js.
 
-### MCP V2 — per klant via OAuth (nog niet gebouwd)
+### MCP V2 — per klant via OAuth (gebouwd 06-10-2026, `api/oauth.js` + `api/_oauth.js`)
 
-claude.ai verwacht voor een eigen connector OAuth 2.1 met dynamische
-registratie. Plan, stateless met ondertekende blobs:
+claude.ai en Cowork verwachten voor een eigen connector OAuth 2.1 met dynamische
+registratie. Stateless, met ondertekende blobs (geen database):
 
-- `/.well-known/oauth-authorization-server` + `oauth-protected-resource`,
-  PKCE S256 verplicht, `redirect_uri` exact en alleen https.
-- Registratie = ondertekende blob als `client_id`; autorisatie = het bestaande
-  inlogscherm (klantcode + wachtwoord), met `X-Frame-Options: DENY`, strikte CSP
-  en een regel die zegt welk merk gedeeld wordt; code 60 s geldig.
-- Access token 24 u, roterend refresh token 90 dagen, ondertekend met een
-  **eigen HKDF-sleutel** uit `AUTH_SECRET` en `aud: mcp`, zodat hij nooit op een
-  dashboard-endpoint geldt. Intrekken via `mcp_min_ts` per klant en een globale
-  `MCP_MIN_TS`.
-- **Vóór V2 eerst:** rate limiting op `/api/auth` (en straks
-  `/api/oauth/authorize`) via de Vercel Firewall, plus een timing-veilige
-  wachtwoordvergelijking in `auth.js`. Nu kan inloggen onbeperkt geprobeerd
-  worden.
+- **Routes** via rewrites in `vercel.json` naar één functie (`op=`):
+  `/.well-known/oauth-authorization-server` (+ `openid-configuration`),
+  `/.well-known/oauth-protected-resource/api/mcp/<klant>`, `/oauth/register`,
+  `/oauth/authorize`, `/oauth/token`. `/api/mcp/<klant>` → `/api/mcp?tenant=`.
+- **Registratie** = ondertekende blob als `client_id` (redirect_uris erin).
+  Alleen https, hooguit vijf, exact vergeleken. Een ongeldige `client_id` of
+  `redirect_uri` geeft een foutpagina, nooit een redirect (geen open redirector).
+- **Inlogscherm** = klantcode + wachtwoord, dezelfde `checkPassword` en rem als
+  `/api/auth` (`_auth.js`). `X-Frame-Options: DENY`, CSP met `form-action` op
+  het terugkeeradres. PKCE S256 verplicht, code 60 s.
+- **Fail-closed per klant:** alleen klantcodes in `MCP_OAUTH_CLIENTS`. Dat het
+  merk niet openstaat, of dat de login bij een ander klantadres hoort, zegt het
+  scherm pas ná een geldige login — anders verraadt het welke codes bestaan.
+- **Tokens:** access 24 u, refresh 90 dagen en roterend, elk soort blob met een
+  **eigen HKDF-sleutel** uit `AUTH_SECRET` en `aud: mcp`. Een code is dus nooit
+  een access token, en geen van beide geldt op een dashboard-endpoint.
+- **Intrekken:** `mcp_min_ts` (ms) per klant in CLIENTS, of `MCP_MIN_TS` voor
+  iedereen; elk token met een oudere `iat` is dood. Klant uit `MCP_OAUTH_CLIENTS`
+  halen werkt ook meteen.
+- **Grenzen van stateless:** een code of geroteerd refresh token is alleen
+  binnen dezelfde instantie eenmalig. PKCE en de intrekregel dekken de rest.
+- **In `mcp.js`:** een token met voorvoegsel `mcpat.` wordt scope
+  `{kind:'client'}`; `clientId` is dan optioneel in de tools. Op een klantadres
+  wordt een token van een andere klant geweigerd (403) en een agency-sleutel
+  beperkt tot die klant. De 401 wijst met `resource_metadata` naar de login.
+- **Test:** 33 controles op de hele flow met nepklanten (registratie, PKCE,
+  hergebruik, tenantgrens, intrekken, rem); geen testsuite in de repo, het script
+  stond in de scratchpad.
 
-### MCP-roadmap (stand 29-09-2026)
+### MCP-roadmap (stand 06-10-2026)
 
-1. Login verharden (`auth.js`): voorwaarde voor elke OAuth-login.
-2. **Nu: V2 voor één klant.** Inloggen in claude.ai/Cowork met klantcode +
-   wachtwoord; de connector ziet alleen die klant. Per klant een eigen
-   connectoradres (`/api/mcp/<klant>`, vult alleen de login voor; het token
-   bepaalt de scope), zodat één Project per klant één connector heeft. Testklant:
-   SENJA (dummydata).
+1. ~~Login verharden~~: timing-veilige vergelijking + rem per IP en per
+   klantcode (per instantie). **Nog open:** een Vercel Firewall-regel op
+   `/api/auth` en `/oauth/authorize`, want de rem in het geheugen begint bij elke
+   koude instantie opnieuw.
+2. **Nu: V2 testen met SENJA** in claude.ai (`/api/mcp/senja`). Daarna per klant
+   openzetten via `MCP_OAUTH_CLIENTS`.
 3. **Later: cross-client login + MCP.** Een aparte agency-login in claude.ai die
    over klanten heen mag vragen, gescheiden van de klantconnectors. Tot dan
    blijft cross-client alleen via de agency-sleutel in Claude Code.
@@ -1001,8 +1016,9 @@ Sources-sub-tab van GEO leeg met een uitleg; de rest van het dashboard — inclu
 de GEO-baseline, die uit Drive komt — merkt er niets van). Optional prompt
 overrides: `AGENT_SYSTEM_PROMPT`, `REPORT_SYSTEM_PROMPT`.
 MCP-koppeling: `MCP_AGENCY_KEYS` (JSON naam → sleutel ≥ 32 tekens, mark Sensitive;
-zonder deze variabele antwoordt `/api/mcp` 503), optioneel `MCP_DISABLED=1`,
-`MCP_ALLOWED_ORIGINS` en `DEMO_CLIENTS`.
+zonder deze variabele werkt geen agency-sleutel), `MCP_OAUTH_CLIENTS`
+(komma-gescheiden klantcodes die via claude.ai mogen inloggen; leeg = niemand),
+optioneel `MCP_MIN_TS`, `MCP_DISABLED=1`, `MCP_ALLOWED_ORIGINS` en `DEMO_CLIENTS`.
 
 ## Deploy
 

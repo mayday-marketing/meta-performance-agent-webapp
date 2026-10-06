@@ -8,8 +8,10 @@ die het dashboard ook toont — dezelfde berekening, dezelfde drempels.
 Achtergrond en de regels voor ontwikkelaars staan in [../CLAUDE.md](../CLAUDE.md)
 onder 'MCP-koppeling'. Dit document is de handleiding.
 
-**Stand V1 (26-09-2026):** alleen lezen, voor het mayday-team, via Claude Code.
-Klanten zelf koppelen via claude.ai komt in V2 (inloggen met OAuth).
+**Stand V2 (06-10-2026):** alleen lezen. Het mayday-team koppelt via Claude
+Code met een agency-sleutel (alle klanten). Een klant koppelt in claude.ai of
+Cowork door in te loggen met zijn klantcode en wachtwoord (alleen dat merk) —
+zie 'Per klant: koppelen in claude.ai'.
 
 ---
 
@@ -60,8 +62,8 @@ kosten per keer geld op het gedeelde DataForSEO-saldo.
    pad `/api/mcp` (bijvoorbeeld 120 verzoeken per minuut per IP). De functie
    heeft zelf ook een rem, maar alleen per instantie.
 
-Zonder `MCP_AGENCY_KEYS` antwoordt de koppeling altijd "niet geconfigureerd".
-Dat is zo bedoeld: dan staat hij dicht.
+Zonder `MCP_AGENCY_KEYS` werkt geen enkele agency-sleutel. Dat is zo bedoeld:
+dan staat die toegang dicht.
 
 ---
 
@@ -93,12 +95,64 @@ Dat is zo bedoeld: dan staat hij dicht.
 
 ---
 
+## Per klant: koppelen in claude.ai of Cowork
+
+De klant logt in met dezelfde klantcode en hetzelfde wachtwoord als op het
+dashboard. Claude ziet daarna alleen de cijfers van dat ene merk.
+
+**Eenmalig per klant (beheerder):**
+
+1. Ga naar [vercel.com](https://vercel.com) → project
+   **meta-performance-agent-webapp** → **Settings** → **Environment Variables**.
+2. Zoek `MCP_OAUTH_CLIENTS`. Bestaat hij niet, klik dan **Add New** en vul bij
+   **Key** `MCP_OAUTH_CLIENTS` in.
+3. Zet bij **Value** de klantcodes die mogen koppelen, komma-gescheiden, in
+   kleine letters. Bijvoorbeeld: `senja` of `senja,spotto`.
+4. Vink bij **Environments** alleen **Production** aan en klik **Save**.
+5. Ga naar **Deployments**, klik op de bovenste productie-deployment → menu
+   **⋯** → **Redeploy**.
+
+Een klant die niet in de lijst staat, krijgt na het inloggen de melding dat
+koppelen voor zijn merk nog niet openstaat.
+
+**Koppelen (de klant of jij, in claude.ai):**
+
+1. Open [claude.ai](https://claude.ai) en klik linksonder op je naam →
+   **Settings** → **Connectors**.
+2. Klik **Add custom connector**.
+3. Vul bij **Name** in: `mayday dashboard`.
+4. Vul bij **URL** het adres van het merk in, met de klantcode op het einde:
+
+   ```
+   https://dashboard.mayday.marketing/api/mcp/senja
+   ```
+
+5. Klik **Add** en daarna **Connect**. Er opent een inlogscherm van mayday
+   marketing; de klantcode staat al ingevuld.
+6. Typ het wachtwoord van het dashboard en klik **Inloggen en koppelen**.
+7. Terug in claude.ai staat de connector op *connected*. Zet hem in een gesprek
+   aan via het menu **Search and tools**.
+
+De koppeling blijft 90 dagen geldig zolang hij gebruikt wordt; daarna vraagt
+claude.ai opnieuw om in te loggen.
+
+**Eén klant ontkoppelen:** zet in de env var `CLIENTS` bij die klant
+`"mcp_min_ts": <huidig tijdstip in ms>` (Terminal: `node -e "console.log(Date.now())"`)
+en redeploy. Elk eerder uitgegeven token van die klant is dan ongeldig. Of haal
+de klantcode uit `MCP_OAUTH_CLIENTS`. **Iedereen ontkoppelen:** zet
+`MCP_MIN_TS` op hetzelfde tijdstip.
+
+---
+
 ## Als het niet werkt
 
 | Melding | Oorzaak | Oplossing |
 |---|---|---|
-| 503 · niet geconfigureerd | `MCP_AGENCY_KEYS` ontbreekt of is ongeldig | Stap 2 tot 8 van de beheerder |
-| 401 · ongeldige sleutel | Sleutel verkeerd overgenomen of ingetrokken | Koppeling verwijderen en opnieuw toevoegen |
+| 503 · niet geconfigureerd | `AUTH_SECRET` ontbreekt in deze omgeving | `AUTH_SECRET` zetten en redeployen |
+| 401 · ongeldige sleutel | Sleutel verkeerd overgenomen, ingetrokken, of `MCP_AGENCY_KEYS` ontbreekt | Stap 2 tot 8 van de beheerder; koppeling opnieuw toevoegen |
+| "Koppelen met Claude staat voor dit merk nog niet open" | Klantcode staat niet in `MCP_OAUTH_CLIENTS` | Toevoegen en redeployen |
+| "Deze koppeling hoort bij een ander merk" | Ingelogd met een andere klantcode dan in de URL | Connector met de juiste klantcode in de URL toevoegen |
+| "Te veel mislukte pogingen" | Tien foute wachtwoorden vanaf hetzelfde adres | Een kwartier wachten |
 | "De bron antwoordde niet op tijd" | Eerste opvraging van een periode is traag | Even wachten en opnieuw vragen; daarna komt het uit de cache |
 | Onbekende klant | Klantcode verkeerd | Laat Claude eerst `list_clients` aanroepen |
 

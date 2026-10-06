@@ -5,9 +5,15 @@
    gesprekken. Stateless Streamable HTTP: elke POST is één JSON-RPC-bericht, het
    antwoord is gewoon JSON. Geen sessies, geen SSE, geen dependencies.
 
-   V1 = agency-scope, alleen lezen. Wie een geldige agency-sleutel heeft, mag
-   elke klant uit CLIENTS opvragen. V2 (OAuth per klant) voegt een tweede soort
-   scope toe; de tools veranderen daarvoor niet — vandaar het scope-object.
+   Twee soorten scope, dezelfde tools:
+     - agency (V1): een agency-sleutel uit MCP_AGENCY_KEYS, elke klant uit
+       CLIENTS. Voor het mayday-team, via Claude Code.
+     - client (V2): een OAuth access token (oauth.js, _oauth.js), precies één
+       klant. Voor claude.ai en Cowork; resolveClient() negeert dan elke andere
+       klantcode.
+   Adres per klant: /api/mcp/<klant> (rewrite naar ?tenant=<klant>). Dat vult in
+   claude.ai de login voor en beperkt ook een agency-sleutel tot die ene klant;
+   een token van een andere klant wordt er geweigerd.
 
    ISOLATIE — dezelfde regel als overal (CLAUDE.md):
      - Een tool krijgt alleen een klantcode, datums, een vergelijking en een
@@ -35,6 +41,7 @@
 const crypto = require('crypto');
 const { captureOidcToken, getClientConfig } = require('./_config');
 const { signToken } = require('./_auth');
+const OAuth = require('./_oauth');
 const Summary = require('../summary.js');
 
 // De handlers die de tools aanroepen. Statisch geladen, zodat Vercel ze meebundelt.
@@ -123,14 +130,25 @@ function readAgencyKeys() {
 }
 
 function authenticate(req) {
-  const keys = agencyKeys();
-  if (!keys.length || !process.env.AUTH_SECRET) {
-    const why = readAgencyKeys().problems.concat(process.env.AUTH_SECRET ? [] : ['AUTH_SECRET ontbreekt']);
-    console.warn('[mcp] niet geconfigureerd:', why.join(' · '));
+  if (!process.env.AUTH_SECRET) {
+    console.warn('[mcp] niet geconfigureerd: AUTH_SECRET ontbreekt');
     return { status: 503, error: 'MCP-koppeling is niet geconfigureerd.' };
   }
-  const m = /^Bearer\s+(\S{1,512})$/i.exec(String(req.headers.authorization || ''));
+  const m = /^Bearer\s+(\S{1,4096})$/i.exec(String(req.headers.authorization || ''));
   if (!m) return { status: 401, error: 'Bearer-token ontbreekt.' };
+
+  // V2: een OAuth access token van één klant (herkenbaar aan zijn voorvoegsel).
+  if (OAuth.isAccessToken(m[1])) {
+    const scope = OAuth.verifyAccessToken(m[1]);
+    return scope ? { scope } : { status: 401, error: 'Token ongeldig, verlopen of ingetrokken.' };
+  }
+
+  // V1: agency-sleutel. Zonder geldige sleutels in de omgeving matcht er niets.
+  const keys = agencyKeys();
+  if (!keys.length) {
+    console.warn('[mcp] geen agency-sleutels:', readAgencyKeys().problems.join(' · '));
+    return { status: 401, error: 'Ongeldige sleutel.' };
+  }
   // Hashes vergelijken: vaste lengte, dus timingSafeEqual gooit nooit, en de
   // lengte van de echte sleutel lekt niet. Alle sleutels aflopen, niet stoppen
   // bij de eerste treffer.
@@ -142,6 +160,21 @@ function authenticate(req) {
   }
   if (!hit) return { status: 401, error: 'Ongeldige sleutel.' };
   return { scope: { kind: 'agency', keyName: hit.name } };
+}
+
+// Klantadres (/api/mcp/<klant>): een klant-token moet bij die klant horen, een
+// agency-sleutel wordt beperkt tot die klant. Geeft de scope terug, of null.
+function scopeForTenant(scope, tenant) {
+  if (!tenant) return scope;
+  if (!ID_RE.test(tenant) || !Object.prototype.hasOwnProperty.call(parseClients(), tenant)) return null;
+  if (scope.kind === 'client') return scope.clientId === tenant ? scope : null;
+  return { kind: 'client', clientId: tenant, keyName: scope.keyName };
+}
+
+function publicOrigin(req) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) return null;
+  return `${/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host) ? 'http' : 'https'}://${host}`;
 }
 
 // Per sleutel een glijdend venster, per instantie. Geen vervanging voor een
@@ -607,7 +640,13 @@ async function callTool(scope, params, oidc) {
   if (!tool) return { error: rpcError(null, -32602, `Onbekende tool '${name.slice(0, 40)}'.`) };
   const log = { tool: name, clientId: null };
   try {
-    const args = checkArgs(tool, params.arguments);
+    // Onder een klant-scope is er maar één klant: een ontbrekende klantcode
+    // wordt die klant, een andere negeert resolveClient().
+    const given = params.arguments == null ? {} : params.arguments;
+    const filled = scope.kind === 'client' && given && typeof given === 'object' && !Array.isArray(given)
+      && tool.inputSchema.properties && tool.inputSchema.properties.clientId && given.clientId == null
+      ? { ...given, clientId: scope.clientId } : given;
+    const args = checkArgs(tool, filled);
     const ctx = tool.name === 'list_clients' ? null : { ...resolveClient(scope, args.clientId), oidc };
     if (ctx) log.clientId = ctx.clientId;
     const cacheKey = `${ctx ? ctx.clientId : '*'}|${scope.kind === 'client' ? scope.clientId : 'agency'}|${name}|${JSON.stringify(args)}`;
@@ -630,6 +669,17 @@ async function callTool(scope, params, oidc) {
   }
 }
 
+// Onder een klant-scope is clientId niet verplicht: de koppeling ziet één klant.
+function listedSchema(tool, scope) {
+  const s = tool.inputSchema;
+  if (scope.kind !== 'client' || !s.properties || !s.properties.clientId) return s;
+  return {
+    ...s,
+    properties: { ...s.properties, clientId: { type: 'string', description: `Optioneel: deze koppeling ziet alleen klant '${scope.clientId}'.` } },
+    required: (s.required || []).filter(k => k !== 'clientId'),
+  };
+}
+
 function allowedOrigin(origin) {
   const list = String(process.env.MCP_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
   return list.includes(origin);
@@ -646,13 +696,23 @@ module.exports = async (req, res) => {
   if (req.headers.origin && !allowedOrigin(req.headers.origin)) return res.status(403).json(rpcError(null, -32000, 'Origin niet toegestaan.'));
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json(rpcError(null, -32000, 'Alleen POST.')); }
 
+  const tenant = typeof req.query.tenant === 'string' ? req.query.tenant.toLowerCase() : null;
   const auth = authenticate(req);
   if (auth.status) {
-    if (auth.status === 401) res.setHeader('WWW-Authenticate', 'Bearer realm="mayday-dashboard"');
+    if (auth.status === 401) {
+      // resource_metadata wijst claude.ai de weg naar de OAuth-login (RFC 9728).
+      const base = publicOrigin(req);
+      const rm = base ? `, resource_metadata="${base}/.well-known/oauth-protected-resource/api/mcp${tenant && ID_RE.test(tenant) ? `/${tenant}` : ''}"` : '';
+      res.setHeader('WWW-Authenticate', `Bearer realm="mayday-dashboard"${rm}`);
+    }
     console.log(JSON.stringify({ evt: 'mcp', status: auth.status }));
     return res.status(auth.status).json(rpcError(null, -32001, auth.error));
   }
-  const scope = auth.scope;
+  const scope = scopeForTenant(auth.scope, tenant);
+  if (!scope) {
+    console.log(JSON.stringify({ evt: 'mcp', status: 403, key: auth.scope.keyName, tenant: String(tenant).slice(0, 40) }));
+    return res.status(403).json(rpcError(null, -32001, 'Deze toegang hoort niet bij dit klantadres.'));
+  }
   captureOidcToken(req);   // Google-toegang voor de handlers (zie _config.js)
   const oidc = req.headers['x-vercel-oidc-token'] || null;
 
@@ -672,7 +732,7 @@ module.exports = async (req, res) => {
   // Notificaties (zonder id) en antwoorden op onze eigen verzoeken: bevestigen, niets terug.
   if (!idOk) return res.status(202).end();
 
-  const logLine = { evt: 'mcp', key: scope.keyName, method: msg.method.slice(0, 40) };
+  const logLine = { evt: 'mcp', key: scope.keyName, scope: scope.kind === 'client' ? scope.clientId : 'agency', method: msg.method.slice(0, 40) };
   let out;
   switch (msg.method) {
     case 'initialize': {
@@ -691,7 +751,7 @@ module.exports = async (req, res) => {
     case 'tools/list':
       out = rpcResult(id, {
         tools: TOOLS.map(t => ({
-          name: t.name, title: t.title, description: t.description, inputSchema: t.inputSchema,
+          name: t.name, title: t.title, description: t.description, inputSchema: listedSchema(t, scope),
           annotations: { title: t.title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         })),
       });
@@ -719,4 +779,4 @@ module.exports = async (req, res) => {
 };
 
 // Voor lokale tests (scripts), niet voor de route zelf.
-module.exports._internal = { TOOLS, redact, resolvePeriod, checkArgs, agencyKeys };
+module.exports._internal = { TOOLS, redact, resolvePeriod, checkArgs, agencyKeys, scopeForTenant };

@@ -37,12 +37,51 @@
     "api/cron-demo.js": {
       "maxDuration": 300,
       "memory": 1024
+    },
+    "api/oauth.js": {
+      "maxDuration": 10
     }
   },
   "rewrites": [
     {
       "source": "/",
       "destination": "/index.html"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server",
+      "destination": "/api/oauth?op=as-meta"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server/:path*",
+      "destination": "/api/oauth?op=as-meta"
+    },
+    {
+      "source": "/.well-known/openid-configuration",
+      "destination": "/api/oauth?op=as-meta"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource",
+      "destination": "/api/oauth?op=pr-meta"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource/:path*",
+      "destination": "/api/oauth?op=pr-meta&path=:path*"
+    },
+    {
+      "source": "/oauth/register",
+      "destination": "/api/oauth?op=register"
+    },
+    {
+      "source": "/oauth/authorize",
+      "destination": "/api/oauth?op=authorize"
+    },
+    {
+      "source": "/oauth/token",
+      "destination": "/api/oauth?op=token"
+    },
+    {
+      "source": "/api/mcp/:tenant",
+      "destination": "/api/mcp?tenant=:tenant"
     }
   ],
   "crons": [

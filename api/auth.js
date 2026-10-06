@@ -1,5 +1,6 @@
-// Ondertekenen gebeurt op één plek (_auth.js); mcp.js gebruikt dezelfde functie.
-const { signToken } = require('./_auth');
+// Ondertekenen en de wachtwoordcontrole gebeuren op één plek (_auth.js); mcp.js
+// en oauth.js gebruiken dezelfde functies.
+const { signToken, checkPassword, loginBlocked, loginFailed } = require('./_auth');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,31 +11,31 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { clientId, password } = req.body || {};
-
-  if (!clientId || !password) {
+  if (typeof clientId !== 'string' || typeof password !== 'string' || !clientId || !password) {
     return res.status(400).json({ error: 'Vul beide velden in.' });
   }
 
-  // Parse clients from env var
-  // Format: { "merknaam": { "password": "abc", "sheetId": "1xyz...", "brandName": "Merknaam" } }
-  let clients;
-  try {
-    clients = JSON.parse(process.env.CLIENTS || '{}');
-  } catch {
-    return res.status(500).json({ error: 'Serverconfiguratie fout.' });
+  if (loginBlocked(req, clientId)) {
+    res.setHeader('Retry-After', '900');
+    return res.status(429).json({ error: 'Te veel mislukte pogingen. Probeer het over een kwartier opnieuw.' });
   }
 
-  const client = clients[clientId.toLowerCase()];
-  if (!client || client.password !== password) {
+  // CLIENTS-vorm: { "merknaam": { "password": "abc", "sheetId": "1xyz...", "brandName": "Merknaam" } }
+  const check = checkPassword(clientId, password);
+  if (check.config) return res.status(500).json({ error: 'Serverconfiguratie fout.' });
+  if (!check.ok) {
+    loginFailed(req, clientId);
     return res.status(401).json({ error: 'Ongeldige klantcode of wachtwoord.' });
   }
+  const client = check.client;
+  const id = check.clientId;
 
-  const token = signToken(clientId.toLowerCase());
+  const token = signToken(id);
 
   res.status(200).json({
     token,
-    clientId: clientId.toLowerCase(),
-    brandName: client.brandName || clientId,
+    clientId: id,
+    brandName: client.brandName || id,
     sheetId: client.sheetId || null,
     hasDrive: !!client.driveFolderId,
     hasMetricool: !!client.metricool_token,
