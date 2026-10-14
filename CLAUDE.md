@@ -23,8 +23,9 @@ this repo are Dutch too — match that.
 
 - **Frontend:** a single static `index.html` + `app.js` (one IIFE) +
   `summary.js` (gedeelde rekenlaag, zie 'MCP-koppeling') + `charts.js` +
-  `report.js` + `styles.css`. No framework, no bundler, **no `package.json`**.
-  Edit and deploy as-is.
+  `report.js` + `styles.css`. No framework, no bundler. `package.json` bestaat
+  alleen voor `@vercel/functions` (Runtime Cache voor de login-rem, zie
+  `_auth.js`); er is nog altijd geen build-stap. Edit and deploy as-is.
 - **Backend:** Vercel serverless functions in `api/*.js` (Node, CommonJS
   `module.exports = async (req,res) => …`). Timeouts/memory set per-function in
   `vercel.json`.
@@ -947,9 +948,10 @@ registratie. Stateless, met ondertekende blobs (geen database):
 ### MCP-roadmap (stand 06-10-2026)
 
 1. ~~Login verharden~~: timing-veilige vergelijking + rem per IP en per
-   klantcode (per instantie). **Nog open:** een Vercel Firewall-regel op
-   `/api/auth` en `/oauth/authorize`, want de rem in het geheugen begint bij elke
-   koude instantie opnieuw.
+   klantcode. Sinds 14-10-2026 staan de tellers ook in de Vercel Runtime Cache
+   (`_auth.js`), dus ze overleven een koude instantie. **Nog open:** de Vercel
+   Firewall-regel `Login rate limit` grijpt op dit project niet in
+   (docs/ROADMAP.md, supportticket).
 2. **Nu: V2 testen met SENJA** in claude.ai (`/api/mcp/senja`). Daarna per klant
    openzetten via `MCP_OAUTH_CLIENTS`.
 3. **Later: cross-client login + MCP.** Een aparte agency-login in claude.ai die

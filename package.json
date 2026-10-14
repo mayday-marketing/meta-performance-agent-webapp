@@ -1,0 +1,9 @@
+{
+  "name": "meta-performance-agent-webapp",
+  "private": true,
+  "description": "mayday marketing performance dashboard — statische frontend + Vercel-functies. Geen build-stap; package.json bestaat alleen voor @vercel/functions (Runtime Cache voor de login-rem).",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@vercel/functions": "^3.9.11"
+  }
+}

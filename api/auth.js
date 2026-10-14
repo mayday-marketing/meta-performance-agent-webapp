@@ -15,7 +15,7 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Vul beide velden in.' });
   }
 
-  if (loginBlocked(req, clientId)) {
+  if (await loginBlocked(req, clientId)) {
     res.setHeader('Retry-After', '900');
     return res.status(429).json({ error: 'Te veel mislukte pogingen. Probeer het over een kwartier opnieuw.' });
   }
@@ -24,7 +24,7 @@ module.exports = async (req, res) => {
   const check = checkPassword(clientId, password);
   if (check.config) return res.status(500).json({ error: 'Serverconfiguratie fout.' });
   if (!check.ok) {
-    loginFailed(req, clientId);
+    await loginFailed(req, clientId);
     return res.status(401).json({ error: 'Ongeldige klantcode of wachtwoord.' });
   }
   const client = check.client;

@@ -262,7 +262,7 @@ function fatalPage(res, msg) {
   return page(res, 400, { title: 'Koppelen lukt niet', intro: esc(msg) });
 }
 
-function authorize(req, res) {
+async function authorize(req, res) {
   const base = origin(req);
   if (!base) return fatalPage(res, 'Ongeldig adres.');
   if (!process.env.AUTH_SECRET) return fatalPage(res, 'De koppeling is niet geconfigureerd.');
@@ -281,14 +281,14 @@ function authorize(req, res) {
   const rawId = str(q.login_client, 40).trim().toLowerCase();
   const password = str(q.login_password, 200);
   if (!ID_RE.test(rawId) || !password) return loginForm(res, p, { error: 'Vul je klantcode en wachtwoord in.', clientCode: rawId });
-  if (loginBlocked(req, rawId)) {
+  if (await loginBlocked(req, rawId)) {
     res.setHeader('Retry-After', '900');
     return loginForm(res, p, { error: 'Te veel mislukte pogingen. Probeer het over een kwartier opnieuw.', clientCode: rawId });
   }
   const check = checkPassword(rawId, password);
   if (check.config) return fatalPage(res, 'Serverconfiguratie fout.');
   if (!check.ok) {
-    loginFailed(req, rawId);
+    await loginFailed(req, rawId);
     return loginForm(res, p, { error: 'Ongeldige klantcode of wachtwoord.', clientCode: rawId });
   }
   // Pas ná een geldige login zeggen dat een klant geen toegang heeft, zodat het

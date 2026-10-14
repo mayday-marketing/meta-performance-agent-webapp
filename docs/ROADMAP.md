@@ -79,6 +79,17 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
   > project?
 - **Daarna:** opnieuw testen met POSTs op `/oauth/register` (kost geen
   inlogpoging): na 20 binnen een minuut moet er een 429 komen.
+- **Stand 14-10-2026:** opnieuw gemeten, nog altijd geen 429 (38 POSTs op
+  `/oauth/register`, regel geldig, geen drafts). De rem in `_auth.js` is daarom
+  niet langer per instantie: hij schrijft zijn tellers ook naar de Vercel
+  Runtime Cache (`@vercel/functions`, zie package.json), die koude starts
+  overleeft en door alle instanties in de regio gedeeld wordt. Getest op
+  productie: de klantcode-teller blokkeerde na precies 20 fouten, verspreid
+  over runs minuten uit elkaar. Let op bij zelf testen: de per-IP-teller (10)
+  grijpt niet als je verbinding per verzoek een ander uitgaand IP krijgt — dat
+  was hier het geval. De Firewall-regel blijft gewenst als eerste laag (die
+  telt vóór de functie en kost geen invocaties); het supportticket hierboven
+  staat nog open.
 
 ### Nachtelijke testscenario's: wat kan er mislopen
 - **Waarom:** er zijn geen tests (zie CLAUDE.md). Fouten zoals deze week (een
