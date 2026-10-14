@@ -94,7 +94,8 @@ herkent ze aan het nummer in de bestandsnaam, niet aan de rest van de naam:
 
 ## 5 · Maak de klantsheet
 
-Template: `CLIENTS/KLANTNAAM/06_PERFORMANTIE/Klant_Context_TEMPLATE.xlsx`.
+Template: `Klant_Context_TEMPLATE` (Google Sheet) in
+`CLIENTS/KLANTNAAM/00_AI-CONTEXT/0.1_Merk-Brief/`.
 Drie tabs, met exact deze namen:
 
 | Tab | Vorm | Gebruikt door |
@@ -247,7 +248,8 @@ exportnamen van Windsor volstaan. Deel de spreadsheet met het service-account
 (Viewer) en noteer de id voor stap 10.
 
 De query's hoef je niet met de hand te typen: [Windsor-querybuilder.xlsx](Windsor-querybuilder.xlsx)
-heeft één tabblad per export (ook Meta Ads, Google Ads, e-mail en de connectors
+(als template ook in Drive: `CLIENTS/KLANTNAAM/00_AI-CONTEXT/0.1_Merk-Brief/
+Windsor-querybuilder_TEMPLATE.xlsx`, naast `Klant_Context_TEMPLATE`) heeft één tabblad per export (ook Meta Ads, Google Ads, e-mail en de connectors
 die het dashboard nog niet leest: TikTok, LinkedIn, Pinterest, Snapchat, Bing,
 Amazon, ChatGPT en Reddit Ads, organisch TikTok/LinkedIn/Pinterest/YouTube/
 Threads/X, Google Business Profile, Plausible, Shopify/WooCommerce/Magento,
