@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { cors } = require('./_cors');
 const { getAccessToken: googleAccessToken, captureOidcToken, getClientConfig, okDriveFile } = require('./_config');
 const { getDesignSystem, isInside } = require('./_designsystem');
 
@@ -148,10 +149,7 @@ function classifyFile(name) {
 }
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (cors(req, res, 'GET')) return;   // alleen het eigen domein, zie _cors.js
   captureOidcToken(req);   // OIDC-token uit de request-header (zie _config.js)
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 

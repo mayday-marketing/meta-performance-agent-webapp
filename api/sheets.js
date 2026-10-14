@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { cors } = require('./_cors');
 const { getClientConfig, emptyConfig, getAccessToken: googleAccessToken, captureOidcToken } = require('./_config');
 
 const SECRET = process.env.AUTH_SECRET;
@@ -190,11 +191,7 @@ function parseGoals(rows) {
 
 // ── HANDLER ───────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (cors(req, res, 'GET')) return;   // alleen het eigen domein, zie _cors.js
   captureOidcToken(req);   // OIDC-token uit de request-header (zie _config.js)
 
   const { method } = req;

@@ -1,13 +1,10 @@
 // Ondertekenen en de wachtwoordcontrole gebeuren op één plek (_auth.js); mcp.js
 // en oauth.js gebruiken dezelfde functies.
 const { signToken, checkPassword, loginBlocked, loginFailed } = require('./_auth');
+const { cors } = require('./_cors');
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (cors(req, res, 'POST')) return;   // alleen het eigen domein, zie _cors.js
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { clientId, password } = req.body || {};

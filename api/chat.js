@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { cors } = require('./_cors');
 const fs = require('fs');
 const path = require('path');
 
@@ -41,10 +42,7 @@ function loadAgentPrompt() {
 }
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (cors(req, res, 'POST')) return;   // alleen het eigen domein, zie _cors.js
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { messages, clientId, token, driveFiles, drivePeriod, dashboardData } = req.body || {};

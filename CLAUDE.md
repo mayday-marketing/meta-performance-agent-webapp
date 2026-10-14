@@ -1003,6 +1003,12 @@ syntax shows literally — the chat prompt tells the model to avoid `**`/`#`/etc
 - **Non-fatal add-on calls:** creative/video/conversion ad fields are fetched in
   separate calls with a tighter timeout so a slow breakdown can't sink the core
   fetch; failures return `{__error}` and are surfaced in `errors`, not thrown.
+- **CORS alleen voor het eigen domein (`api/_cors.js`):** de dashboardroutes
+  echoën het `Origin` alleen als zijn host gelijk is aan de host van het verzoek
+  (productie én previews), plus `ALLOWED_ORIGINS`. Geen `*` meer: een vreemde
+  site krijgt geen ACAO-header en de browser weigert dan het antwoord. OAuth-
+  metadata en het token-endpoint houden wél `*` — dat vraagt de OAuth-spec voor
+  publieke clients; `mcp.js` heeft zijn eigen allowlist.
 - **Rem op betaalde calls (`api/_throttle.js`):** per klant en per soort, in de
   Vercel Runtime Cache net als de login-rem. Chat 30 per kwartier, rapport-
   duiding 10 per uur, SEO-rank-check en GEO-bronnen/-vermeldingen 6 per uur.
@@ -1030,6 +1036,8 @@ MCP-koppeling: `MCP_AGENCY_KEYS` (JSON naam → sleutel ≥ 32 tekens, mark Sens
 zonder deze variabele werkt geen agency-sleutel), `MCP_OAUTH_CLIENTS`
 (komma-gescheiden klantcodes die via claude.ai mogen inloggen; leeg = niemand),
 optioneel `MCP_MIN_TS`, `MCP_DISABLED=1`, `MCP_ALLOWED_ORIGINS` en `DEMO_CLIENTS`.
+`ALLOWED_ORIGINS` (optioneel, komma-gescheiden): extra browser-origins voor de
+dashboardroutes naast het eigen domein, zie `_cors.js`.
 
 ## Deploy
 
