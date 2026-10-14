@@ -226,6 +226,10 @@ function page(res, status, { title, intro, form, error }) {
 </main></body></html>`);
 }
 
+function redirectHost(uri) {
+  try { return new URL(uri).host; } catch { return 'onbekend adres'; }
+}
+
 function loginForm(res, p, { error, clientCode } = {}) {
   securityHeaders(res, p.redirectUri);
   const hidden = {
@@ -245,7 +249,10 @@ function loginForm(res, p, { error, clientCode } = {}) {
   </form>`;
   return page(res, error ? 401 : 200, {
     title: 'Claude koppelen aan je dashboard',
-    intro: `<b>${esc(p.reg.n)}</b> vraagt toegang tot de cijfers in het mayday marketing dashboard. Log in met dezelfde klantcode en hetzelfde wachtwoord als op het dashboard.`,
+    // De naam kiest de app zelf bij registratie en bewijst dus niets. Het
+    // terugkeeradres wél: de code gaat alleen daarheen. Daarom staat het er
+    // naast, zodat 'Claude' met een vreemd domein opvalt.
+    intro: `<b>${esc(p.reg.n)}</b> (${esc(redirectHost(p.redirectUri))}) vraagt toegang tot de cijfers in het mayday marketing dashboard. Log in met dezelfde klantcode en hetzelfde wachtwoord als op het dashboard.`,
     form, error,
   });
 }
@@ -312,7 +319,11 @@ function tokenClient(req, b) {
   if (m) {
     const dec = Buffer.from(m[1], 'base64').toString('utf8');
     const i = dec.indexOf(':');
-    if (i > 0) { id = decodeURIComponent(dec.slice(0, i)); secret = decodeURIComponent(dec.slice(i + 1)); }
+    // Een kapotte procent-codering mag geen 500 geven: dan is het gewoon een
+    // ongeldige client.
+    try {
+      if (i > 0) { id = decodeURIComponent(dec.slice(0, i)); secret = decodeURIComponent(dec.slice(i + 1)); }
+    } catch { return null; }
   }
   const reg = registration(id);
   if (!reg) return null;

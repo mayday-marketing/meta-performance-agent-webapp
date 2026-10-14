@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getClientConfig, captureOidcToken } = require('./_config');
+const { redact } = require('./_redact');
 const { activeChannels, pendingChannels, matchGa4Channel, ga4GroupOf } = require('./_channels');
 const { getWebsiteSheetData, getConnectorRows, hasConnectorTab, aggregateDemo } = require('./_sheetdata');
 
@@ -39,7 +40,7 @@ async function windsor(connector, apiKey, params, timeoutMs = 25000) {
     const res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Windsor ${res.status}: ${text.slice(0, 300)}`);
+      throw new Error(redact(`Windsor ${res.status}: ${text.slice(0, 300)}`));
     }
     return await res.json();
   } catch (e) {
@@ -65,7 +66,11 @@ module.exports = async (req, res) => {
   captureOidcToken(req);   // OIDC-token uit de request-header (zie _config.js)
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, clientId, token, connector, fields, startDate, endDate, datePreset, filter } = req.body || {};
+  // Alleen action, klant, token en datums. Een connector-slug of veldenlijst
+  // uit het request was vroeger mogelijk (acties getData/getFields): voor een
+  // slug buiten ACCOUNT_ID_CONNECTORS gaf dat álle accounts op de gedeelde
+  // Windsor-sleutel terug. Die acties zijn weg (14-10-2026).
+  const { action, clientId, token, startDate, endDate } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -265,23 +270,6 @@ module.exports = async (req, res) => {
 
   try {
     switch (action) {
-
-      // Generic data query — pass connector + comma-separated fields + datums.
-      // Voorbeeld: { connector: "instagram", fields: "media_id,media_caption,media_reach,timestamp", startDate: "2026-05-04", endDate: "2026-05-11" }
-      // Voor schema-ontdekking gebruik Windsor's MCP-tools (get_connectors, get_fields) — niet via REST.
-      case 'getData': {
-        if (!connector || !fields) return res.status(400).json({ error: 'connector en fields vereist.' });
-        const params = {};
-        if (startDate) params.date_from = startDate;
-        if (endDate) params.date_to = endDate;
-        if (datePreset) params.date_preset = datePreset;
-        // Via windsorScoped, niet via windsor(): anders zou deze actie bij een gedeelde
-        // Windsor-sleutel álle klantaccounts teruggeven. Een `accounts` uit het request
-        // wordt bewust genegeerd — scoping komt alleen server-side uit de config.
-        const data = await windsorScoped(connector, fields, params, 25000, 'getData');
-        if (data && data.__error) return res.status(502).json({ error: data.__error });
-        return res.status(200).json(data);
-      }
 
       // Eén-shot dashboard fetch — IG organic + Meta Ads parallel. FB organic komt later
       // zodra we de juiste connector-slug hebben bevestigd.
@@ -1854,40 +1842,6 @@ module.exports = async (req, res) => {
         });
       }
 
-      // Veld-ontdekking: vraagt de autoritatieve veldenlijst van een connector op
-      // (account-specifiek). Geeft de velden terug die matchen op video/engagement-termen,
-      // zodat we de juiste veldnamen kunnen instellen zonder te gokken.
-      case 'getFields': {
-        const conn = connector || 'facebook';
-        const url = `${BASE}/${conn}/fields?api_key=${encodeURIComponent(apiKey)}`;
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 25000);
-        try {
-          const r = await fetch(url, { signal: ctrl.signal });
-          const text = await r.text();
-          let data;
-          try { data = JSON.parse(text); } catch { return res.status(200).json({ connector: conn, raw: text.slice(0, 3000) }); }
-          const list = Array.isArray(data) ? data
-            : (Array.isArray(data.data) ? data.data : (Array.isArray(data.fields) ? data.fields : []));
-          // Standaard-filter dekt video/engagement én creative-type-termen (type/format/
-          // creative/object/asset/placement/reel/carousel/media). Override via body.filter.
-          const rx = filter
-            ? new RegExp(filter, 'i')
-            : /video|p25|p50|p75|p95|p100|react|comment|share|save|engag|\blike|play|view|watch|type|format|creative|object|asset|placement|reel|carousel|carrousel|media|story/i;
-          const matched = list
-            .filter(f => rx.test(JSON.stringify(f)))
-            .map(f => ({ id: f.id || f.field || f.name, name: f.name || f.label, type: f.type }));
-          // Volledige id-lijst meesturen zodat een veld dat de filter mist toch zichtbaar is.
-          const allIds = list.map(f => f.id || f.field || f.name).filter(Boolean);
-          return res.status(200).json({ connector: conn, total: list.length, matched, allIds });
-        } finally { clearTimeout(timer); }
-      }
-
-      // Google Ads voor de Ads-pagina: kosten per conversie, impression share,
-      // zoektermen, apparaten en conversieacties. Geen omzet en geen ROAS — die
-      // staan in de ROAS-tab; één cijfer, één plek.
-      // Het account komt uit de Config-tab (`Google Ads account`), nooit uit het
-      // request; zonder account geeft windsorScoped fail-closed niets terug.
       case 'getGoogleAds': {
         const isoOk = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
         if (!isoOk(startDate) || !isoOk(endDate)) return res.status(400).json({ error: 'startDate en endDate vereist.' });
@@ -1970,9 +1924,9 @@ module.exports = async (req, res) => {
       }
 
       default:
-        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getData', 'getDashboard', 'getRoas', 'getWebsite', 'getGoogleAds', 'getEmail', 'getFields' beschikbaar).` });
+        return res.status(400).json({ error: `Onbekende action: ${action} (alleen 'getDashboard', 'getRoas', 'getWebsite', 'getGoogleAds', 'getEmail', 'getGoalMetrics', 'getAiTraffic' beschikbaar).` });
     }
   } catch (err) {
-    return res.status(502).json({ error: err.message });
+    return res.status(502).json({ error: redact(err.message) });
   }
 };

@@ -114,85 +114,6 @@
     </div>
   </div>
 
-  <!-- ========================== SOURCE ========================== -->
-  <div id="source-screen" class="screen" data-screen-label="Source">
-    <div class="auth-card">
-      <div class="brand">mayday marketing</div>
-      <div style="margin-top: 16px;">
-        <h1 style="font-size:30px; font-weight:400; letter-spacing:0.04em; color:var(--fg); margin:0 0 8px;">Hoe wil je starten?</h1>
-        <p class="muted" style="margin:0; font-size:14px; line-height:1.7;">Kies de gewenste onboardingflow voor de tool.</p>
-      </div>
-      <div class="source-grid">
-        <div class="source-card">
-          <h3>Automatisch</h3>
-          <p>Gebruik de live Metricool / Google Drive flow. Standaard voor klanten met een bestaande koppeling.</p>
-          <ul>
-            <li>Directe dataflow</li>
-            <li>Merkcontext uit Drive</li>
-            <li>Beste UX voor terugkerende klanten</li>
-          </ul>
-          <button class="primary" onclick="chooseSource('automatisch')">Kies Automatisch →</button>
-        </div>
-        <div class="source-card">
-          <h3>Handmatig</h3>
-          <p>Upload CSV-bestanden als fallback. Blijft bestaan voor losse analyses en klanten zonder Metricool.</p>
-          <ul>
-            <li>Upload CSV</li>
-            <li>Geen Drive-koppeling nodig</li>
-            <li>Backward compatible</li>
-          </ul>
-          <button onclick="chooseSource('handmatig')">Kies Handmatig →</button>
-        </div>
-      </div>
-      <p class="unlock-note">Ingelogd als <strong id="source-brand">—</strong></p>
-    </div>
-  </div>
-
-  <!-- ========================== MANUAL UPLOAD ========================== -->
-  <div id="manual-screen" class="screen" data-screen-label="Manual upload">
-    <div class="auth-card">
-      <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:16px;">
-        <div>
-          <div class="brand">mayday marketing</div>
-          <h1 style="font-size:28px; font-weight:400; letter-spacing:0.04em; color:var(--fg); margin:14px 0 6px;">Handmatige upload</h1>
-          <p class="muted" style="margin:0; font-size:13px;">Upload CSV-bestanden die later gebruikt worden in de dashboardflow.</p>
-        </div>
-        <button class="btn" onclick="showScreen('source-screen')">← Terug</button>
-      </div>
-      <div class="upload-grid">
-        <div class="upload-card">
-          <div class="label">Verplicht</div>
-          <div class="title">Instagram CSV</div>
-          <div class="copy">Export van Instagram Reels of posts. Basis voor het prototype.</div>
-          <div class="zone">Sleep hier of klik</div>
-        </div>
-        <div class="upload-card">
-          <div class="label">Aanbevolen</div>
-          <div class="title">Facebook CSV</div>
-          <div class="copy">Export van Facebook content voor een bredere analyse.</div>
-          <div class="zone">Sleep hier of klik</div>
-        </div>
-        <div class="upload-card">
-          <div class="label">Aanbevolen</div>
-          <div class="title">Meta Ads CSV</div>
-          <div class="copy">Advertentie-export voor campagne-inzicht.</div>
-          <div class="zone">Sleep hier of klik</div>
-        </div>
-      </div>
-      <div class="upload-card context-card" style="margin-top:18px;">
-        <div class="label">Optioneel</div>
-        <div class="title">Merkcontext</div>
-        <div class="copy">Tone of voice, doelgroep, do's &amp; don'ts, USPs, lopende campagnes — alles wat de agent moet weten over jouw merk.</div>
-        <textarea id="manual-context"
-          rows="6"
-          placeholder="Bv. 'Wij zijn een Belgisch modemerk voor vrouwen 25-45. Tone: warm, persoonlijk, geen jargon. Avoid: salesy taal, kortingacties zonder context. Lopende campagnes: voorjaarscollectie 2026 (mrt–mei)...'"
-          style="width:100%; min-height:120px; padding:12px 14px; font:inherit; font-size:13px; line-height:1.55; color:var(--fg); background:var(--surface); border:1px solid var(--border); border-radius:10px; resize:vertical; margin-top:12px; box-sizing:border-box;"></textarea>
-        <div id="manual-context-count" style="font-size:10px; color:var(--fg-muted); letter-spacing:0.06em; text-transform:uppercase; font-weight:700; margin-top:8px; min-height:14px;"></div>
-      </div>
-      <button class="upload-action primary" onclick="showScreen('app-screen')">Dashboard openen →</button>
-    </div>
-  </div>
-
   <!-- ========================== APP ========================== -->
   <div id="app-screen" class="screen" data-screen-label="Dashboard">
     <div class="page-shell">
@@ -261,10 +182,6 @@
           <div class="brand-pill">
             <span aria-hidden="true" style="width:6px; height:6px; border-radius:50%; background:var(--positive);"></span>
             <span id="sidebar-brand">Klant: —</span>
-          </div>
-          <div id="sidebar-context" class="brand-pill" style="display:none;" title="Merkcontext zoals opgegeven bij handmatige upload">
-            <span aria-hidden="true" style="width:6px; height:6px; border-radius:50%; background:var(--accent);"></span>
-            <span>Merkcontext: <span id="sidebar-context-count">—</span></span>
           </div>
           <div id="sidebar-brand-sub">—</div>
         </div>
@@ -386,15 +303,14 @@
                     <div id="trend-chart"></div>
                   </div>
                   <p class="source-line" id="trend-source"></p>
-                  <div id="ads-summary"></div>
-                </div>
+                            </div>
                 <div class="callouts" id="ov-callouts"></div>
               </div>
 
               <div style="margin-top:36px;"></div>
               <div class="report-head">
                 <p class="eyebrow">Publicaties</p>
-                <h2 class="report-title" id="pub-conclusion">Wat er gepost is, en wat het deed</h2>
+                <h2 class="report-title">Wat er gepost is, en wat het deed</h2>
                 <p class="report-lede">Beste posts van de periode, het aandeel per kanaal en op welke dagen er gepubliceerd is.</p>
               </div>
 
@@ -616,7 +532,6 @@
     </div>
   </div>
 
-  <script src="data.js"></script>
   <script src="charts.js"></script>
   <script src="summary.js"></script>
   <script src="app.js"></script>

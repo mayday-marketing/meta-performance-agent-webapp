@@ -85,15 +85,7 @@ function parseClients() {
   } catch { return {}; }
 }
 
-// Sleutels, url-parameters met geheimen en bearer-tokens eruit, vóór iets de
-// server verlaat. Windsor zet bij een fout soms de volledige aanroep-URL in de
-// melding, inclusief api_key= — en die sleutel is gedeeld over klanten.
-function redact(text) {
-  return String(text)
-    .replace(/\b(api[_-]?key|apikey|key|token|access_token|refresh_token|client_secret|password|signature|sig)=([^&\s"'\\]+)/gi, '$1=[verwijderd]')
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/g, 'Bearer [verwijderd]')
-    .replace(/\bsk-ant-[A-Za-z0-9_-]+/g, '[verwijderd]');
-}
+const { redact } = require('./_redact');
 
 /* ---------- Authenticatie ---------- */
 

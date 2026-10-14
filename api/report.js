@@ -104,7 +104,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { clientId, token, brandName, period, blocks, clientContext, template, templateName } = req.body || {};
+  const { clientId, token, brandName, period, blocks, template, templateName } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -127,9 +127,6 @@ module.exports = async (req, res) => {
   let systemPrompt = loadPrompt();
   if (!systemPrompt) {
     return res.status(500).json({ error: 'Report prompt niet gevonden in agents/Report_Agent.md' });
-  }
-  if (clientContext?.trim()) {
-    systemPrompt += '\n\n---\n\n## KLANTCONTEXT\n\n' + clientContext;
   }
   // Rapportsjabloon van deze klant (Drive, via 'Rapportlink' in de Config-tab).
   // Gezaghebbend boven de standaardaanpak: het beschrijft hoe déze klant zijn

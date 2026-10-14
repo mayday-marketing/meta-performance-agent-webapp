@@ -22,9 +22,9 @@ this repo are Dutch too — match that.
 ## Architecture (no build step)
 
 - **Frontend:** a single static `index.html` + `app.js` (one IIFE) +
-  `summary.js` (gedeelde rekenlaag, zie 'MCP-koppeling') + `styles.css` +
-  `data.js`. No framework, no bundler, **no `package.json`**. Edit and deploy
-  as-is.
+  `summary.js` (gedeelde rekenlaag, zie 'MCP-koppeling') + `charts.js` +
+  `report.js` + `styles.css`. No framework, no bundler, **no `package.json`**.
+  Edit and deploy as-is.
 - **Backend:** Vercel serverless functions in `api/*.js` (Node, CommonJS
   `module.exports = async (req,res) => …`). Timeouts/memory set per-function in
   `vercel.json`.
@@ -35,7 +35,7 @@ this repo are Dutch too — match that.
 
 Every client's config lives in the **`CLIENTS` env var** (JSON), keyed by lowercase
 client id: `{ "merknaam": { password, sheetId, driveFolderId, brandName,
-metricool_token, metricool_user_id, windsor_api_key, anthropic_api_key,
+windsor_api_key, anthropic_api_key,
 email_connector } }`. Most fields are optional; connectors are enabled per client.
 
 **RULE: never trust a client-supplied resource identifier.** Every per-client
@@ -46,7 +46,7 @@ service account and shared API keys can reach *every* client's data, so trusting
 request-supplied id = cross-tenant read/write. This app has already had two
 isolation bugs (an email cache that wasn't client-keyed; a `sheetId` IDOR in
 `sheets.js`) — treat any request field that names a resource as a red flag.
-`metricool.js`, `windsor.js`, and `drive.js` are the correct reference pattern.
+`windsor.js` and `drive.js` are the correct reference pattern.
 
 ## Auth
 
@@ -67,7 +67,6 @@ isolation bugs (an email cache that wasn't client-keyed; a `sheetId` IDOR in
   name), `klaviyo`/`convertkit` (email). `getDashboard` fans out IG + Meta Ads
   (campaign-level + ad-level core + non-fatal add-on calls for creative/video/
   conversions, merged by `ad_id`).
-- **Metricool** (`api/metricool.js`) — alternative source for clients on Metricool.
 - **Google Drive** (`api/drive.js`) — per-client brand context + raw-data CSVs/PDFs,
   read via a service-account JWT. Folder tree is a fixed convention
   (`06_PERFORMANTIE/6.4_Ruwe-Data`, `00_AI-CONTEXT`, etc.). Actions: `scan`,
@@ -123,7 +122,10 @@ onder elk van de drie. `switchPage("roas")` landt op Ads. Met een **eigen period
   oordeel, maar blijven alle ROAS-cijfers staan. Let op in JS: `null / getal === 0`,
   dus overal expliciet op `!= null` toetsen.
 - **Isolatie:** elke nieuwe connector-slug hoort in `ACCOUNT_ID_CONNECTORS` in
-  `windsor.js` (inclusief `searchconsole`). Ontbreekt hij daar, dan geldt de
+  `windsor.js` (inclusief `searchconsole`). De connector-slug komt altijd uit de
+  code, nooit uit het request: de vroegere acties `getData`/`getFields` (slug en
+  velden uit de body) zijn op 14-10-2026 verwijderd omdat een slug buiten die set
+  álle accounts van de gedeelde sleutel teruggaf. Ontbreekt hij daar, dan geldt de
   fail-closed-regel niet en geeft een niet-geconfigureerde connector álle klanten
   terug.
 
@@ -835,7 +837,7 @@ afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
 - **Chat** (`api/chat.js`): **single-shot, stateless, no tools.** Loads
   `agents/Chat_Agent.md` (lean, harness-matched) with fallback to
   `agents/Meta-Performance_Agent.md`. The frontend injects context into the
-  request — `clientContext` (→ system prompt), `dashboardData` from
+  request — `dashboardData` from
   `buildAnalysisSummary()` and Drive `contextFiles` (→ prepended to the user
   message). The chat has NO tools; it cannot fetch anything itself.
   - `agents/Meta-Performance_Agent.md` is the **original 52KB multi-phase,
@@ -885,8 +887,9 @@ geen dependencies. Koppelen: `docs/MCP.md`.
 - **Geen betaalde calls.** SEO-rank-check, GEO-bronnen en ongeplande
   vermeldingen kosten per call op het gedeelde DataForSEO-saldo; een gesprek kan
   tientallen tools aanroepen. Ze staan er bewust niet in.
-- **Wat de server verlaat.** Elk resultaat gaat door `redact()` (`api_key=`,
-  tokens, bearer), is ingekort tot 200.000 tekens en zit in een omslag met de
+- **Wat de server verlaat.** Elk resultaat gaat door `redact()` (`api/_redact.js`:
+  `api_key=`, tokens, bearer — dezelfde helper redigeert ook de Windsor-foutmeldingen
+  die `windsor.js` naar de browser stuurt), is ingekort tot 200.000 tekens en zit in een omslag met de
   melding dat tekstvelden data zijn, geen instructies. Interne fouten gaan
   generiek naar buiten en volledig (geredigeerd) naar de log.
 - **Cache per klant** (10 min, sleutel met `clientId`, scope en argumenten) en
@@ -903,8 +906,9 @@ geen dependencies. Koppelen: `docs/MCP.md`.
 - **`list_clients` voegt accounts samen zoals `windsor.js`**: Config-tab plus
   `CLIENTS[id].windsor_accounts`. BAJA en Just Jane hebben geen klantsheet en
   staan alleen in die terugval; zonder samenvoeging leken ze leeg.
-- **Metricool-klanten** worden niet ondersteund: er is er geen (stand
-  26-09-2026), en `transformDashboard` staat nog in app.js.
+- **Metricool** is weg (14-10-2026): er was geen klant op, dus `api/metricool.js`,
+  `transformDashboard` en het bronkeuzescherm na het inloggen zijn verwijderd.
+  Na inloggen landt iedereen meteen op Overview.
 
 ### MCP V2 — per klant via OAuth (gebouwd 06-10-2026, `api/oauth.js` + `api/_oauth.js`)
 
@@ -952,7 +956,7 @@ registratie. Stateless, met ondertekende blobs (geen database):
    over klanten heen mag vragen, gescheiden van de klantconnectors. Tot dan
    blijft cross-client alleen via de agency-sleutel in Claude Code.
 4. Ideeën: vergelijkingstool of voorverwarmde cache (koude fetch 75 s),
-   SEO/GEO alleen uit de dagcache, Metricool naar `summary.js`.
+   SEO/GEO alleen uit de dagcache.
 
 ## Sessie-einde: state leegmaken is niet genoeg
 

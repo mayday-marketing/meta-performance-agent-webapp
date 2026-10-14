@@ -1,6 +1,6 @@
 /* ==========================================================
    mayday marketing Performance Dashboard — App logic
-   Stap 3: echte auth + live Metricool data voor Overview
+   Eén IIFE; rekenwerk staat in summary.js (gedeeld met de MCP-koppeling).
    ========================================================== */
 
 (function () {
@@ -50,7 +50,7 @@
   function roasCampaignRows() { return S.roasCampaignRows(state.roas, roasMinTarget()); }
 
   const state = {
-    session: null,                    // { token, clientId, brandName, hasMetricool, hasDrive }
+    session: null,                    // { token, clientId, brandName, hasDrive, hasWindsor, windsorSource, hasDataSheet }
     driveContext: null,               // { clientId, files: [{label, content}] } — merkcontext voor de chat (cache per klant)
     page: "overview",
     libraryView: "grid",
@@ -355,16 +355,6 @@
     return data;
   }
 
-  function metricoolCall(action, extra = {}) {
-    if (!state.session) throw new Error("Niet ingelogd");
-    return apiPost("/api/metricool", {
-      action,
-      clientId: state.session.clientId,
-      token: state.session.token,
-      ...extra,
-    });
-  }
-
   function windsorCall(action, extra = {}) {
     if (!state.session) throw new Error("Niet ingelogd");
     return apiPost("/api/windsor", {
@@ -382,66 +372,6 @@
     if (id === "app-screen") initDashboard();
   }
   window.showScreen = showScreen;
-
-  function chooseSource(type) {
-    if (type === "handmatig") {
-      showScreen("manual-screen");
-      hydrateManualContext();
-    } else {
-      showScreen("app-screen");
-    }
-  }
-  window.chooseSource = chooseSource;
-
-  /* ---------- Brand context (handmatige flow) ---------- */
-
-  function countWords(s) {
-    const trimmed = (s || "").trim();
-    if (!trimmed) return 0;
-    return trimmed.split(/\s+/).length;
-  }
-
-  function updateSidebarContext() {
-    const pill = $("#sidebar-context");
-    const count = $("#sidebar-context-count");
-    if (!pill || !count) return;
-    const ctx = state.session?.clientContext || "";
-    const n = countWords(ctx);
-    if (n > 0) {
-      count.textContent = `${n} woord${n === 1 ? "" : "en"}`;
-      pill.style.display = "";
-    } else {
-      pill.style.display = "none";
-    }
-  }
-
-  function updateManualContextCount() {
-    const ta = $("#manual-context");
-    const out = $("#manual-context-count");
-    if (!ta || !out) return;
-    const n = countWords(ta.value);
-    out.textContent = n > 0 ? `${n} woord${n === 1 ? "" : "en"} · auto-saved` : "";
-  }
-
-  function hydrateManualContext() {
-    const ta = $("#manual-context");
-    if (!ta) return;
-    ta.value = state.session?.clientContext || "";
-    updateManualContextCount();
-  }
-
-  function bindManualContext() {
-    const ta = $("#manual-context");
-    if (!ta) return;
-    ta.addEventListener("input", updateManualContextCount);
-    ta.addEventListener("blur", () => {
-      if (!state.session) return;
-      state.session.clientContext = ta.value.trim();
-      saveSession(state.session);
-      updateSidebarContext();
-      updateManualContextCount();
-    });
-  }
 
   function logout() {
     clearSession();
@@ -503,7 +433,6 @@
     state.chatMessages = [];
     $("#brand-input").value = "";
     $("#code-input").value = "";
-    $("#source-brand").textContent = "—";
     setLoginError("");
     showScreen("login-screen");
   }
@@ -565,17 +494,13 @@
         token: data.token,
         clientId: data.clientId,
         brandName: data.brandName,
-        sheetId: data.sheetId,
-        hasMetricool: !!data.hasMetricool,
         hasDrive: !!data.hasDrive,
         hasWindsor: !!data.hasWindsor,
         windsorSource: data.windsorSource || null,
         hasDataSheet: !!data.hasDataSheet,
       });
-      $("#source-brand").textContent = data.brandName;
       $("#sidebar-brand").textContent = `Klant: ${data.brandName}`;
-      $("#sidebar-brand-sub").textContent = data.hasMetricool ? "Connected · Metricool live" : "Connected";
-      updateSidebarContext();
+      $("#sidebar-brand-sub").textContent = "Connected";
       const ctxLabel = $("#chat-context-label");
       if (ctxLabel) ctxLabel.textContent = `Online · context: ${data.brandName}`;
 
@@ -583,13 +508,9 @@
       // standaardkleur opent. Faalt nooit hard — dan blijven de defaults staan.
       await fetchBrandConfig();
 
-      // Skip source-screen if either automatic source is available for this client.
-      if (data.hasMetricool || data.hasDrive) {
-        showScreen("app-screen");
-      } else {
-        $("#source-brand").textContent = data.brandName;
-        showScreen("source-screen");
-      }
+      // Altijd rechtstreeks naar het dashboard. Het vroegere bronkeuzescherm
+      // (Metricool/handmatig) is weg: de tabs zeggen zelf wat er ontbreekt.
+      showScreen("app-screen");
     } catch (err) {
       setLoginError(err.message || "Inloggen mislukt.");
     } finally {
@@ -800,74 +721,9 @@
 
   let adsFetchId = 0;
 
-  async function refreshOverview() {
-    // Windsor-flow voor klanten met windsor_api_key — voorrang boven Metricool.
-    if (state.session?.hasWindsor) {
-      return refreshOverviewWindsor();
-    }
+  async function refreshOverview() { return refreshOverviewWindsor(); }
 
-    if (!state.session?.hasMetricool) {
-      state.overviewError = "Voor deze klant is geen Metricool- of Windsor-koppeling geconfigureerd.";
-      renderOverview();
-      return;
-    }
-    state.overviewLoading = true;
-    state.overviewError = null;
-    renderOverview();
-
-    // Cancel any in-flight ads fetch from previous period.
-    adsFetchId++;
-
-    try {
-      const cmp = compareRange(state.period.start, state.period.end);
-      const raw = await metricoolCall("getDashboard", {
-        startDate: state.period.start,
-        endDate: state.period.end,
-        compareStartDate: cmp.start,
-        compareEndDate: cmp.end,
-      });
-      state.overview = transformDashboard(raw, null); // ads still loading
-      state.overview._rawDashboard = raw;
-      state.overviewLoading = false;
-      renderOverview();
-
-      // Fire ads-campaigns async — don't block dashboard.
-      refreshAdsCampaigns(state.period.start, state.period.end);
-    } catch (err) {
-      state.overviewLoading = false;
-      state.overviewError = err.message || "Onbekende fout bij laden Metricool-data.";
-      if (err.status === 401) {
-        clearSession();
-        setTimeout(() => showScreen("login-screen"), 600);
-      }
-      renderOverview();
-    }
-  }
-
-  async function refreshAdsCampaigns(startDate, endDate) {
-    const myId = ++adsFetchId;
-    try {
-      const result = await metricoolCall("getAdsCampaigns", { startDate, endDate });
-      if (myId !== adsFetchId) return; // outdated fetch — discard
-      if (!state.overview?._rawDashboard) return;
-      const dashboardRaw = state.overview._rawDashboard;
-      const ads = arrayOrEmpty(result.adsCampaigns);
-      state.overview = transformDashboard(dashboardRaw, ads);
-      state.overview._rawDashboard = dashboardRaw;
-      renderOverview(); // Re-render all panels: KPIs, trend, channel mix, top posts, cadence
-
-    } catch (err) {
-      if (myId !== adsFetchId) return;
-      // Silent fail — keep ads-line at 0, no user-facing error.
-      console.warn("[ads] fetch failed:", err.message);
-      if (state.overview) {
-        state.overview.adsLoading = false;
-        renderTrendChart();
-      }
-    }
-  }
-
-  /* ---------- Metricool → app shape ---------- */
+  /* ---------- Hulpfuncties ---------- */
 
   function escapeHtml(s) {
     if (s == null) return "";
@@ -877,213 +733,6 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
-  }
-
-  function safe(obj) { return (obj && !obj.__error) ? obj : {}; }
-  function pick(obj, ...keys) {
-    const o = safe(obj);
-    for (const k of keys) {
-      const v = o[k];
-      if (typeof v === "number" && !Number.isNaN(v)) return v;
-    }
-    return 0;
-  }
-  function pickStr(obj, ...keys) {
-    const o = safe(obj);
-    for (const k of keys) {
-      const v = o[k];
-      if (typeof v === "string" && v.length) return v;
-    }
-    return "";
-  }
-
-  function normalizePost(raw, platform, defaultType) {
-    if (!raw || typeof raw !== "object") return null;
-    // Prefer numeric Unix-ms timestamp (locale-safe); fall back to string dates.
-    const ts = pick(raw, "timestamp");
-    const published = ts || raw.created || raw.published || raw.publishedAt || raw.start || raw.date;
-    const date = published ? new Date(published) : null;
-    // Ad-campaign specific: active period [start, stop]. Posts will have these as 0.
-    const startMs = pick(raw, "start");
-    const stopMs = pick(raw, "stop") || pick(raw, "updated");
-    const reach = pick(raw, "reach", "impressionsUnique");
-    const impressions = pick(raw, "impressions");
-    const likes = pick(raw, "likes", "reactions");
-    const comments = pick(raw, "comments");
-    const shares = pick(raw, "shares");
-    const saves = pick(raw, "saved", "saves");
-    const clicks = pick(raw, "clicks", "linkclicks");
-    const views = pick(raw, "videoviews", "videoViews", "impressions");
-    const interactions = pick(raw, "interactions") || (likes + comments + shares + saves);
-    const engagementRaw = pick(raw, "engagement");
-    // Metricool returns engagement either as fraction (0.05) or as pct (5.0). Heuristic:
-    const engagement = engagementRaw > 1
-      ? engagementRaw
-      : (reach ? (interactions / reach) * 100 : 0);
-    const ctr = reach ? (clicks / reach) * 100 : 0;
-    // IG: content. FB: text. Other fallbacks for safety.
-    const captionRaw = pickStr(raw, "content", "text", "caption", "name", "description", "title", "message", "firstcomment");
-    const caption = captionRaw ? captionRaw.replace(/\s+/g, " ").trim() : "—";
-    const thumb = pickStr(raw, "imageUrl", "image", "thumbnail", "picture", "fullPicture", "mediaUrl");
-    const url = pickStr(raw, "url", "permalinkUrl", "permalink", "link");
-    const rawType = pickStr(raw, "type", "mediaType", "mediaProductType");
-    const type = friendlyType(rawType, defaultType);
-    // Gem. kijktijd in seconden — Metricool exposeert dit doorgaans niet (→ 0),
-    // defensief opgevangen voor het geval een endpoint het wél meelevert.
-    const avgWatchTime = pick(raw, "avgwatchtime", "averageWatchTime", "videoAvgTimeWatched");
-
-    return {
-      id: pickStr(raw, "id", "postId") || url || `${platform}-${published || Math.random()}`,
-      platform, type,
-      date, dateLabel: date ? fmt.dateNL(date) : "—",
-      startMs, stopMs,
-      reach, impressions, likes, comments, shares, saves, clicks, views,
-      interactions, engagement, ctr,
-      avgWatchTime,
-      caption, thumb, url,
-    };
-  }
-
-  // Pro-rata reach voor ads-campagnes binnen een datumbereik.
-  // Een campagne die van mrt 2025 tot mei 2026 liep krijgt voor een feb-mei 2026 window
-  // alleen het deel reach toegekend dat met het window overlapt.
-  function adsReachInRange(campaigns, rangeStartMs, rangeEndMs) {
-    let total = 0;
-    for (const c of campaigns) {
-      if (!c.startMs || !c.stopMs || c.stopMs <= c.startMs) continue;
-      const overlapStart = Math.max(c.startMs, rangeStartMs);
-      const overlapEnd = Math.min(c.stopMs, rangeEndMs);
-      if (overlapEnd <= overlapStart) continue;
-      const totalMs = c.stopMs - c.startMs;
-      const overlapMs = overlapEnd - overlapStart;
-      total += (c.reach || 0) * (overlapMs / totalMs);
-    }
-    return Math.round(total);
-  }
-
-  /* ---------- Metricool → app shape ----------
-     De benchmarkkolom (benchmarkPosts in summary.js) zet per post een index
-     t.o.v. het gemiddelde van dezelfde groep in de gekozen periode. */
-
-  function transformDashboard(raw, adsCampaignsRaw) {
-    const igPosts = arrayOrEmpty(raw.posts?.igPosts).map(p => normalizePost(p, "ig", "Post"));
-    const igReels = arrayOrEmpty(raw.posts?.igReels).map(p => normalizePost(p, "ig", "Reel"));
-    const fbPosts = arrayOrEmpty(raw.posts?.fbPosts).map(p => normalizePost(p, "fb", "Post"));
-    const ads = arrayOrEmpty(adsCampaignsRaw).map(c => normalizePost(c, "ads", "Campagne"));
-
-    const allPosts = [...igPosts, ...igReels, ...fbPosts].filter(Boolean);
-    const adsCampaigns = ads.filter(Boolean);
-    benchmarkPosts([...allPosts, ...adsCampaigns]); // kolom 't.o.v. gemiddelde'
-
-    // Previous period posts — used for true period-over-period deltas.
-    const igPostsPrev = arrayOrEmpty(raw.postsPrev?.igPosts).map(p => normalizePost(p, "ig", "Post"));
-    const igReelsPrev = arrayOrEmpty(raw.postsPrev?.igReels).map(p => normalizePost(p, "ig", "Reel"));
-    const fbPostsPrev = arrayOrEmpty(raw.postsPrev?.fbPosts).map(p => normalizePost(p, "fb", "Post"));
-    const allPostsPrev = [...igPostsPrev, ...igReelsPrev, ...fbPostsPrev].filter(Boolean);
-
-    // All KPIs derive from posts data — internally consistent with the trend chart.
-    const curAgg = aggregatePosts(allPosts);
-    const prvAgg = aggregatePosts(allPostsPrev);
-
-    // Pro-rata ads reach for both periods so the delta blijft apples-to-apples.
-    const periodStartMs = new Date(raw.period.startDate).getTime();
-    const periodEndMs = new Date(raw.period.endDate).getTime() + 86400000 - 1;
-    const prevStartMs = new Date(raw.period.prevStartDate).getTime();
-    const prevEndMs = new Date(raw.period.prevEndDate).getTime() + 86400000 - 1;
-    const adsReachCur = adsReachInRange(adsCampaigns, periodStartMs, periodEndMs);
-    const adsReachPrv = adsReachInRange(adsCampaigns, prevStartMs, prevEndMs);
-
-    const erCur = curAgg.reach ? (curAgg.interactions / curAgg.reach) * 100 : 0;
-    const erPrv = prvAgg.reach ? (prvAgg.interactions / prvAgg.reach) * 100 : 0;
-
-    const kpis = [
-      buildKpi("Totale reach", curAgg.reach + adsReachCur, prvAgg.reach + adsReachPrv, fmt.k, "pct"),
-      buildKpi("Engagement rate", erCur, erPrv, (n) => fmt.pct(n), "pp"),
-      buildKpi("Posts gepubliceerd", curAgg.count, prvAgg.count, (n) => String(n), "pct"),
-      buildKpi("Clicks", curAgg.clicks, prvAgg.clicks, fmt.k, "pct"),
-    ];
-
-    // Sparklines: 12 weekly buckets of reach per KPI where applicable.
-    const weeks = enumerateWeeks(raw.period.startDate, raw.period.endDate, 12);
-    const weekReach = weeks.map(w => sumPostsField(allPosts, w, "reach"));
-    const weekInteractions = weeks.map(w => sumPostsField(allPosts, w, "interactions"));
-    const weekER = weeks.map((w, i) => weekReach[i] ? (weekInteractions[i] / weekReach[i]) * 100 : 0);
-    const weekPostsCount = weeks.map(w => countPostsInWeek(allPosts, w));
-    const weekClicks = weeks.map(w => sumPostsField(allPosts, w, "clicks"));
-
-    kpis[0].spark = weekReach;
-    kpis[1].spark = weekER;
-    kpis[2].spark = weekPostsCount;
-    kpis[3].spark = weekClicks;
-
-    // Trend chart — wider weekly buckets across the full period (let's aim for ~13-17 buckets).
-    const trendWeeks = enumerateWeeks(raw.period.startDate, raw.period.endDate);
-    const trendIG = trendWeeks.map(w => sumPostsField([...igPosts, ...igReels].filter(Boolean), w, "reach"));
-    const trendFB = trendWeeks.map(w => sumPostsField(fbPosts.filter(Boolean), w, "reach"));
-    const trendAds = trendWeeks.map(w => adsReachInWeek(adsCampaigns, w));
-
-    const timeseries = {
-      weeks: trendWeeks.map((w, i) => `wk ${i + 1}`),
-      series: [
-        { label: "Instagram", values: trendIG },
-        { label: "Facebook", values: trendFB },
-        { label: "Meta Ads", values: trendAds },
-      ],
-    };
-
-    // Channel mix — independent of week-bucketing. Real period totals.
-    const igReach = [...igPosts, ...igReels].filter(Boolean).reduce((s, p) => s + (p.reach || 0), 0);
-    const fbReach = fbPosts.filter(Boolean).reduce((s, p) => s + (p.reach || 0), 0);
-    const adsReach = adsReachCur; // reuse from KPI calc above
-    const totalChannelReach = igReach + fbReach + adsReach || 1;
-    const channels = [
-      { label: "Instagram", color: "var(--accent-100)", value: Math.round((igReach / totalChannelReach) * 100) },
-      { label: "Facebook",  color: "var(--chart-3)", value: Math.round((fbReach / totalChannelReach) * 100) },
-      { label: "Meta Ads",  color: "var(--chart-4)", value: Math.round((adsReach / totalChannelReach) * 100) },
-    ];
-
-    // Top posts (top 5 by engagement, organic only — ads excluded per architectuur)
-    const topPosts = [...allPosts]
-      .sort((a, b) => b.engagement - a.engagement)
-      .slice(0, 5)
-      .map((p, i) => {
-        const cleanUrl = safeUrl(p.thumb);
-        const isHttp = cleanUrl && cleanUrl.startsWith("http");
-        return {
-          id: p.id,
-          caption: p.caption,
-          type: p.type,
-          platform: p.platform,
-          date: p.dateLabel,
-          engagement: p.engagement.toFixed(1) + "%",
-          imageUrl: isHttp ? cleanUrl : null,
-          fallbackBg: gradientFor(i),
-        };
-      });
-
-    // Cadence: 7 days × 13 weeks heatmap of post counts.
-    const cadenceWeeks = enumerateWeeks(raw.period.startDate, raw.period.endDate, 13);
-    const cadence = [];
-    for (let d = 0; d < 7; d++) {
-      const row = [];
-      for (let w = 0; w < cadenceWeeks.length; w++) {
-        row.push(allPosts.filter(p => p.date && p.date.getDay() === ((d + 1) % 7) && inWeek(p.date, cadenceWeeks[w])).length);
-      }
-      cadence.push(row);
-    }
-
-    return {
-      kpis,
-      timeseries,
-      channels,
-      topPosts,
-      cadenceWeeks,
-      cadence,
-      allPosts,
-      adsCampaigns,
-      adsLoading: !adsCampaignsRaw,
-      _raw: raw,
-    };
   }
 
   /* ---------- Windsor → app shape ---------- */
@@ -1129,27 +778,8 @@
       }
   }
 
-  function adsReachInWeek(campaigns, week) {
-    // Day after week.end to make the range inclusive of the last day.
-    const endMs = week.end.getTime() + 86400000 - 1;
-    return adsReachInRange(campaigns, week.start.getTime(), endMs);
-  }
-
   /* ---------- Overview render ---------- */
 
-  function sparkPath(values, w, h, pad = 2) {
-    const min = Math.min(...values), max = Math.max(...values);
-    const span = (max - min) || 1;
-    const stepX = (w - pad*2) / Math.max(1, values.length - 1);
-    return values.map((v, i) => {
-      const x = pad + i * stepX;
-      const y = pad + (h - pad*2) * (1 - (v - min) / span);
-      return `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
-    }).join(" ");
-  }
-  function sparkArea(values, w, h, pad = 2) {
-    return `${sparkPath(values, w, h, pad)} L${w-pad},${h-pad} L${pad},${h-pad} Z`;
-  }
   function renderSpark(values, color) {
     if (!values || values.length < 2) return "";
     // Uniforme renderer (charts.js) i.p.v. hand-gerolde SVG.
@@ -1328,8 +958,6 @@
       });
   }
   window.__refreshBrand = () => { state.brand = null; state.brandKey = null; brandFetch(); };
-
-  function allGoals() { return S.flattenGoals(state.brand?.goals); }
 
   function goalMetricsFetch() {
     if (!state.session?.hasWindsor) return;
@@ -1749,7 +1377,6 @@
             <tr><td>Klantcode</td><td>${escapeHtml(s.clientId || "—")}</td></tr>
             <tr><td>Sessie verloopt</td><td>${verloopt ? escapeHtml(verloopt.toLocaleString("nl-NL", { dateStyle: "short", timeStyle: "short" })) : "binnen 10 uur"}</td></tr>
             <tr><td>Windsor gekoppeld</td><td>${s.hasWindsor ? "ja" : "nee"}</td></tr>
-            <tr><td>Metricool gekoppeld</td><td>${s.hasMetricool ? "ja" : "nee"}</td></tr>
             <tr><td>Drive gekoppeld</td><td>${s.hasDrive ? "ja" : "nee"}</td></tr>
           </tbody></table>
         </div>
@@ -4861,7 +4488,6 @@
   // Datumrekenen zonder toISOString(): dat zet een lokale middernacht in UTC+2 op
   // de dag ervoor. Zelfde aanpak als de ROAS-tab (ymd/pad2 hierboven).
   const webAtNoon = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d, 12); };
-  const webIso = (dt) => ymd(dt.getFullYear(), dt.getMonth(), dt.getDate());
 
   // Even lange periode, direct vóór de huidige.
   function webPrevRange(start, end) { return S.prevPeriod(start, end); }
@@ -7483,11 +7109,20 @@
     return out.join("");
   }
 
-  /* ---------- Chat panel (mock, stap 6) ---------- */
+  /* ---------- Chat panel ---------- */
+
+  // Voorbeeldvragen onder het chatvenster. Vroeger het enige dat nog uit de
+  // mock-dataset (data.js) gebruikt werd; die is weg.
+  const CHAT_PROMPTS = [
+    "Welke content heeft het hoogste engagement?",
+    "Vergelijk Instagram en Facebook performance",
+    "Wat zijn de beste posting tijden?",
+    "Analyseer de betaalde campagnes"
+  ];
 
   function renderChat() {
     $("#chat-body").innerHTML = "";
-    $("#chat-prompts").innerHTML = DATA.prompts.map(p => `<button class="chat-prompt" data-prompt="${p}">${p}</button>`).join("");
+    $("#chat-prompts").innerHTML = CHAT_PROMPTS.map(p => `<button class="chat-prompt" data-prompt="${p}">${p}</button>`).join("");
     $$("#chat-prompts .chat-prompt").forEach(b => { b.onclick = () => sendUserMsg(b.dataset.prompt); });
     $("#chat-form").onsubmit = (e) => {
       e.preventDefault();
@@ -7566,7 +7201,6 @@
         messages: apiMessages,
         clientId: state.session.clientId,
         token: state.session.token,
-        clientContext: state.session.clientContext || "",
         dashboardData,
         driveFiles,
       });
@@ -7801,21 +7435,14 @@
     bindTweaks();
     bindSidebarNav();
     bindSubtabs();
-    bindManualContext();
 
     const existing = loadSession();
     if (existing && existing.token) {
       $("#sidebar-brand").textContent = `Klant: ${existing.brandName}`;
-      $("#sidebar-brand-sub").textContent = existing.hasMetricool ? "Connected · Metricool live" : "Connected";
-      updateSidebarContext();
+      $("#sidebar-brand-sub").textContent = "Connected";
       applyBrandConfig(existing.brand);   // uit de sessie: geen flits van de standaardkleur
       fetchBrandConfig();                 // en meteen verversen voor wijzigingen in de sheet
-      if (existing.hasMetricool || existing.hasDrive) {
-        showScreen("app-screen");
-      } else {
-        $("#source-brand").textContent = existing.brandName;
-        showScreen("source-screen");
-      }
+      showScreen("app-screen");
     } else {
       showScreen("login-screen");
     }

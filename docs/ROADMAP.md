@@ -57,6 +57,29 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
 
 ## Kwaliteit
 
+### Firewall-rate-limit op het inloggen werkt niet (melden bij Vercel)
+- **Waarom:** de rem op mislukte logins in `_auth.js` geldt per instantie; een
+  koude instantie begint weer bij nul. De Vercel Firewall-regel `Login rate limit`
+  (pad begint met `/api/auth` óf `/oauth/`, 20 verzoeken per 60 s per IP, actie
+  429) moet dat sluitend maken, ook voor het OAuth-inlogscherm van de MCP-koppeling.
+- **Stand 06-10-2026:** de regel staat aan en is gepubliceerd, maar grijpt nooit
+  in: 25+ POSTs per minuut vanaf één IP komen allemaal door, en de regel telt 0
+  treffers. Een log-regel op hetzelfde pad sloeg wél aan, dus het pad klopt. De
+  firewall ziet het pad vóór de rewrite (`/oauth/register`, niet `/api/oauth`).
+  Het prijsvenster 'Rate Limiting Pricing' is nooit verschenen, ook niet bij een
+  regel die opnieuw in het dashboard werd aangemaakt. Project op Hobby (1
+  rate-limitregel toegestaan).
+- **Eerste stap:** melden bij Vercel Support (vercel.com/help):
+  > Project meta-performance-agent-webapp (team mayday-marketings-projects,
+  > Hobby). WAF rate limit rule "Login rate limit" (path starts with /api/auth OR
+  > /oauth/, 20 req / 60 s, key IP, action 429) is enabled and published, but
+  > never triggers: 25+ POSTs per minute from one IP all pass, and the rule shows
+  > 0 matched requests. A log rule on the same path does match. The pricing
+  > dialog for rate limiting never appeared. Is rate limiting activated for this
+  > project?
+- **Daarna:** opnieuw testen met POSTs op `/oauth/register` (kost geen
+  inlogpoging): na 20 binnen een minuut moet er een 429 komen.
+
 ### Nachtelijke testscenario's: wat kan er mislopen
 - **Waarom:** er zijn geen tests (zie CLAUDE.md). Fouten zoals deze week (een
   ontbrekende hulpfunctie die de Doelgroep-tab stil liet uitvallen, de datasheet

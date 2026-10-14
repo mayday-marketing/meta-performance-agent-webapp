@@ -30,6 +30,7 @@
    verschoven achterblijven, en een dubbele run schuift niets twee keer.
    ========================================================== */
 
+const crypto = require('crypto');
 const { getAccessToken, captureOidcToken } = require('./_config');
 
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
@@ -142,9 +143,12 @@ module.exports = async (req, res) => {
 
   // Vercel Cron stuurt een Authorization-header met CRON_SECRET. Zonder geldig
   // geheim doet deze route niets — hij schrijft, dus hij is geen open endpoint.
+  // Vergeleken als hash in constante tijd: een gewone stringvergelijking stopt
+  // bij het eerste verschil en verraadt zo teken voor teken het geheim.
   const geheim = process.env.CRON_SECRET;
   const meegestuurd = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (!geheim || meegestuurd !== geheim) {
+  const h = (v) => crypto.createHash('sha256').update(String(v), 'utf8').digest();
+  if (!geheim || !crypto.timingSafeEqual(h(meegestuurd), h(geheim))) {
     return res.status(401).json({ error: 'Niet toegestaan.' });
   }
 
@@ -153,11 +157,13 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: true, overgeslagen: 'DEMO_SHEET_ID niet ingesteld.' });
   }
 
-  // Slot 2: nooit de sheet van een echte klant aanraken.
+  // Slot 2: nooit de sheet van een echte klant aanraken. Demoklanten (DEMO_CLIENTS,
+  // dezelfde lijst als de MCP-koppeling) mogen wél op deze sheet wijzen.
+  const demoClients = String(process.env.DEMO_CLIENTS || 'senja').toLowerCase().split(',').map(x => x.trim());
   try {
     const clients = JSON.parse(process.env.CLIENTS || '{}');
     for (const [id, c] of Object.entries(clients)) {
-      if (id.toLowerCase() === 'senja') continue;
+      if (demoClients.includes(id.toLowerCase())) continue;
       if (c && (c.dataSheetId === sheetId || c.sheetId === sheetId)) {
         return res.status(400).json({ error: `DEMO_SHEET_ID hoort bij klant '${id}'. Geweigerd.` });
       }

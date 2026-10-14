@@ -21,7 +21,6 @@ meta-performance-agent-webapp/
 ├── app.js                     ← alle frontendlogica, één IIFE
 ├── charts.js                  ← SVG-grafieken
 ├── styles.css                 ← design tokens + componenten
-├── data.js                    ← statische fallbackdata
 ├── fonts/inter-variable.woff2 ← zelf gehost
 ├── api/                       ← Vercel serverless functions (CommonJS)
 │   ├── auth.js                ← login → HMAC-token
@@ -31,7 +30,6 @@ meta-performance-agent-webapp/
 │   ├── chat.js                ← chat-agent (single-shot, zonder tools)
 │   ├── seo.js                 ← DataForSEO: zoekvolumes + posities
 │   ├── geo.js                 ← AI-zichtbaarheid: baseline + live sources
-│   ├── metricool.js           ← alternatieve bron voor klanten op Metricool
 │   ├── _config.js             ← Config-tab per klant (gedeelde module)
 │   ├── _channels.js           ← registry van betaalde kanalen
 │   ├── _sheetdata.js          ← websitedata uit de Windsor-datasheet
@@ -112,8 +110,8 @@ de GEO-baseline, deploy en de testronde — met een afvinkbare checklist.
 Verkort:
 
 1. Drive-klantmap volgens de mappenconventie, gedeeld met het service-account (Viewer)
-2. Klantsheet met de tabs `Merkcontext`, `Config` en `Analysehistoriek`, gedeeld met
-   hetzelfde service-account (Editor)
+2. Klantsheet met de tabs `Merkcontext`, `Config` en `Doelen`, gedeeld met
+   hetzelfde service-account (Viewer)
 3. Config-tab invullen — vooral de Windsor-account-id's: die zijn fail-closed, een
    ontbrekend id geeft een lege tab
 4. Klant toevoegen aan de `CLIENTS` env var in Vercel

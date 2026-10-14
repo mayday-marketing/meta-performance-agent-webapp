@@ -503,4 +503,4 @@ async function getDesignSystem(clientId, driveFolderId, wantName, force) {
   return data;
 }
 
-module.exports = { getDesignSystem, tokensFrom };
+module.exports = { getDesignSystem, tokensFrom, isInside };

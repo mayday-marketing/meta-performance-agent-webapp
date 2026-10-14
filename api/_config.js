@@ -4,7 +4,7 @@
    Gedeelde module (underscore-prefix = geen Vercel-route). Wordt gebruikt door
    sheets.js (action=config, voor de frontend) en windsor.js (account-scoping).
 
-   De Config-tab staat in dezelfde klantsheet als Merkcontext en Analysehistoriek,
+   De Config-tab staat in dezelfde klantsheet als Merkcontext en Doelen,
    met dezelfde veld/waarde-vorm (kolom A = veld, B = waarde). Template:
    CLIENTS/KLANTNAAM/06_PERFORMANTIE/Klant_Context_TEMPLATE.xlsx.
 

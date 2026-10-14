@@ -28,6 +28,9 @@
   const SLIDE_W = 1280, SLIDE_H = 720;  // 16:9, in CSS-px
   const MAX_ROWS = 11;                 // tabelrijen per slide
   const PPTX_CDN = "https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js";
+  // SRI-hash van precies die versie: een gewijzigd CDN-bestand laadt niet.
+  // Bij een versiewissel opnieuw berekenen (sha384, base64).
+  const PPTX_SRI = "sha384-Cck14aA9cifjYolcnjebXRfWGkz5ltHMBiG4px/j8GS+xQcb7OhNQWZYyWjQ+UwQ";
 
   /* ---------- 1. Wat er te kiezen valt ---------- */
 
@@ -515,7 +518,6 @@
       brandName: state.session.brandName,
       period: { startDate: state.period.start, endDate: state.period.end, days: B.periodDays() },
       blocks,
-      clientContext: state.session.clientContext || "",
       template: (RS.tpl && RS.tpl.found) ? RS.tpl.template : "",
       templateName: (RS.tpl && RS.tpl.found) ? RS.tpl.name : "",
     });
@@ -807,6 +809,8 @@
       if (window.PptxGenJS) return resolve();
       const s = document.createElement("script");
       s.src = src;
+      s.integrity = PPTX_SRI;
+      s.crossOrigin = "anonymous";
       s.onload = () => resolve();
       s.onerror = () => reject(new Error("PowerPoint-bibliotheek kon niet geladen worden."));
       document.head.appendChild(s);

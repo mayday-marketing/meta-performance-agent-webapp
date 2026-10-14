@@ -45,7 +45,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { messages, clientId, token, clientContext, driveFiles, drivePeriod, dashboardData } = req.body || {};
+  const { messages, clientId, token, driveFiles, drivePeriod, dashboardData } = req.body || {};
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
@@ -66,11 +66,15 @@ module.exports = async (req, res) => {
   if (!systemPrompt) {
     return res.status(500).json({ error: 'Agent bestand niet gevonden. Zet Meta-Performance_Agent.md in de agents/ map.' });
   }
-  if (clientContext?.trim()) {
-    systemPrompt += '\n\n---\n\n## KLANTCONTEXT\n\n' + clientContext;
-  }
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'Geen berichten ontvangen.' });
+  }
+  // Grens op wat één gesprek naar het model stuurt. Het chatvenster blijft daar
+  // ruim onder; de grens houdt alleen tegen dat iemand met een geldig token het
+  // endpoint als vrije Claude-proxy gebruikt.
+  const MAX_MESSAGES = 40, MAX_CHARS = 300000;
+  if (messages.length > MAX_MESSAGES || JSON.stringify(messages).length > MAX_CHARS) {
+    return res.status(413).json({ error: 'Gesprek te lang. Begin een nieuw gesprek.' });
   }
 
   // Verrijk het laatste user-bericht met de context die de agent nodig heeft: de

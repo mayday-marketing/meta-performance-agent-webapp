@@ -33,7 +33,7 @@ performance-agent@performance-agent-493301.iam.gserviceaccount.com
 - [ ] 2 · Drive-klantmap volgens de mappenconventie
 - [ ] 3 · Drive-map gedeeld met het service-account (Viewer)
 - [ ] 4 · Contextbestanden in `00_AI-CONTEXT`
-- [ ] 5 · Klantsheet met de tabs `Merkcontext`, `Config`, `Analysehistoriek`
+- [ ] 5 · Klantsheet met de tabs `Merkcontext`, `Config`, `Doelen`
 - [ ] 6 · Klantsheet gedeeld met het service-account (Editor)
 - [ ] 7 · Config-tab ingevuld
 - [ ] 8 · Windsor-account-id's ingevuld (fail-closed!)
@@ -101,7 +101,7 @@ Drie tabs, met exact deze namen:
 |---|---|---|
 | `Merkcontext` | kolom A veld, B waarde, tot rij 40 | analyse + chat |
 | `Config` | kolom A veld, B waarde, tot rij 60 | het hele dashboard |
-| `Analysehistoriek` | kolommen A–F | de analyse schrijft hier bij |
+| `Doelen` | Soort · Periode · Doel · Streef · Huidig · Meetbron | Merk-tab (Overview) |
 
 De `Config`-tab hoef je niet met de hand op te bouwen. Het script hieronder zet
 hem erin met alle veldnamen en toelichtingen al ingevuld; jij vult alleen de
@@ -131,7 +131,8 @@ eerste vrije rij en laat de bestaande indeling en opmaak met rust.
 
 ## 6 · Deel de klantsheet met het service-account
 
-Rol **Editor** — nodig omdat `Analysehistoriek` beschreven wordt. Sheet-id uit
+Rol **Viewer** volstaat voor het dashboard (het leest alleen). **Editor** alleen
+als je `scripts/add-config-tab.js` de Config-tab wilt laten aanmaken. Sheet-id uit
 `docs.google.com/spreadsheets/d/<ID>/edit`.
 
 > **Let op.** Sheets kent geen rechten per tab. Zolang deze spreadsheet niet met
@@ -278,7 +279,6 @@ Voeg één sleutel toe aan de JSON:
 | `email_connector` | nee | `klaviyo`, `mailerlite` of `convertkit`; anders geraden |
 | `anthropic_api_key` | nee | eigen sleutel i.p.v. de gedeelde |
 | `dataforseo_login` + `dataforseo_password` | nee | eigen DataForSEO-account |
-| `metricool_token` + `metricool_user_id` (+ `metricool_blog_id`) | nee | klanten op Metricool i.p.v. Windsor |
 
 `dataSheetId` staat bewust in de env var en niet in de Config-tab: die tab kan
 met de klant gedeeld worden, en een sheet-id daaruit accepteren zou een klant
@@ -323,7 +323,6 @@ Controleer in de sidebar dat **Windsor.ai** als live bron staat — dat komt uit
 | E-mail | juiste connector, niet leeg |
 | SEO | volumes laden; rank-check kost ~€0,002 per keyword, één keer volstaat |
 | GEO | baseline gevonden, datum klopt |
-| Analyse | levert JSON én schrijft een regel in `Analysehistoriek` |
 | Chat | antwoordt met de merkcontext erin |
 
 ## 15 · Lever op

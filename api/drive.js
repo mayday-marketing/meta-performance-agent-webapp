@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const { getAccessToken: googleAccessToken, captureOidcToken, getClientConfig, okDriveFile } = require('./_config');
-const { getDesignSystem } = require('./_designsystem');
+const { getDesignSystem, isInside } = require('./_designsystem');
 
 const SECRET = process.env.AUTH_SECRET;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
@@ -226,6 +226,11 @@ module.exports = async (req, res) => {
         return res.status(200).json({ found: false, reason: `Bestand niet leesbaar (${meta.status}). Staat het gedeeld met het service-account?` });
       }
       const info = await meta.json();
+      // Alleen een bestand ín de klantmap. Wie in de Config-tab kan schrijven,
+      // mag niet via een link een bestand van een andere klant laten lezen.
+      if (!(await isInside(accessTokenTpl, fileId, rootId))) {
+        return res.status(200).json({ found: false, reason: 'De Rapportlink wijst naar een bestand buiten de Drive-map van deze klant.' });
+      }
       const text = await downloadText(accessTokenTpl, fileId, info.mimeType);
       if (!text || !text.trim()) {
         return res.status(200).json({ found: false, reason: `'${info.name}' is leeg of niet als tekst te lezen.` });

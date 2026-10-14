@@ -257,55 +257,6 @@ a { color: inherit; text-decoration: none; }
   color: var(--fg);
   text-transform: uppercase;
 }
-.auth-grid {
-  display: grid;
-  grid-template-columns: 0.85fr 1fr;
-  gap: 32px;
-  align-items: stretch;
-  min-height: 460px;
-}
-.auth-panel {
-  background: linear-gradient(160deg, var(--accent-100) 0%, color-mix(in oklch, var(--accent-100) 80%, black) 100%);
-  color: #fff;
-  border-radius: var(--radius-lg);
-  padding: 32px 28px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  position: relative;
-  overflow: hidden;
-}
-.auth-panel::after {
-  content: "";
-  position: absolute;
-  inset: auto -40px -60px auto;
-  width: 220px;
-  height: 220px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  filter: blur(10px);
-}
-.auth-panel h1 {
-  margin: 0;
-  font-size: 38px;
-  line-height: 1.05;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.auth-panel p {
-  max-width: 360px;
-  color: rgba(255, 255, 255, 0.86);
-  line-height: 1.7;
-  font-size: 14px;
-  margin: 18px 0 0;
-}
-.auth-panel .note {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  color: rgba(255, 255, 255, 0.65);
-  text-transform: uppercase;
-  font-weight: 600;
-}
 /* ---- Login — rapportstijl ------------------------------------------------
    Zelfde grammatica als het dashboard: papier, één getinte grafiekbak, schreef
    voor de bewering, schreefloos voor wat je afleest. Vóór het inloggen is er nog
@@ -468,44 +419,7 @@ a { color: inherit; text-decoration: none; }
   .login-form h1 { font-size: 36px; }
   .login-foot span:last-child { display: none; }
 }
-.helper-note { font-size: 12px; color: var(--fg-muted); }
 
-.source-grid { display: grid; gap: 16px; margin-top: 22px; grid-template-columns: 1fr 1fr; }
-.source-card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 22px; padding: 24px;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s;
-  display: flex; flex-direction: column;
-}
-.source-card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: var(--shadow-sm); }
-.source-card h3 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; }
-.source-card p { margin: 0 0 16px; color: var(--fg-muted); line-height: 1.7; font-size: 13px; }
-.source-card ul { margin: 0; padding-left: 18px; color: var(--fg-muted); font-size: 13px; line-height: 1.8; }
-.source-card button, .upload-action {
-  margin-top: auto; padding: 14px 18px;
-  border-radius: 14px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--fg);
-  font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; font-size: 12px;
-}
-.source-card button.primary, .upload-action.primary {
-  background: var(--btn-primary); color: #fff; border-color: transparent;
-}
-.upload-grid { display: grid; gap: 14px; margin-top: 24px; grid-template-columns: 1fr 1fr 1fr; }
-.upload-card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 18px; padding: 20px; display: grid; gap: 10px;
-}
-.upload-card .label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-muted); font-weight: 700; }
-.upload-card .title { font-weight: 700; color: var(--fg); display: flex; align-items: center; gap: 10px; font-size: 14px; }
-.upload-card .copy { color: var(--fg-muted); font-size: 12px; line-height: 1.6; }
-.upload-card .zone {
-  padding: 22px; border-radius: 14px; border: 1.5px dashed var(--border-strong);
-  color: var(--fg-muted); text-align: center; font-size: 12px;
-  transition: border-color 0.2s, background 0.2s;
-}
-.upload-card .zone:hover { border-color: var(--accent); background: var(--accent-10); color: var(--accent); }
-.upload-action { width: 100%; margin-top: 22px; padding: 16px; }
-.unlock-note { margin: 22px 0 0; font-size: 12px; color: var(--fg-muted); text-align: center; }
 .brand-pill {
   background: var(--surface-strong); color: var(--fg);
   padding: 8px 12px; border-radius: 999px;
@@ -691,7 +605,6 @@ a { color: inherit; text-decoration: none; }
 .btn:hover { border-color: var(--border-strong); color: var(--fg); }
 .btn.primary { background: var(--btn-primary); color: #fff; border-color: transparent; border-radius: 999px; padding: 10px 18px; }
 .btn.primary:hover { color: #fff; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(var(--heat), 0.3); }
-.btn.ghost { background: transparent; border-color: transparent; }
 .btn.tiny { padding: 6px 10px; font-size: 11px; border-radius: 9px; }
 .btn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--positive); }
 
@@ -859,7 +772,6 @@ a { color: inherit; text-decoration: none; }
   text-transform: uppercase; letter-spacing: 0.1em;
 }
 .report-table tbody tr:last-child td { border-bottom: 0; }
-.report-table tr.running td { color: var(--fg-muted); }
 .report-table .pos { color: var(--positive); font-weight: 600; }
 .report-table .neg { color: var(--negative); font-weight: 600; }
 /* Sorteerbare kop: de hele kop is de knop, zodat het doel groot genoeg is. */
@@ -871,7 +783,6 @@ a { color: inherit; text-decoration: none; }
 .report-table .th-sort:focus-visible { outline: 2px solid var(--accent-data); outline-offset: 2px; border-radius: 3px; }
 .report-table .th-sort .sort-arrow { opacity: 0.35; font-size: 11px; }
 .report-table .th-sort.on .sort-arrow { opacity: 1; }
-.report-table .perf-button { cursor: pointer; }
 
 /* Meta Ads-blokken onder de campagnetabel (funnel, creatie, doelgroep). */
 .ads-block { margin-top: 48px; }
@@ -1056,12 +967,6 @@ tr.demo-gap td, tr.demo-gap th { height: 10px; padding: 0 !important; border: 0 
   grid-template-columns: 2fr 1fr;
   margin-top: var(--grid-gap);
 }
-.row-3 {
-  display: grid; gap: var(--grid-gap);
-  grid-template-columns: 1fr 1fr 1fr;
-  margin-top: var(--grid-gap);
-}
-
 /* Top posts list */
 .top-posts { display: flex; flex-direction: column; gap: 12px; }
 .top-post {
@@ -1400,32 +1305,6 @@ tr.demo-gap td, tr.demo-gap th { height: 10px; padding: 0 !important; border: 0 
  .sortable:hover {
    background: rgba(var(--heat), 0.08);
  }
- .perf-button {
-   font-size: 10px;
-   padding: 4px 8px;
-   border-radius: 6px;
-   border: none;
-   font-weight: 600;
-   text-transform: uppercase;
-   letter-spacing: 0.06em;
-   cursor: pointer;
-   transition: all 0.15s;
- }
- .perf-button.good {
-   background: var(--positive-bg);
-   color: var(--positive);
- }
- .perf-button.average {
-   background: rgba(var(--heat), 0.12);
-   color: var(--accent);
- }
- .perf-button.bad {
-   background: rgba(193, 77, 77, 0.12);
-   color: var(--negative);
- }
- .perf-button:hover {
-   opacity: 0.8;
- }
 /* Kolom 't.o.v. gemiddelde' (bibliotheek en Ads-tabel): afwijking t.o.v. het groepsgemiddelde.
    Kleur volgt alleen de richting; binnen ±10% blijft hij neutraal. */
 .bench { font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -1655,16 +1534,6 @@ tr.demo-gap td, tr.demo-gap th { height: 10px; padding: 0 !important; border: 0 
   cursor: pointer;
 }
 .tweak-opt.on { background: var(--fg); color: var(--surface); border-color: transparent; }
-.tweak-swatches { display: flex; gap: 6px; }
-.tweak-swatch {
-  width: 28px; height: 28px;
-  border-radius: 8px;
-  border: 2px solid transparent;
-  cursor: pointer;
-  position: relative;
-}
-.tweak-swatch.on { border-color: var(--fg); }
-
 /* Period toggle on Overview */
 .period-toggle {
   display: inline-flex;
@@ -1686,7 +1555,6 @@ tr.demo-gap td, tr.demo-gap th { height: 10px; padding: 0 !important; border: 0 
 /* ==========================================================
    Misc / utilities
    ========================================================== */
-.section-stack > * + * { margin-top: var(--grid-gap); }
 .muted { color: var(--fg-muted); }
 .soft { color: var(--fg-muted); }
 
@@ -1704,7 +1572,7 @@ tr.demo-gap td, tr.demo-gap th { height: 10px; padding: 0 !important; border: 0 
 /* Hide brand-pattern overlay when a real image is rendered on top */
 .thumb-pattern:has(.post-thumb-img)::before { display: none; }
 
-/* Real post thumbnails from Metricool (Instagram CDN, etc.) */
+/* Echte post-thumbnails (Instagram CDN, etc.) */
 .post-thumb-img {
   position: absolute;
   inset: 0;
@@ -1730,10 +1598,9 @@ tr.demo-gap td, tr.demo-gap th { height: 10px; padding: 0 !important; border: 0 
 @media (max-width: 1180px) {
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .row-2 { grid-template-columns: 1fr; }
-  .row-3 { grid-template-columns: 1fr; }
 }
 
-/* Skeleton loaders (stap 3 — live data fetch) */
+/* Skeleton loaders */
 @keyframes skeleton-shimmer {
   0%   { background-position: -200px 0; }
   100% { background-position: calc(200px + 100%) 0; }
@@ -1911,19 +1778,6 @@ tr.demo-gap td, tr.demo-gap th { height: 10px; padding: 0 !important; border: 0 
      pixel ervan leesruimte. */
   .topbar { padding: 10px 16px; gap: 8px; }
 }
-
-/* ---- ≤ 520: tabellen schuiven, eerste kolom blijft staan --------------- */
-@media (max-width: 520px) {
-  .table-wrap, .tablewrap { overflow-x: auto; }
-  .table-wrap table th:first-child,
-  .table-wrap table td:first-child,
-  .tablewrap table th:first-child,
-  .tablewrap table td:first-child {
-    position: sticky; left: 0;
-    background: var(--surface);
-  }
-}
-
 
 /* Voet van de zijbalk: klant, eventuele merkcontext, en de staat van de sessie.
    Hoort onderaan — bovenaan staat het merk van de klant, niet zijn metadata. */
@@ -2547,12 +2401,10 @@ th.c, td.c { text-align: center; }
    op specificiteit, ongeacht de volgorde. */
 .rp-body .kpi-grid      { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .rp-body .row-2         { grid-template-columns: 2fr 1fr; }
-.rp-body .row-3         { grid-template-columns: 1fr 1fr 1fr; }
 .rp-body .web-mini-grid { grid-template-columns: repeat(3, 1fr); }
 .rp-body .geo-grid2     { grid-template-columns: 1fr 1fr; }
 .rp-body .geo-score     { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .rp-body .geo-lanes     { grid-template-columns: 1fr 1fr; }
-.rp-body .table-wrap, .rp-body .tablewrap { overflow-x: visible; }
 
 @media (max-width: 900px) {
   .rp-actions { flex-direction: column; align-items: stretch; }
@@ -2672,8 +2524,7 @@ th.c, td.c { text-align: center; }
   color: var(--ds-ink, var(--fg));
 }
 .rp-deck[data-ds="on"] .lib-table tbody tr:hover { background: none; }
-.rp-deck[data-ds="on"] .panel,
-.rp-deck[data-ds="on"] .geo-action {
+.rp-deck[data-ds="on"] .panel {
   background: none; border: none; border-radius: 0; box-shadow: none;
 }
 

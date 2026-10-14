@@ -36,9 +36,7 @@ module.exports = async (req, res) => {
     token,
     clientId: id,
     brandName: client.brandName || id,
-    sheetId: client.sheetId || null,
     hasDrive: !!client.driveFolderId,
-    hasMetricool: !!client.metricool_token,
     // 'hasWindsor' betekent voor de frontend: er is een bron achter het
     // windsor-endpoint. Dat is de API-sleutel óf de datasheet — zonder deze
     // tweede voorwaarde slaat de UI het ophalen over bij een klant die wél een

@@ -17,9 +17,6 @@
     "api/drive.js": {
       "maxDuration": 30
     },
-    "api/metricool.js": {
-      "maxDuration": 60
-    },
     "api/windsor.js": {
       "maxDuration": 150
     },
@@ -88,6 +85,29 @@
     {
       "path": "/api/cron-demo",
       "schedule": "0 2 * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
     }
   ]
 }
