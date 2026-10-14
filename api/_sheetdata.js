@@ -188,9 +188,17 @@ function cached(cache, key, load) {
 
 function listTabs(clientId, sheetId, token) {
   return cached(metaCache, clientId, async () => {
-    const data = await fetchJson(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`, token);
-    return (data.sheets || []).map(s => s.properties.title);
+    const t0 = Date.now();
+    try {
+      const data = await fetchJson(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`, token);
+      const titles = (data.sheets || []).map(s => s.properties.title);
+      console.info(`[sheetdata] tablijst: ${titles.length} tabs in ${Date.now() - t0} ms`);
+      return titles;
+    } catch (e) {
+      console.warn(`[sheetdata] tablijst mislukt na ${Date.now() - t0} ms: ${e.name === 'AbortError' ? 'timeout' : e.message}`);
+      throw e;
+    }
   });
 }
 
@@ -203,6 +211,7 @@ const a1 = (title) => `'${String(title).replace(/'/g, "''")}'`;
 // te zien dat hij niet paste. Staging-tabs doen nooit mee, die vragen we niet op.
 function readHeaders(clientId, sheetId, titles, token) {
   return cached(headerCache, clientId, async () => {
+    const t0 = Date.now();
     const wanted = titles.filter(t => !/^_windsor_staging/i.test(t));
     const out = new Map();
     // Per blok van 40, zodat de URL kort genoeg blijft.
@@ -213,6 +222,7 @@ function readHeaders(clientId, sheetId, titles, token) {
         `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchGet?${qs}`, token);
       (data.valueRanges || []).forEach((vr, j) => out.set(chunk[j], (vr.values && vr.values[0]) || []));
     }
+    console.info(`[sheetdata] kopregels: ${out.size} tabs in ${Date.now() - t0} ms`);
     return out;
   });
 }
@@ -234,6 +244,85 @@ function readTab(clientId, sheetId, title, token) {
     console.info(`[sheetdata] tab '${title}': ${rows.length} rijen in ${Date.now() - t0} ms`);
     return rows;
   });
+}
+
+/* ---------- Datumkolom eerst, dan alleen de periode ----------
+   Gemeten bij Spotto (14-10-2026): de Search-Console-querytab heeft 475.000
+   rijen en de GA4-landingtab 263.000; volledig lezen kost 13 en 18 s, en op
+   productie lopen ze tegen de timeout van 20 s. Daarna bleken ze de periode
+   niet eens te dekken (export staat stil), dus ging alles alsnog live.
+
+   Daarom in twee stappen. Eerst alleen de datumkolom (één kolom, een fractie
+   van de bytes): daaruit volgen min, max en de dekking. Dekt de tab de periode
+   niet, dan stopt het hier. Dekt hij wél, dan lezen we alleen het rijbereik
+   van de eerste tot de laatste rij binnen de periode — bij een export die per
+   dag aanvult is dat een smal blok onderaan. Rijen buiten de periode binnen dat
+   blok filtert de aanroeper zoals voorheen.
+
+   Zonder herkenbare datumkolom valt dit terug op de volledige lezing. */
+
+function colLetter(i) {
+  let s = '';
+  for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  return s;
+}
+
+// Alle cellen van één kolom; index k ↔ rij k+1 in de sheet (index 0 = kop).
+function readDateColumn(clientId, sheetId, title, token, colIndex) {
+  return cached(tabCache, `${clientId}|${title}|col${colIndex}`, async () => {
+    const t0 = Date.now();
+    const col = colLetter(colIndex);
+    const data = await fetchJson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(`${a1(title)}!${col}:${col}`)}?majorDimension=COLUMNS`, token);
+    const cells = (data.values && data.values[0]) || [];
+    console.info(`[sheetdata] tab '${title}' datumkolom: ${cells.length} cellen in ${Date.now() - t0} ms`);
+    return cells;
+  });
+}
+
+// Rijen r1..r2 (1-based, inclusief), met de kopregel ervoor.
+function readRowRange(clientId, sheetId, title, token, r1, r2) {
+  return cached(tabCache, `${clientId}|${title}|${r1}-${r2}`, async () => {
+    const t0 = Date.now();
+    const data = await fetchJson(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(`${a1(title)}!${r1}:${r2}`)}`, token);
+    const rows = data.values || [];
+    console.info(`[sheetdata] tab '${title}' rijen ${r1}-${r2}: ${rows.length} rijen in ${Date.now() - t0} ms`);
+    return rows;
+  });
+}
+
+/**
+ * Leest een tab voor een periode. Geeft { rows, dates, min, max } terug: rows
+ * met de kopregel als eerste rij, dates gesorteerd over de héle tab (voor de
+ * dekkingscontrole). `check(dates)` mag de lezing afbreken vóór het rijbereik
+ * wordt opgehaald: geeft hij iets anders dan null terug, dan is dat het
+ * resultaat en worden er geen rijen gelezen.
+ */
+async function readTabForPeriod(clientId, sheetId, title, token, { headerRow, dateColIndex, from, to, parseDate = isoOf, check = null }) {
+  if (dateColIndex == null || !headerRow || !from || !to) {
+    const rows = await readTab(clientId, sheetId, title, token);
+    return { rows, dates: null, min: null, max: null, full: true };
+  }
+  const cells = await readDateColumn(clientId, sheetId, title, token, dateColIndex);
+  const dates = [];
+  let first = null, last = null, min = null, max = null;
+  for (let k = 1; k < cells.length; k++) {
+    const d = parseDate(cells[k]);
+    if (!d) continue;
+    dates.push(d);
+    if (min == null || d < min) min = d;
+    if (max == null || d > max) max = d;
+    if (d >= from && d <= to) { if (first == null) first = k; last = k; }
+  }
+  dates.sort();
+  if (check) {
+    const stop = check(dates, { min, max });
+    if (stop != null) return { rows: null, dates, min, max, stopped: stop };
+  }
+  if (first == null) return { rows: [headerRow], dates, min, max };
+  const body = await readRowRange(clientId, sheetId, title, token, first + 1, last + 1);
+  return { rows: [headerRow, ...body], dates, min, max };
 }
 
 /* ---------- Periodedekking ----------
@@ -370,23 +459,34 @@ async function getWebsiteSheetData(clientId, startDate, endDate) {
     // Eerste kandidaat waarvan de kopregel past. Leesfouten onthouden we: als geen
     // enkele tab past, is 'niet leesbaar' een betere reden dan 'ontbreekt'.
     // Eerst op de kopregel kiezen, pas dan de ene tab volledig lezen.
-    let title = null, rows = null, readErr = null;
+    let title = null, rows = null, readErr = null, cov = null;
+    const lag = table.lagDays || 2;
     for (const t of candidates) {
-      if (headers && !fitsHeaders(table, headers.get(t))) continue;
+      const headerRow = headers ? headers.get(t) : null;
+      if (headers && !fitsHeaders(table, headerRow)) continue;
       let r;
-      try { r = await readTab(clientId, sheetId, t, token); }
-      catch (e) { readErr = readErr || e.message; continue; }
-      if (fitsHeaders(table, r[0])) { title = t; rows = r; break; }
+      try {
+        // Datumkolom eerst: dekt de tab de periode niet, dan lezen we hem niet.
+        const dateColIndex = headerRow ? headerIndex(headerRow).idx.date : null;
+        r = await readTabForPeriod(clientId, sheetId, t, token, {
+          headerRow, dateColIndex, from: startDate, to: endDate,
+          check: (dates) => { const c = covers(dates, startDate, endDate, lag); return c.ok ? null : c; },
+        });
+      } catch (e) { readErr = readErr || e.message; continue; }
+      if (r.stopped) { title = t; cov = r.stopped; rows = null; break; }
+      if (fitsHeaders(table, r.rows[0])) { title = t; rows = r.rows; cov = r.full ? null : covers(r.dates, startDate, endDate, lag); break; }
     }
     if (!title) {
       result.coverage[key] = { ok: false, reason: readErr || (table.needs ? 'geen tab met leeftijd of geslacht' : 'tab ontbreekt') };
       return null;
     }
     result.tabs[key] = title;
-    const lag = table.lagDays || 2;
+    if (cov && !cov.ok) { result.coverage[key] = { ...cov, tab: title }; return null; }
     const parsed = rowsInPeriod(rows, startDate, endDate);
     if (parsed.noDate) { result.coverage[key] = { ok: false, reason: 'tab heeft geen datumkolom' }; return null; }
-    const cov = covers(parsed.dates, startDate, endDate, lag);
+    // Bij een volledige lezing (geen datumkolom in de kop bekend) komt de
+    // dekking uit de rijen zelf, zoals vroeger.
+    if (!cov) cov = covers(parsed.dates, startDate, endDate, lag);
     result.coverage[key] = { ...cov, tab: title, rows: parsed.body.length };
     if (!cov.ok) return null;
     if (parsed.goalEvent && !result.goalEvent && key !== 'ga4Demo') result.goalEvent = parsed.goalEvent;
@@ -596,6 +696,24 @@ async function getWebsiteSheetData(clientId, startDate, endDate) {
   // minder sessies dan de dagtab. De UI toont dat dekkingspercentage.
   if (demo) {
     result.demographics = aggregateDemo(demo.body.map(({ r }) => r), demo.idx);
+    // Voor klanten zonder live Windsor-koppeling (demoklant SENJA) is dit de
+    // enige bron, ook voor de conversietabellen en de evolutie-heatmap. Welk
+    // event het doelveld draagt staat in de kop ('Key event count for <event>');
+    // de dagreeks per leeftijd × geslacht gaat mee voor de heatmap.
+    if (demo.idx.goal != null) {
+      result.demographics.goalEvent = demo.goalEvent;
+      const m = new Map();
+      for (const { d, r } of demo.body) {
+        const age = normAge(r[demo.idx.age]);
+        const gender = normGender(r[demo.idx.gender]);
+        const k = `${d}|${age}|${gender}`;
+        const e = m.get(k) || { date: d, age, gender, sessions: 0, conversions: 0 };
+        e.sessions += num(r[demo.idx.sessions]);
+        e.conversions += num(r[demo.idx.goal]);
+        m.set(k, e);
+      }
+      result.demographics.daily = [...m.values()];
+    }
   }
 
   result.available = !!(result.totals || result.channels || result.search);
@@ -878,8 +996,16 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
   if (onleesbaar.length) return { __error: `kopregel niet leesbaar voor ${onleesbaar.join(', ')}` };
   if (!best && bestIncompleet) return { __missing: bestIncompleet.mist, __sheet: { tab: bestIncompleet.title } };
   if (!best) return null;
-  try { best.rows = await readTab(clientId, sheetId, best.title, token); }
-  catch (e) { return { __error: `Datasheet-tab '${best.title}' niet leesbaar: ${e.message}` }; }
+  // Alleen het rijbereik van de periode (datumkolom eerst); min/max van de hele
+  // tab blijven bekend voor sheetThrough in de UI.
+  const dateColIdx = DATE_HEADERS.map(h => best.headers.indexOf(h)).find(i => i !== -1);
+  let gelezen;
+  try {
+    gelezen = await readTabForPeriod(clientId, sheetId, best.title, token, {
+      headerRow: headerRows ? headerRows.get(best.title) : null, dateColIndex: dateColIdx, from, to, parseDate: dayOfCell,
+    });
+  } catch (e) { return { __error: `Datasheet-tab '${best.title}' niet leesbaar: ${e.message}` }; }
+  best.rows = gelezen.rows;
   if (!best.rows.length) return null;
   for (const f of extraFields) {
     if (best.colOf[f] != null) continue;
@@ -891,9 +1017,9 @@ async function getConnectorRows(clientId, connector, fieldsCsv, { from, to, requ
   // Nederlands sheet en zijn punten duizendtallen.
   const nl = best.rows.slice(1, 200).some(r => r.some(c => typeof c === 'string' && /^-?\d+,\d+$/.test(c.trim())));
 
-  const dateCol = DATE_HEADERS.map(h => best.headers.indexOf(h)).find(i => i !== -1);
+  const dateCol = dateColIdx;
   const data = [];
-  let min = null, max = null;
+  let min = gelezen.min, max = gelezen.max;
   for (const r of best.rows.slice(1)) {
     if (dateCol != null) {
       const d = dayOfCell(r[dateCol]);

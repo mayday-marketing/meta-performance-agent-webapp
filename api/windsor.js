@@ -1181,9 +1181,12 @@ module.exports = async (req, res) => {
           // geslacht per dag precies één rij over, dus verdween het AI-kanaal
           // bij mannen. Over de hele periode in één keer gevraagd valt er bijna
           // niets weg, en deze calls zijn klein (1–4 s).
-          const useDemo     = false;
+          // Uitzondering: een klant zonder eigen Windsor-sleutel (alleen een
+          // datasheet, zoals demoklant SENJA) kán niet live. Dan is de sheet de
+          // enige bron, met de privacydrempel als bekende beperking.
+          const useDemo     = !client.windsor_api_key && !!(sd.demographics && sd.demographics.rows && sd.demographics.rows.length);
           const skip = Promise.resolve(EMPTY);
-          const ga4Live = (f, label) => (hasGa4
+          const ga4Live = (f, label) => (hasGa4 && !useDemo
             ? windsorScoped('googleanalytics4', f, params, ADDON_MS, label, { skipSheet: true })
             : Promise.resolve(EMPTY));
           const convCall = (dims, event, label) => ga4Live(`${dims},conversions_${event}`, label);
@@ -1492,8 +1495,11 @@ module.exports = async (req, res) => {
           // álle key events staan (goalAvailable:false), net als elders.
           let demoBaseRows = null;
           if (useDemo) {
-            out.demographics = sd.demographics;
-            demoBaseRows = sd.demographics && sd.demographics.rows;
+            // Het doelveld in de sheet hoort bij één event (in de kop). Telt het
+            // een ander event dan het hoofddoel, dan is het niet het hoofddoel.
+            const goalOk = !!(goalEvent && sd.demographics.goalEvent === goalEvent);
+            demoBaseRows = sd.demographics.rows.map(r => ({ ...r, goalConversions: goalOk ? r.goalConversions : null }));
+            out.demographics = { rows: demoBaseRows, goalAvailable: goalOk };
           } else if (errOf(demoRaw)) {
             errors.ga4Demo = errOf(demoRaw);
             out.demographics = null;
@@ -1516,6 +1522,7 @@ module.exports = async (req, res) => {
           // Bestaat het event niet als key event, dan available:false met de fout —
           // nooit nullen, want dat zou 'niemand converteert' lezen.
           out.demoConversions = demoConversions.map((c, i) => {
+            if (useDemo) return demoConversionFromSheet(c, sd.demographics, demoBaseRows);
             const [raw, chRaw, dayRaw] = convRaws.slice(i * 3, i * 3 + 3);
             const key = `conversions_${c.event}`;
             const rows = rowsOf(raw);

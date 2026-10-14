@@ -155,6 +155,16 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
 
 ## Snelheid
 
+### Datasheet: tablijst-call valt soms in de 20 s-timeout
+- **Gemeten 14-10-2026:** `spreadsheets.get?fields=sheets.properties.title` bij
+  Spotto normaal 0,8 s, maar één keer op drie de volle 20 s (lokaal én op
+  productie: 'Datasheet niet leesbaar: This operation was aborted'). Dan gaat
+  de hele Website-tab live, 47 s. De tablezing zelf is sinds vandaag 5 s
+  (datumkolom eerst), dus deze ene call is nu de grootste onzekere factor.
+- **Eerste stap:** de tablijst per klant in de Runtime Cache zetten (een uur;
+  nieuwe tabs komen zelden) zodat een trage metadata-call niet elke koude
+  instantie raakt, en de timeout voor die ene call korter met één herkansing.
+
 ### Historiek van de grootste exports inkorten (Spotto)
 - **Waarom:** het dashboard leest uit deze tabs hooguit 30 dagen detail
   (`PAGE_LEVEL_MAX_DAYS`, `DETAIL_MAX_DAYS`), maar leest ze wel volledig in.
@@ -162,6 +172,10 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
   zoektermen 318.000 rijen (8,9 s), GA4 landing 259.000 rijen (7,8 s), Google Ads
   conversieacties 81.000 rijen (6,1 s). Ze zitten in `getWebsite` (28,9 s) en
   `getGoogleAds` (26,4 s).
+- **Stand 14-10-2026:** sinds 'datumkolom eerst' leest de app die tabs niet
+  meer volledig; de winst van inkorten is nu kleiner. Belangrijker: de exports
+  van de querytab (loopt tot 23-09) en de landingtab (tot 01-10) staan stil,
+  waardoor beide blokken toch live gaan. Eerst die taken in Windsor nakijken.
 - **Eerste stap:** in Windsor.ai de exporttaken van die vier tabs op een rollend
   venster zetten (bv. de laatste 60 dagen, ruimte voor de vergelijkingsperiode),
   daarna opnieuw meten met de `[tijd]`-regels.

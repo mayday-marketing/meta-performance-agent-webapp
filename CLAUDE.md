@@ -411,6 +411,15 @@ Gemeten: een sheet-tab lezen duurt 0,3–2,3 s, een koude Windsor-fetch over 90 
   en **niet** in de Config-tab: die tab staat in een sheet dat met de klant gedeeld
   kán worden, en een sheet-id daaruit accepteren zou een klant laten kiezen wiens
   data hij leest.
+- **Datumkolom eerst, dan alleen de periode** (14-10-2026, `readTabForPeriod`).
+  Per gekozen tab wordt eerst alleen de datumkolom gelezen; daarop valt de
+  dekkingscontrole, en dekt de tab de periode niet, dan wordt hij niet verder
+  gelezen. Dekt hij wél, dan alleen het rijbereik van de eerste tot de laatste
+  rij in de periode. Gemeten bij Spotto: de websitetabs van 20,6 s naar 4,8 s;
+  de querytab van 475.000 rijen kost nu 2,3 s (datumkolom) in plaats van 13 s,
+  en de landingtab 1,4 s in plaats van 17,6 s. Een tab die niet op datum
+  gesorteerd is (Google Ads-zoektermen) krijgt een breder blok, nooit meer dan
+  de hele tab. Zonder herkenbare datumkolom: volledige lezing zoals vroeger.
 - **Kiezen op de kopregel, dan pas lezen.** Eén `batchGet` haalt rij 1 van elke tab;
   daarop valt de tabkeuze, en alleen de winnaar wordt volledig gelezen. De cache
   (5 min, per klant) bewaart de lópende lezing, zodat tien gelijktijdige vragen
