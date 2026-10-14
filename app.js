@@ -1523,6 +1523,20 @@
     </div>`;
   }
 
+  // Duiding altijd in een kader (keuze eigenaar 14-10-2026): de neutrale
+  // observaties onder een tabel of grafiek zijn hetzelfde soort tekst als de
+  // callouts bovenaan een pagina, dus ze zien er ook zo uit. items = al
+  // ge-escapete HTML-regels; leeg → niets.
+  function insightCard(titel, items, style) {
+    const list = (items || []).filter(Boolean);
+    if (!list.length) return "";
+    const body = list.length === 1 ? list[0] : `<ul class="callout-list">${list.map(i => `<li>${i}</li>`).join("")}</ul>`;
+    return `<div class="callout-card info"${style ? ` style="${style}"` : ""}>
+      <div class="ct"><span class="glyph" aria-hidden="true">i</span>${escapeHtml(titel)}</div>
+      <div>${body}</div>
+    </div>`;
+  }
+
   function renderCallouts() {
     const root = $("#ov-callouts");
     if (!root) return;
@@ -1784,10 +1798,12 @@
     root.innerHTML = adsBlockHead("Funnel", titel,
       "Van vertoning tot aankoop, met het aandeel dat elke stap haalt en wat een stap kost.")
       + `<div class="kpi-grid">${cards}</div>`
-      + `<p class="source-line">${freqLine ? freqLine + " " : ""}`
-      + `${leads > 0 && !leadFunnel ? `Leads: <b>${fmt.int(leads)}</b> (${fmtEur(spend / leads)} per lead). ` : ""}`
-      + `${visits > 0 ? `Instagram-profielbezoeken via advertenties: <b>${fmt.int(visits)}</b>. ` : ""}`
-      + `Aankopen en winkelmandjes zijn Meta's omni-cijfers (web, app en offline samen); afrekenen heeft geen omni-variant.`
+      + insightCard("Bereik en bijvangst", [
+          freqLine,
+          leads > 0 && !leadFunnel ? `Leads: <b>${fmt.int(leads)}</b> (${fmtEur(spend / leads)} per lead).` : "",
+          visits > 0 ? `Instagram-profielbezoeken via advertenties: <b>${fmt.int(visits)}</b>.` : "",
+        ], "margin:14px 0 0;")
+      + `<p class="source-line">Aankopen en winkelmandjes zijn Meta's omni-cijfers (web, app en offline samen); afrekenen heeft geen omni-variant.`
       + `${heeftFunnel ? "" : " Er kwam geen winkelmand-, afreken- of aankoopdata binnen: de pixel meet die stappen niet, of ze zijn in deze periode niet gebeurd."}`
       + `${leadFunnel ? " Daarom loopt de funnel hier van klik naar lead." : ""}`
       + `${adsWindowNote()}</p>`;
@@ -2002,15 +2018,13 @@
     const titel = top.length
       ? `${escapeHtml(top[0].label)}: <b>${fmtShare(top[0].sDoel)} van de ${doelNaam}</b>`
       : "Doelgroep naar leeftijd en geslacht";
-    const lede = top.length
-      ? top.map(r => `${escapeHtml(r.label)} ${fmtShare(r.sDoel)} van de ${doelNaam} bij ${fmtShare(r.sSpend)} van de kosten`).join(" · ")
-      : "";
+    const topLines = top.map(r => `${escapeHtml(r.label)} ${fmtShare(r.sDoel)} van de ${doelNaam} bij ${fmtShare(r.sSpend)} van de kosten`);
 
     // Geslacht los, want dat is de vraag die het vaakst gesteld wordt.
     const perGender = ["female", "male", "unknown"].map(g => {
       const gr = demo.filter(r => r.gender === g);
       return gr.length ? `${GENDER_LABEL[g]} ${fmtShare(share(sum(gr, doelKey), tot.doel))} van de ${doelNaam}, ${fmtShare(share(sum(gr, "spend"), tot.spend))} van de kosten` : "";
-    }).filter(Boolean).join(" · ");
+    }).filter(Boolean);
 
     // Leads en kliks zijn hetzelfde veld als in de totalen, dus een aantal mag.
     // Aankopen en winkelmandjes zijn hier niet-omni: geen getal, alleen een waarschuwing.
@@ -2044,8 +2058,8 @@
         ${regioConvGat ? `<p class="source-line">Meta levert voor deze klant geen ${doelNaam} per regio (alles 0, terwijl leeftijd en geslacht er wel tonen). Daarom alleen de kosten.</p>` : ""}`;
     }
 
-    root.innerHTML = adsBlockHead("Doelgroep", titel, lede)
-      + `<p class="source-line" style="margin-top:0;">${perGender}</p>`
+    root.innerHTML = adsBlockHead("Doelgroep", titel, "")
+      + insightCard("Verdeling", [...topLines, ...perGender], "margin:0 0 14px;")
       + renderDemoBars(demo, doelKey, doelNaam, tot)
       + `<p class="source-line">Per leeftijdsgroep het aandeel in kosten, vertoningen en ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de kostenstaaf, dan levert die groep meer op dan hij kost (index boven 1).${state.adsDemoGender !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%; de index meet wél tegenover het gemiddelde van dat geslacht, dus de staaflengtes en de index kunnen dan verschillen." : ""}</p>`
       + tabel + regioHtml
@@ -2465,10 +2479,10 @@
         <span class="item"><span class="swatch" style="background:var(--slice-4)"></span>Gemist door budget ${gFmt.pct(s.lostBudget)}</span>
         <span class="item"><span class="swatch" style="background:var(--slice-7)"></span>Gemist door rang ${gFmt.pct(s.lostRank)}</span>
       </p>
-      <p class="source-line">${budgetLeidt
-        ? "Het meeste gemiste aandeel komt door het budget: de advertenties mochten tonen, maar het dagbudget was op. Meer budget levert hier direct meer vertoningen op."
-        : "Het meeste gemiste aandeel komt door de rang: een te laag bod of een lage advertentiekwaliteit. Meer budget helpt hier weinig; een beter bod, betere advertenties of een betere landingspagina wel."}
-        ${s.belowTenShare > 0 ? ` Op ${gFmt.pct(s.belowTenShare)} van de campagnedagen meldde Google 'minder dan 10%'; die tellen hier als 9,99%, dus het werkelijke aandeel ligt iets lager.` : ""}</p>
+      ${insightCard("Waar het gemiste aandeel zit", [budgetLeidt
+        ? `Het meeste gemiste aandeel komt door het budget (${gFmt.pct(s.lostBudget)}): de advertenties mochten tonen, maar het dagbudget was op.`
+        : `Het meeste gemiste aandeel komt door de rang (${gFmt.pct(s.lostRank)}): bod en advertentiekwaliteit bepalen die.`], "margin:14px 0 0;")}
+      ${s.belowTenShare > 0 ? `<p class="source-line">Op ${gFmt.pct(s.belowTenShare)} van de campagnedagen meldde Google 'minder dan 10%'; die tellen hier als 9,99%, dus het werkelijke aandeel ligt iets lager.</p>` : ""}
     </section>`;
   }
 
@@ -4396,10 +4410,10 @@
     const spendOf = (k) => sorted.filter(x => x.verdict.key === k).reduce((s, x) => s + x.spend, 0);
 
     const summary = min.value
-      ? `<div class="roas-advice-summary">
-          <div><strong>${counts.above || 0}</strong> boven · <strong>${counts.below || 0}</strong> onder break-even</div>
-          <div class="muted">${roasFmt.eur(spendOf("above"))} spend boven de drempel · ${roasFmt.eur(spendOf("below"))} eronder</div>
-        </div>`
+      ? insightCard("Campagnes tegenover break-even", [
+          `<strong>${counts.above || 0}</strong> boven · <strong>${counts.below || 0}</strong> onder break-even`,
+          `${roasFmt.eur(spendOf("above"))} spend boven de drempel · ${roasFmt.eur(spendOf("below"))} eronder`,
+        ], "margin:0 0 14px;")
       : `<div class="roas-advice-summary"><div class="muted">Vul een brutomarge in om campagnes tegen een break-even te beoordelen.</div></div>`;
 
     const body = sorted.map(x => `<tr${x.noRevenue ? ' style="opacity:0.72;"' : ''}>
@@ -4780,19 +4794,19 @@
     const base = webBase();
     const prevChans = base ? (base.channels || []) : [];
     const metGroei = chans.map(c => {
-      const pv = prevChans.find(x => x.label === c.label);
+      const pv = prevChans.find(x => x.channel === c.channel);
       return { ...c, groei: webPct(c.sessions, pv && pv.sessions) };
     }).filter(c => c.groei != null && c.sessions > 0);
     metGroei.sort((a, b) => b.groei - a.groei);
     if (metGroei.length && metGroei[0].groei > 0.02) {
       const c = metGroei[0];
       kaarten.push(callout("good", "+", "Wat werkt",
-        `<b>${escapeHtml(c.label)}</b> groeit met ${((c.groei * 100).toFixed(1)).replace(".", ",")}% naar `
+        `<b>${escapeHtml(c.channel)}</b> groeit met ${((c.groei * 100).toFixed(1)).replace(".", ",")}% naar `
         + `${webFmt.int(c.sessions)} sessies — de sterkste stijger van deze periode.`));
     } else if (chans.length) {
       const grootste = chans.slice().sort((a, b) => (b.sessions || 0) - (a.sessions || 0))[0];
       kaarten.push(callout("good", "+", "Wat werkt",
-        `<b>${escapeHtml(grootste.label)}</b> is het grootste kanaal met ${webFmt.int(grootste.sessions)} sessies.`));
+        `<b>${escapeHtml(grootste.channel)}</b> is het grootste kanaal met ${webFmt.int(grootste.sessions)} sessies.`));
     }
 
     // Welk doel je ziet: het verschil tussen hoofddoel en alle key events is groot.
@@ -5281,13 +5295,13 @@
 
     const b = w.current.branded;
     const brandTotal = b ? (b.branded.clicks + b.nonbranded.clicks) : 0;
-    const brandedBlock = (b && brandTotal > 0) ? `<div class="web-brand-split">
-      <div><strong>${webFmt.pct0(b.branded.clicks / brandTotal)}</strong> merkgebonden
-        <span class="muted">${webFmt.int(b.branded.clicks)} kliks · CTR ${webFmt.pct1(b.branded.ctr)}</span></div>
-      <div><strong>${webFmt.pct0(b.nonbranded.clicks / brandTotal)}</strong> niet-merkgebonden
-        <span class="muted">${webFmt.int(b.nonbranded.clicks)} kliks · CTR ${webFmt.pct1(b.nonbranded.ctr)}</span></div>
-      <div class="muted" style="font-size:11px;">Merkgebonden = de zoekopdracht bevat ${b.tokens.map(t => `<em>${escapeHtml(t)}</em>`).join(" of ")}. Berekend over de zoekopdrachten die Google vrijgeeft, niet over alle kliks.</div>
-    </div>` : "";
+    const brandedBlock = (b && brandTotal > 0)
+      ? insightCard("Merk tegenover niet-merk", [
+          `<strong>${webFmt.pct0(b.branded.clicks / brandTotal)}</strong> merkgebonden: ${webFmt.int(b.branded.clicks)} kliks · CTR ${webFmt.pct1(b.branded.ctr)}`,
+          `<strong>${webFmt.pct0(b.nonbranded.clicks / brandTotal)}</strong> niet-merkgebonden: ${webFmt.int(b.nonbranded.clicks)} kliks · CTR ${webFmt.pct1(b.nonbranded.ctr)}`,
+        ], "margin:0 0 6px;")
+        + `<p class="source-line" style="margin:0 0 14px;">Merkgebonden = de zoekopdracht bevat ${b.tokens.map(t => `<em>${escapeHtml(t)}</em>`).join(" of ")}. Berekend over de zoekopdrachten die Google vrijgeeft, niet over alle kliks.</p>`
+      : "";
 
     const qRows = (w.current.queries || []).map(q => `<tr>
       <td class="row-caption" title="${escapeHtml(q.query)}">${escapeHtml(q.query)}</td>
@@ -5520,9 +5534,7 @@
     };
     const ageKeys = AGE_ORDER.filter(a => tables.some(t => t.byAge.some(g => g.key === a)));
     const genderKeys = ["female", "male"].filter(k => tables.some(t => t.byGender.some(g => g.key === k)));
-    const notes = res.observations.length
-      ? `<ul class="source-line" style="margin:18px 0 0; padding-left:18px; color:var(--fg);">${res.observations.map(o => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`
-      : "";
+    const notes = insightCard("Wat opvalt", res.observations.map(o => escapeHtml(o)), "margin:18px 0 0;");
     const coverage = tables.map(t => `${escapeHtml(t.label)} ${pctS(t.knownShare)} (${fmt.int(t.knownConversions)} van ${fmt.int(t.totalConversions)})`).join(" · ");
 
     return `<section class="panel" style="margin-bottom:16px;">${head}
@@ -5576,9 +5588,7 @@
       return `<h3 class="label-head" style="margin-top:22px;">${escapeHtml(g.label)} per ${ev.grain === "week" ? "week" : "maand"}, per 1.000 sessies</h3>
         <div class="dm-wrap"><table class="dm-table"><thead>${head(g)}</thead><tbody>${tot}${ages.map(row).join("")}${genders.length ? gap + genders.map(row).join("") : ""}${unk}</tbody></table></div>`;
     };
-    const notes = ev.observations.length
-      ? `<ul class="source-line" style="margin:14px 0 0; padding-left:18px; color:var(--fg);">${ev.observations.map(o => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`
-      : "";
+    const notes = insightCard("Wat opvalt in de tijd", ev.observations.map(o => escapeHtml(o)), "margin:14px 0 0;");
     const unit = ev.grain === "week" ? "week" : "maand";
     return `<h3 class="label-head" style="margin-top:32px;">Evolutie</h3>
       ${notes}
@@ -5667,7 +5677,7 @@
       const s = sum(gr, "sessions");
       if (!s) return "";
       return `${GENDER_LABEL[gk]} ${fmtShare(share(sum(gr, "doel"), tot.doel))} van de ${escapeHtml(doelNaam)}, ${fmtShare(share(s, tot.sessions))} van de sessies (${webFmt.pct2(rate(sum(gr, "doel"), s))})`;
-    }).filter(Boolean).join(" · ");
+    }).filter(Boolean);
 
     const bars = renderDemoBars(rows, "doel", doelNaam, tot, {
       series: [{ key: "sessions", field: "sessions", label: "Sessies", color: "var(--chart-3)" }],
@@ -5676,17 +5686,16 @@
 
     // Waarschuwing vooraan als de uitsplitsing te dun is om op te sturen.
     const signalsWarn = knownShare != null && knownShare < 0.1
-      ? `<p class="source-line" style="color:var(--negative);">Maar ${webFmt.pct0(knownShare)} van de sessies heeft een leeftijd én geslacht. Staat Google Signals aan in deze GA4-property? Zo niet, dan valt vrijwel alles onder 'onbekend'.</p>`
+      ? `<div class="callout-card watch" style="margin:0 0 14px;"><div class="ct"><span class="glyph" aria-hidden="true">!</span>Weinig bekende leeftijd en geslacht</div><div>Maar ${webFmt.pct0(knownShare)} van de sessies heeft een leeftijd én geslacht. Staat Google Signals aan in deze GA4-property? Zo niet, dan valt vrijwel alles onder 'onbekend'.</div></div>`
       : "";
 
     return `<section class="panel" style="margin-bottom:16px;">
       <div class="panel-header"><div>
         <h2 class="panel-title">${titel}</h2>
-        <div class="panel-sub">${lede}</div>
       </div></div>
       ${convSwitch}
       ${signalsWarn}
-      <p class="source-line" style="margin-top:0;">${perGender}</p>
+      ${insightCard("Verdeling", [lede, ...perGender], "margin:0 0 14px;")}
       ${bars}
       <p class="source-line">Per leeftijdsgroep het aandeel in de sessies en in de ${escapeHtml(doelNaam)}. Is de ${escapeHtml(doelNaam)}-staaf langer dan de sessiestaaf, dan converteert die groep bovengemiddeld (index boven 1).${gFilter !== "all" ? " Aandelen blijven van het totaal, dus binnen één geslacht tellen ze niet op tot 100%; de index meet wél tegenover het gemiddelde van dat geslacht, dus de staaflengtes en de index kunnen dan verschillen." : ""}</p>
       ${renderWebsiteDemoMatrix(fRows, doelNaam, avgRate, avgWie)}
@@ -6909,10 +6918,11 @@
     return `<section class="panel">
       <div class="panel-header"><div>
         <h2 class="panel-title">${g.prompts.length} koopvragen × ${E.length} engines — ${brand} genoemd in ${u.hit}/${u.of} unbranded en ${b.hit}/${b.of} brand-combinaties</h2>
-        <div class="panel-sub">${prev ? `${moved} van ${g.prompts.length} prompts bewogen t.o.v. ${escapeHtml(geoFmt.date(prev.date))}` : "Nog geen vorige meting — na meting 2 zie je hier wat bewoog"}</div>
+        ${prev ? "" : `<div class="panel-sub">Nog geen vorige meting — na meting 2 zie je hier wat bewoog</div>`}
       </div>
       <div class="panel-actions"><label class="geo-chk"><input type="checkbox" ${state.geoMovedOnly ? "checked" : ""} ${prev ? "" : "disabled"} onchange="window.__geoMoved(this.checked)"> Toon alleen wat bewoog</label></div>
       </div>
+      ${prev ? insightCard("Wat bewoog", [`${moved} van ${g.prompts.length} prompts bewogen t.o.v. ${escapeHtml(geoFmt.date(prev.date))}`], "margin:0 0 14px;") : ""}
       <div class="lib-table geo-fit"><table>
         <thead><tr>
           <th class="right">#</th><th>Prompt</th><th>Blok</th>

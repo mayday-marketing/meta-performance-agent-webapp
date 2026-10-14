@@ -392,6 +392,8 @@
     const notes = [];
     el.querySelectorAll("p, li, .callout-card, .channel-row").forEach(n => {
       if (n.closest(".kpi-card") || n.closest("table")) return;
+      // Een kader telt als één notitie; zijn regels niet nog eens apart.
+      if (!n.classList.contains("callout-card") && n.closest(".callout-card")) return;
       const t = txt(n);
       if (t.length > 3 && notes.length < 14) notes.push(t);
     });

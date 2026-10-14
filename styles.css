@@ -736,6 +736,8 @@ a { color: inherit; text-decoration: none; }
 .callout-card.watch { background: var(--negative-bg); }
 .callout-card.info { background: var(--info-bg); }
 .callout-card .btn { margin-top: 12px; width: 100%; justify-content: center; }
+.callout-list { margin: 0; padding-left: 18px; }
+.callout-list li + li { margin-top: 4px; }
 .callout-foot { margin: 2px 2px 0; font-size: 11.5px; line-height: 1.7; color: var(--fg-muted); }
 
 /* Datastempel: het lampje rekent tegen vandaag, niet tegen het bouwmoment. */

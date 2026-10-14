@@ -217,6 +217,13 @@ geslachtsfilter (`state.webDemoGender`).
   aparte, niet-fatale calls per conversie, allemaal met `skipSheet`. De tabherkenning
   hierboven blijft nodig, zodat de doelgroeptab nooit voor dag-, kanaal- of
   landingvragen gekozen wordt.
+  **Uitzondering: klanten zonder eigen Windsor-sleutel** (`sheetOnly`, zoals
+  demoklant SENJA) kunnen niet live; voor hen komt alles uit de doelgroeptab,
+  ook de conversietabel en de heatmap (`demoConversionFromSheet()` in
+  `windsor.js`). Die tab draagt één doelveld, herkend aan de kop
+  `Key event count for <event>`; een conversie zonder kolom wordt 'niet
+  beschikbaar'. In SENJA's demosheet is kolom I een formule op `transactions`
+  (14-10-2026).
 - **Conversies per merk (Config-veld `Conversies`).** Bovenaan de sub-tab staat
   per conversie een tabel naar leeftijd en naar geslacht (aandeel sessies,
   aandeel conversies, per 1.000 sessies) met neutrale duiding eronder. Vorm:
@@ -809,6 +816,13 @@ afleest, en per cijfer een regel context. Alles wat kleur draagt hangt aan
   `styles.css`. Laat een nieuw blok op dezelfde grenzen knikken; de app had eerst
   acht losse breekpunten en dan klapt de zijbalk in terwijl een tabel nog op
   volle breedte staat.
+- **Duiding altijd in een kader** (keuze eigenaar 14-10-2026). Een
+  data-gedreven observatie onder een tabel of grafiek ("35-44 levert het grootste
+  aandeel", "62% merkgebonden") gaat door `insightCard(titel, regels)` in
+  `app.js`: een blauwe `.callout-card.info`, één regel los of meerdere als lijst.
+  Een waarschuwing over de data is een rood kader (`.watch`, glyph `!`). Koppen
+  boven een blok blijven koppen, en uitleg over de methode blijft een
+  `source-line`. De rapportextractor telt een kader als één notitie.
 - **Sub-tabs** zijn `.subtabs` (en `.geo-tabs`, dezelfde regels): browserstijl,
   het actieve blad in de paginakleur dat de lijn van de strip onderbreekt. Ze
   horen bij één sectie, nooit bij de app als geheel — daarvoor is de zijbalk.
