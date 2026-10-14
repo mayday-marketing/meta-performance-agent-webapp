@@ -1003,6 +1003,19 @@ syntax shows literally — the chat prompt tells the model to avoid `**`/`#`/etc
 - **Non-fatal add-on calls:** creative/video/conversion ad fields are fetched in
   separate calls with a tighter timeout so a slow breakdown can't sink the core
   fetch; failures return `{__error}` and are surfaced in `errors`, not thrown.
+- **Content-Security-Policy op de dashboardpagina** (`vercel.json`, alleen op `/`
+  en `/index.html`; de OAuth-pagina zet zijn eigen CSP en twee CSP-headers
+  gelden allebei). Scripts alleen uit eigen bestanden en pptxgenjs van jsDelivr —
+  daarom staat het tweak-blok in `tweak-defaults.js` en niet inline in
+  `index.html`. `script-src-attr 'unsafe-inline'` blijft nodig voor de ~55
+  `onclick="…"`-handlers in de templates; wie die naar event delegation
+  omzet, kan die regel schrappen. Stijlen: `'unsafe-inline'` (honderden
+  `style=""`-attributen en de `<style>` met design-system-fonts). Afbeeldingen:
+  `https:` en `data:` (post-thumbnails van de Meta-CDN, logo's, SVG→PNG voor de
+  pptx); fonts ook `data:` (design-system-fonts reizen als data-URL). Getest op
+  14-10-2026 in report-only over alle tabs plus een deck met duiding: nul
+  meldingen. Laadt een nieuw blok iets van een andere host, voeg die host dan
+  hier toe — anders blokkeert de browser het stil.
 - **CORS alleen voor het eigen domein (`api/_cors.js`):** de dashboardroutes
   echoën het `Origin` alleen als zijn host gelijk is aan de host van het verzoek
   (productie én previews), plus `ALLOWED_ORIGINS`. Geen `*` meer: een vreemde
