@@ -246,6 +246,22 @@ De tabs worden op patroon herkend (bron + niveau), niet op naam, dus de standaar
 exportnamen van Windsor volstaan. Deel de spreadsheet met het service-account
 (Viewer) en noteer de id voor stap 10.
 
+De query's hoef je niet met de hand te typen: [Windsor-querybuilder.xlsx](Windsor-querybuilder.xlsx)
+heeft één tabblad per export (ook Meta Ads, Google Ads, e-mail en de connectors
+die het dashboard nog niet leest: TikTok, LinkedIn, Pinterest, Snapchat, Bing,
+Amazon, ChatGPT en Reddit Ads, organisch TikTok/LinkedIn/Pinterest/YouTube/
+Threads/X, Google Business Profile, Plausible, Shopify/WooCommerce/Magento,
+Mailchimp/Brevo/Omnisend/ActiveCampaign/HubSpot) met per bron het advies hoeveel
+bestemmingstabbladen je maakt en waarom. Onder de dashboardselectie staat per
+tabblad de volledige Windsor-catalogus van die connector (ruim 11.000 velden in
+totaal, niet aangevinkt), zodat je extra velden alleen hoeft aan te vinken. Alle
+veld-id's zijn op 14-10-2026 geverifieerd tegen Windsor; het tabblad *Registry-check* zet de kandidaat-velden
+uit `api/_channels.js` daarnaast. Vul op *Instellingen* de klantcode en de account-id's in,
+vink per tabblad de velden aan, en kopieer de gegenereerde URL, taaknaam en
+tabnaam naar Windsor. De `api_key` staat bewust leeg in de URL; plak die in
+Windsor zelf. De voorgestelde tabnamen passen op de herkenning in
+`api/_sheetdata.js`.
+
 > **Deel een Windsor-datasheet nooit met een klant.** Windsor schrijft mislukte
 > runs inclusief de volledige aanroep-URL — mét `api_key=` — naar de
 > `Queries`-tab, en die sleutel is gedeeld over alle klanten.
