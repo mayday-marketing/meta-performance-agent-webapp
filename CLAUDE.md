@@ -1003,6 +1003,11 @@ syntax shows literally — the chat prompt tells the model to avoid `**`/`#`/etc
 - **Non-fatal add-on calls:** creative/video/conversion ad fields are fetched in
   separate calls with a tighter timeout so a slow breakdown can't sink the core
   fetch; failures return `{__error}` and are surfaced in `errors`, not thrown.
+- **Rem op betaalde calls (`api/_throttle.js`):** per klant en per soort, in de
+  Vercel Runtime Cache net als de login-rem. Chat 30 per kwartier, rapport-
+  duiding 10 per uur, SEO-rank-check en GEO-bronnen/-vermeldingen 6 per uur.
+  Altijd ná `verifyToken` én ná de eigen dagcache (een cache-hit kost niets en
+  telt niet mee). Een 429 draagt `Retry-After` en een leesbare `error`.
 - **Per-client Anthropic key:** `chat.js`/`report.js` use
   `CLIENTS[clientId].anthropic_api_key` if present, else the shared
   `ANTHROPIC_API_KEY`.

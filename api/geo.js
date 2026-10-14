@@ -45,6 +45,8 @@ const BASE = 'https://api.dataforseo.com/v3';
 // melding terugkomt in plaats van een afgebroken request.
 const SOURCES_TIMEOUT_MS = 100000;
 
+const { takeBudget } = require('./_throttle');
+
 function verifyToken(token, clientId) {
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf8');
@@ -231,6 +233,12 @@ module.exports = async (req, res) => {
           const hit = cacheGet(key);
           if (hit) return res.status(200).json({ ...hit, fromCache: true });
         }
+        // ~$0,10 per pull op het gedeelde saldo; de dagcache is met ↻ te omzeilen.
+        const budget = await takeBudget('geo-sources', cid, 6, 3600);
+        if (!budget.ok) {
+          res.setHeader('Retry-After', String(budget.retryAfter));
+          return res.status(429).json({ error: budget.message });
+        }
 
         const target = [{ keyword: cfg.keyword, match_type: 'partial_match', search_filter: 'include' }];
         if (excl) target.push({ domain: own, search_filter: 'exclude' });
@@ -335,6 +343,11 @@ module.exports = async (req, res) => {
         if (!force) {
           const hit = cacheGet(key);
           if (hit) return res.status(200).json({ ...hit, fromCache: true });
+        }
+        const budget = await takeBudget('geo-mentions', cid, 6, 3600);
+        if (!budget.ok) {
+          res.setHeader('Retry-After', String(budget.retryAfter));
+          return res.status(429).json({ error: budget.message });
         }
 
         const r = await dfsPost('/ai_optimization/llm_mentions/search/live', {

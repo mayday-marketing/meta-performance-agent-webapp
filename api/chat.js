@@ -6,6 +6,8 @@ const SECRET = process.env.AUTH_SECRET;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
 
+const { takeBudget } = require('./_throttle');
+
 function verifyToken(token, clientId) {
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf8');
@@ -49,6 +51,13 @@ module.exports = async (req, res) => {
 
   if (!verifyToken(token, clientId)) {
     return res.status(401).json({ error: 'Sessie verlopen. Meld opnieuw aan.' });
+  }
+  // Elke vraag is een Opus-call op de gedeelde sleutel. Dertig per kwartier is
+  // meer dan een mens typt en te weinig om het endpoint als proxy te gebruiken.
+  const budget = await takeBudget('chat', clientId, 30, 900);
+  if (!budget.ok) {
+    res.setHeader('Retry-After', String(budget.retryAfter));
+    return res.status(429).json({ error: budget.message });
   }
   // Per-klant Claude-key (optioneel, server-side) met terugval op de gedeelde mayday-key.
   let apiKey = ANTHROPIC_API_KEY;

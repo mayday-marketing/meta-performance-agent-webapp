@@ -17,6 +17,8 @@ const TOKEN_MAX_AGE_MS = 10 * 60 * 60 * 1000;
 
 const MAX_BLOCKS = 40;
 
+const { takeBudget } = require('./_throttle');
+
 function verifyToken(token, clientId) {
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf8');
@@ -111,6 +113,12 @@ module.exports = async (req, res) => {
   }
   if (!Array.isArray(blocks) || !blocks.length) {
     return res.status(400).json({ error: 'Geen blokken ontvangen om te duiden.' });
+  }
+  // Eén duiding = één lange Opus-call; een rapport maak je een paar keer per maand.
+  const budget = await takeBudget('report', clientId, 10, 3600);
+  if (!budget.ok) {
+    res.setHeader('Retry-After', String(budget.retryAfter));
+    return res.status(429).json({ error: budget.message });
   }
 
   // Per-klant Claude-key (optioneel, server-side) met terugval op de gedeelde

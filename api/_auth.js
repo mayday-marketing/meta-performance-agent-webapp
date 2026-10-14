@@ -128,8 +128,10 @@ async function loginFailed(req, rawId) {
     try {
       // Samenvoegen met wat er al staat, niet overschrijven: anders wist een
       // instantie met een lege Map de stand van de andere.
+      // De langste lijst wint; geen Set, want gelijke timestamps vallen dan samen.
       const shared = (await sharedRecent(key, now)) || [];
-      const merged = prune([...new Set([...shared, ...fails.get(key)])], now).sort().slice(-50);
+      const mine = fails.get(key);
+      const merged = (shared.length > mine.length ? shared : mine).slice(-50);
       await c.set(key, merged, { ttl: Math.ceil(FAIL_WINDOW_MS / 1000), name: 'login-rem' });
     } catch (e) {
       console.warn('[auth] runtime cache schrijven mislukt:', e && e.message);

@@ -91,6 +91,13 @@ wat de eerste stap is. Afgewerkt → schrappen, niet laten staan.
   telt vóór de functie en kost geen invocaties); het supportticket hierboven
   staat nog open.
 
+### Rem op betaalde calls: Firewall-laag ontbreekt nog
+- **Stand 14-10-2026:** `api/_throttle.js` remt chat, rapportduiding, SEO-rank-
+  check en GEO-bronnen per klant in de Runtime Cache (zie CLAUDE.md). Dat is de
+  tweede laag; de eerste (een Firewall-rate-limit per IP op `/api/chat`,
+  `/api/report`, `/api/seo`, `/api/geo`) wacht op dezelfde oplossing als de
+  login-regel hierboven — Hobby staat maar één rate-limitregel toe.
+
 ### Nachtelijke testscenario's: wat kan er mislopen
 - **Waarom:** er zijn geen tests (zie CLAUDE.md). Fouten zoals deze week (een
   ontbrekende hulpfunctie die de Doelgroep-tab stil liet uitvallen, de datasheet

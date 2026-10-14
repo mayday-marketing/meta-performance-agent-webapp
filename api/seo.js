@@ -57,6 +57,8 @@ const RANK_CONCURRENCY = 6;
 const RANK_DEADLINE_MS = 45000;   // daarna geen nieuwe calls meer starten
 const SERP_DEPTH = 20;            // top 20; daaronder is een positie geen positie
 
+const { takeBudget } = require('./_throttle');
+
 function verifyToken(token, clientId) {
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf8');
@@ -442,6 +444,14 @@ module.exports = async (req, res) => {
         if (!force) {
           const hit = cacheGet(key);
           if (hit) return res.status(200).json({ ...hit, settings: meta, fromCache: true });
+        }
+        // Elke positie is een betaalde SERP-call op het gedeelde saldo; met ↻ is
+        // de dagcache te omzeilen. Zes metingen per uur per klant is ruim voor
+        // echt gebruik en te weinig voor een lus.
+        const budget = await takeBudget('seo-rank', cid, 6, 3600);
+        if (!budget.ok) {
+          res.setHeader('Retry-After', String(budget.retryAfter));
+          return res.status(429).json({ error: budget.message, settings: meta });
         }
 
         const deadline = Date.now() + RANK_DEADLINE_MS;
