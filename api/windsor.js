@@ -59,6 +59,28 @@ function safeCall(promise, label) {
   });
 }
 
+// Conversietabel van de Doelgroep-sub-tab uit de datasheet, voor een klant
+// zonder eigen Windsor-sleutel. Zelfde vorm als de live tak in getWebsite. De
+// doelgroeptab draagt één doelveld ('Key event count for <event>'); een andere
+// conversie staat er niet in en wordt dus 'niet beschikbaar', nooit nul.
+function demoConversionFromSheet(c, demo, baseRows) {
+  const label = c.label || c.event;
+  if (!demo || demo.goalEvent !== c.event) {
+    return { event: c.event, label, available: false, error: `Geen kolom voor '${c.event}' in de doelgroeptab van de datasheet`, rows: [], daily: null };
+  }
+  const groups = new Map();
+  for (const r of demo.rows) {
+    const k = `${r.age}|${r.gender}`;
+    const g = groups.get(k) || { age: r.age, gender: r.gender, sessions: 0, conversions: 0 };
+    g.sessions += r.sessions; g.conversions += r.goalConversions || 0;
+    groups.set(k, g);
+  }
+  // Per kanaal: dezelfde rijen als de kanaalmatrix, dus dezelfde noemer.
+  const byKey = new Map(demo.rows.map(r => [`${r.age}|${r.gender}|${r.channel}`, r.goalConversions || 0]));
+  for (const r of baseRows || []) (r.convs = r.convs || {})[c.event] = byKey.get(`${r.age}|${r.gender}|${r.channel}`) || 0;
+  return { event: c.event, label, available: true, error: null, rows: [...groups.values()], daily: demo.daily || null };
+}
+
 module.exports = async (req, res) => {
   if (cors(req, res, 'POST')) return;   // alleen het eigen domein, zie _cors.js
   captureOidcToken(req);   // OIDC-token uit de request-header (zie _config.js)
@@ -1184,7 +1206,7 @@ module.exports = async (req, res) => {
           // Uitzondering: een klant zonder eigen Windsor-sleutel (alleen een
           // datasheet, zoals demoklant SENJA) kán niet live. Dan is de sheet de
           // enige bron, met de privacydrempel als bekende beperking.
-          const useDemo     = !client.windsor_api_key && !!(sd.demographics && sd.demographics.rows && sd.demographics.rows.length);
+          const useDemo     = sheetOnly && !!(sd.demographics && sd.demographics.rows && sd.demographics.rows.length);
           const skip = Promise.resolve(EMPTY);
           const ga4Live = (f, label) => (hasGa4 && !useDemo
             ? windsorScoped('googleanalytics4', f, params, ADDON_MS, label, { skipSheet: true })
