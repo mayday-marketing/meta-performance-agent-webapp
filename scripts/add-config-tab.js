@@ -438,6 +438,8 @@ const ROWS = [
   ['TikTok ad account', '[id]', 'Een kanaal verschijnt in de ROAS-tab zodra hier een id staat'],
   ['Google Ads account', '[id]', ''],
   ['Bing ad account', '[id]', ''],
+  ['ChatGPT ad account', '[id]', 'Windsor-connector openai_ads'],
+  ['Reddit ad account', '[id]', 'Windsor-connector reddit'],
   ['Brutomarge', '[45%]', 'Marge op de volle prijs. Zonder dit veld is er geen break-even en dus geen oordeel'],
   ['Seizoenskorting', '[30%]', 'Korting die nu loopt. Break-even = (1 − korting) / (brutomarge − korting). Leeg = enkel volle prijs'],
   ['Minimum ROAS', '[leeg laten tenzij je de break-even wil overrulen]', 'Directe override van de drempel'],

@@ -145,7 +145,9 @@ module.exports = async (req, res) => {
     'instagram', 'facebook', 'facebook_organic', 'klaviyo', 'mailerlite',
     // ROAS-tab: omzetbron + betaalde kanalen (zie _channels.js).
     'googleanalytics4', 'tiktok', 'google_ads', 'bing', 'linkedin', 'pinterest',
-    'snapchat', 'amazon_ads',
+    'snapchat', 'amazon_ads', 'reddit',
+    // ChatGPT Ads: Windsor-slug 'openai_ads' (toegevoegd 14-10-2026).
+    'openai_ads',
     // Social-tab: organisch TikTok en LinkedIn (nog zonder fetch, wel alvast
     // fail-closed zodra er iets mee opgehaald wordt).
     'tiktok_organic', 'linkedin_organic',

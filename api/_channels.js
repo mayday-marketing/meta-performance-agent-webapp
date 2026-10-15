@@ -18,10 +18,14 @@
                      Hoger (view-through + eigen attributievenster); kanalen
                      claimen dezelfde sale, dus optellen mag niet.
 
-   VELDNAMEN: alleen `facebook` en `google_ads` zijn geverifieerd via Windsor's get_fields. Voor de
-   nog niet gekoppelde connectors staan kandidaat-veldnamen in `revenueFields` /
-   `convFields`; windsor.js probeert ze en valt terug op enkel spend als Windsor
-   een veld afwijst. De GA4-ROAS blijft dan gewoon werken.
+   VELDNAMEN: alleen `facebook` en `google_ads` zijn live geverifieerd (get_fields
+   op een gekoppeld account). De andere connectors zijn op 14-10-2026 getoetst
+   aan de Windsor-veldcatalogus (windsor.ai/data-field/<slug>, zie het tabblad
+   'Registry-check' in docs/Windsor-querybuilder.xlsx): elk veld hieronder
+   bestaat daar. `verified` blijft false tot een echte klant het kanaal gebruikt
+   — de catalogus zegt dat een veld bestaat, niet dat het bij dit account iets
+   teruggeeft. windsor.js probeert base + omzet + conversies en valt terug op
+   enkel spend als Windsor een veld afwijst. De GA4-ROAS blijft dan werken.
    ========================================================== */
 
 // GA4-medium dat betaald verkeer aanduidt. Zonder deze check zou organisch
@@ -58,9 +62,10 @@ const CHANNELS = [
     group: 'social',
     connector: 'tiktok',
     campaignField: 'campaign',
-    spendField: 'totalcost',
-    revenueFields: ['conversion_value', 'total_purchase_value', 'total_complete_payment'],
-    convFields: ['conversions', 'total_purchase'],
+    spendField: 'spend',             // 'totalcost' bestaat ook, als duplicaat; 'spend' is de officiële naam
+    revenueFields: ['total_purchase_value'],
+    // complete_payment = website-aankopen (aantal), total_purchase = app-aankopen.
+    convFields: ['conversions', 'total_purchase', 'complete_payment'],
     ga4Source: /^tiktok/i,
     verified: false,
   },
@@ -71,8 +76,9 @@ const CHANNELS = [
     connector: 'pinterest',
     campaignField: 'campaign',
     spendField: 'totalcost',
-    revenueFields: ['conversion_value', 'total_conversion_value'],
-    convFields: ['conversions'],
+    // Let op de s: 'total_conversion_value' en 'conversion_value' bestaan niet.
+    revenueFields: ['total_conversions_value'],
+    convFields: ['total_conversions'],
     ga4Source: /^pinterest/i,
     verified: false,
   },
@@ -83,7 +89,7 @@ const CHANNELS = [
     connector: 'snapchat',
     campaignField: 'campaign',
     spendField: 'totalcost',
-    revenueFields: ['conversion_purchases_value', 'conversion_value'],
+    revenueFields: ['conversion_purchases_value'],
     convFields: ['conversion_purchases'],
     ga4Source: /^snapchat/i,
     verified: false,
@@ -95,9 +101,22 @@ const CHANNELS = [
     connector: 'linkedin',
     campaignField: 'campaign',
     spendField: 'totalcost',
-    revenueFields: ['conversion_value', 'external_website_conversions_value'],
-    convFields: ['conversions', 'external_website_conversions'],
+    // LinkedIn schrijft zijn velden zonder underscores; de varianten mét bestaan niet.
+    revenueFields: ['conversionvalueinlocalcurrency'],
+    convFields: ['conversions', 'externalwebsiteconversions', 'oneclickleads'],
     ga4Source: /^linkedin/i,
+    verified: false,
+  },
+  {
+    key: 'reddit',
+    label: 'Reddit Ads',
+    group: 'social',
+    connector: 'reddit',
+    campaignField: 'campaign',
+    spendField: 'spend',
+    revenueFields: ['purchase_total_value'],
+    convFields: ['conversion_purchase_clicks'],
+    ga4Source: /^reddit/i,
     verified: false,
   },
 
@@ -124,8 +143,10 @@ const CHANNELS = [
     connector: 'bing',
     campaignField: 'campaign',
     spendField: 'totalcost',
-    revenueFields: ['revenue', 'conversion_value'],
-    convFields: ['conversions'],
+    revenueFields: ['revenue', 'transactionrevenue'],
+    // 'conversions' bestaat nog maar is deprecated en geeft altijd 0 — dat valt
+    // in het terugvalpad niet op (geen 400) en zou stil nul tonen.
+    convFields: ['conversions_qualified'],
     ga4Source: /^(bing|microsoft|msn)\b/i,
     verified: false,
   },
@@ -134,10 +155,13 @@ const CHANNELS = [
     label: 'Amazon Ads',
     group: 'search',
     connector: 'amazon_ads',
-    campaignField: 'campaign',
-    spendField: 'totalcost',
-    revenueFields: ['attributed_sales14d', 'sales', 'conversion_value'],
-    convFields: ['attributed_conversions14d', 'conversions'],
+    // Amazon zet een rapportvoorvoegsel op élk veld; 'campaign' en 'totalcost'
+    // bestaan niet kaal (Windsor's voorbeeld-URL is verouderd). Alleen 'date'
+    // is kaal, gecontroleerd in de catalogus op 14-10-2026.
+    campaignField: 'sponsored_products_campaign__campaign',
+    spendField: 'sponsored_products_campaign__cost',
+    revenueFields: ['sponsored_products_campaign__attributedsales14d'],
+    convFields: ['sponsored_products_campaign__attributedconversions14d'],
     ga4Source: /^amazon/i,
     verified: false,
   },
@@ -145,11 +169,11 @@ const CHANNELS = [
     key: 'chatgpt_ads',
     label: 'ChatGPT Ads',
     group: 'search',
-    connector: null,                 // nog geen Windsor-connector — GA4-omzet only
-    campaignField: null,
-    spendField: null,
-    revenueFields: [],
-    convFields: [],
+    connector: 'openai_ads',         // Windsor-slug voor ChatGPT Ads (sinds 2026)
+    campaignField: 'campaign',
+    spendField: 'spend',             // geen 'totalcost' bij deze connector
+    revenueFields: ['order_created_attributed_sales'],
+    convFields: ['conversions'],
     ga4Source: /^(chatgpt|openai)/i,
     verified: false,
   },
@@ -163,8 +187,9 @@ function configKey(ch) { return ch.connector; }
 
 /**
  * De kanalen die voor déze klant actief zijn: alles waarvoor een account-id in
- * de Config-tab (of CLIENTS.windsor_accounts) staat. Kanalen zonder connector
- * (bv. ChatGPT Ads) komen nooit als 'actief' terug — die hebben geen spend-bron.
+ * de Config-tab (of CLIENTS.windsor_accounts) staat. Een kanaal zonder connector
+ * komt nooit als 'actief' terug — het heeft geen spend-bron. (Sinds 14-10-2026
+ * heeft elk kanaal er een; ChatGPT Ads was de laatste, via `openai_ads`.)
  */
 function activeChannels(accounts = {}) {
   return CHANNELS.filter(c => c.connector && accounts[c.connector]);

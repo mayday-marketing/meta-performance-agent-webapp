@@ -2145,7 +2145,7 @@
     { key: "google",   label: "Google Ads",   icon: "googleads" },
     { key: "tiktok",   label: "TikTok Ads",   icon: "tiktok",   connector: "tiktok",   config: "TikTok ad account" },
     { key: "linkedin", label: "LinkedIn Ads", icon: "linkedin", connector: "linkedin", config: "LinkedIn ad account" },
-    { key: "chatgpt",  label: "ChatGPT Ads",  icon: "openai",   connector: null },
+    { key: "chatgpt",  label: "ChatGPT Ads",  icon: "openai",   connector: "openai_ads", config: "ChatGPT ad account" },
     // ROAS over alle platforms heen (vroeger een eigen pagina). `roas` = het blad
     // in renderRoas(). Geen platform, dus niet in de platformtabel van Overzicht.
     { key: "roas-blended",   label: "ROAS blended",    roas: "blended" },
@@ -2188,8 +2188,9 @@
   }
 
   // TikTok, LinkedIn en ChatGPT: geen gekoppeld account in Windsor, dus geen
-  // veldnamen om tegen te verifiëren. De ROAS-tab haalt voor TikTok/LinkedIn wél
-  // al spend op zodra er een account-id staat (met kandidaat-velden).
+  // veldnamen om live tegen te verifiëren. De ROAS-tab haalt voor alle drie wél
+  // al spend op zodra er een account-id staat (velden uit de Windsor-catalogus,
+  // zie _channels.js).
   function renderAdsUnlinked(tab) {
     const root = $("#ads-unlinked");
     if (!root) return;

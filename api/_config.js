@@ -275,6 +275,11 @@ const CONFIG_FIELDS = {
   pinterestadaccount:  { path: 'accounts.pinterest',        check: okAccount },
   snapchatadaccount:   { path: 'accounts.snapchat',         check: okAccount },
   amazonadsaccount:    { path: 'accounts.amazon_ads',       check: okAccount },
+  redditadaccount:     { path: 'accounts.reddit',           check: okAccount },
+  // ChatGPT Ads heet bij Windsor 'openai_ads'; de Config-sleutel volgt de
+  // productnaam die de klant kent.
+  chatgptadaccount:    { path: 'accounts.openai_ads',       check: okAccount },
+  openaiadaccount:     { path: 'accounts.openai_ads',       check: okAccount },
 
   // --- Website-tab: GA4-analytics + organisch zoeken ------------------------
   // De GA4-property staat hierboven al (ga4property). Search Console is een eigen

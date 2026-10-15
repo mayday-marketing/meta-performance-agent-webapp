@@ -111,11 +111,22 @@ onder elk van de drie. `switchPage("roas")` landt op Ads. Met een **eigen period
   override. Actief scenario = seizoenskorting zodra die > 0 is, anders volle prijs;
   in de tab met één klik om te zetten. Beide velden zijn daar ook live te
   overschrijven voor een scenario — dat wordt **niet** bewaard.
-- **Alleen `facebook` en `google_ads` hebben geverifieerde veldnamen.** Voor niet-gekoppelde
-  connectors staan kandidaat-omzetvelden in de registry; wijst Windsor er één af,
-  dan valt `fetchChannel` terug op alleen spend (`platformRevenueAvailable:false`)
-  en blijft de GA4-ROAS staan. Campagnes van zo'n kanaal krijgen **geen** oordeel —
-  een ROAS van 0 zou anders 'onder break-even' opleveren terwijl er niets gemeten is.
+- **Alleen `facebook` en `google_ads` zijn live geverifieerd** (`verified: true`,
+  get_fields op een gekoppeld account). De andere kanalen — TikTok, Pinterest,
+  Snapchat, LinkedIn, Reddit, Bing, Amazon en ChatGPT (`openai_ads`) — zijn op
+  14-10-2026 getoetst aan de Windsor-veldcatalogus (`windsor.ai/data-field/<slug>`,
+  tabblad *Registry-check* in `docs/Windsor-querybuilder.xlsx`): elk veld in de
+  registry bestaat daar. `verified` blijft `false` tot een echte klant het kanaal
+  gebruikt, want de catalogus zegt niet of een veld bij dít account iets teruggeeft.
+  Wijst Windsor toch een veld af, dan valt `fetchChannel` terug op alleen spend
+  (`platformRevenueAvailable:false`) en blijft de GA4-ROAS staan. Campagnes van
+  zo'n kanaal krijgen **geen** oordeel — een ROAS van 0 zou anders 'onder
+  break-even' opleveren terwijl er niets gemeten is. Valkuilen uit die toets:
+  Bing's `conversions` bestaat nog maar is deprecated en geeft altijd 0 (geen 400,
+  dus het terugvalpad merkt het niet) → `conversions_qualified`; Amazon zet een
+  rapportvoorvoegsel op elk veld behalve `date` (`sponsored_products_campaign__…`,
+  Windsor's voorbeeld-URL met kale namen is verouderd); LinkedIn schrijft zonder
+  underscores; Pinterest heet `total_conversions_value`, mét s.
 - **Gedeeltelijke config is een geldige toestand.** Ontbrekende data is *onbekend*,
   nooit nul: zonder GA4-property zijn `totals.revenue` en `ga4Revenue` `null`
   (vlaggen `revenueAvailable` / `ga4Available`), toont de UI streepjes en valt de
@@ -375,9 +386,10 @@ kanaaltabs van Social.
   (`state.adsMetaView`). `goToAd()` en de oude sleutels `campagnes`/`advertenties`
   landen daar.
 - **TikTok, LinkedIn, ChatGPT** hebben nog geen fetch (`renderAdsUnlinked()`):
-  geen account in Windsor, dus geen veldnamen om te verifiëren. De tab zegt wat
-  er in de Config-tab moet (`TikTok ad account`, `LinkedIn ad account`); ChatGPT
-  Ads heeft geen Windsor-connector.
+  geen account in Windsor, dus geen veldnamen om live te verifiëren. De tab zegt
+  wat er in de Config-tab moet (`TikTok ad account`, `LinkedIn ad account`,
+  `ChatGPT ad account`). ChatGPT Ads heeft sinds 14-10-2026 wél een
+  Windsor-connector (`openai_ads`) en staat daarmee in de ROAS-registry.
 
 ### Google Ads-tab (`windsor.js` action `getGoogleAds`, `api/_googleads.js`)
 

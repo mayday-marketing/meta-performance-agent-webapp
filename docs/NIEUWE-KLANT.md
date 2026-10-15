@@ -176,7 +176,12 @@ met de hand toe of met `--add` (zie stap 5).
 | `Meta ad account` | Meta Ads (`act_` mag ervoor staan) |
 | `Facebook account` | Facebook organisch |
 | `Klaviyo account` / `Mailerlite account` / `Convertkit account` | e-mailtab |
-| `Google Ads account`, `TikTok ad account`, `Bing ad account`, `LinkedIn ad account`, `Pinterest ad account`, `Snapchat ad account`, `Amazon ads account` | dat kanaal in de ROAS-tab |
+| `Google Ads account`, `TikTok ad account`, `Bing ad account`, `LinkedIn ad account`, `Pinterest ad account`, `Snapchat ad account`, `Amazon ads account`, `Reddit ad account`, `ChatGPT ad account` | dat kanaal in de ROAS-tab |
+
+`ChatGPT ad account` hoort bij Windsor-connector `openai_ads`; de sleutel volgt de
+productnaam die de klant kent. Alleen Meta en Google Ads zijn live geverifieerd;
+de veldnamen van de andere kanalen komen uit de Windsor-catalogus (14-10-2026)
+en worden pas `verified` zodra een echte klant ze gebruikt.
 
 Een nieuw betaald kanaal vergt geen codewijziging: het verschijnt zodra hier een
 account-id staat (zie `api/_channels.js`).
@@ -227,7 +232,7 @@ gedeelde Windsor-account teruggeven.
 
 Scopebare connectors: `instagram`, `facebook`, `facebook_organic`, `klaviyo`,
 `mailerlite`, `googleanalytics4`, `searchconsole`, `tiktok`, `google_ads`,
-`bing`, `linkedin`, `pinterest`, `snapchat`, `amazon_ads`.
+`bing`, `linkedin`, `pinterest`, `snapchat`, `amazon_ads`, `reddit`, `openai_ads`.
 
 Gevolg bij het opzetten: een vergeten GA4-property is geen "valt terug op alles",
 maar een lege Website-tab. Loop de lijst dus af per gekoppelde connector.
